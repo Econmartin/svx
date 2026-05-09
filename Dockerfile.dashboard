@@ -19,8 +19,9 @@ RUN pnpm install --frozen-lockfile --prod=false
 
 # ---- builder stage ----
 FROM base AS builder
+# Dashboard has no workspace deps (no svx-shared import), so /app/node_modules
+# alone is sufficient — no per-package node_modules to copy.
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/svx-dashboard/node_modules ./packages/svx-dashboard/node_modules
 COPY pnpm-workspace.yaml package.json tsconfig.base.json .npmrc ./
 COPY packages/svx-dashboard ./packages/svx-dashboard
 COPY packages/svx-shared ./packages/svx-shared

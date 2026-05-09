@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { api, formatPct, formatUsdc, formatRelative, type TradeRecord } from '@/lib/api';
 import { usePolling } from '@/lib/usePolling';
 import { StatRow } from '@/components/StatRow';
@@ -136,7 +136,7 @@ export default function OverviewPage() {
       <section className="rounded border border-border bg-surface p-4">
         <h2 className="text-sm uppercase tracking-wider text-muted mb-3">Cumulative realized PnL</h2>
         <div className="h-64">
-          {pnlSeries.length > 1 ? (
+          {pnlSeries.length >= 1 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={pnlSeries} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1c2230" />
@@ -148,12 +148,25 @@ export default function OverviewPage() {
                   tick={{ fontSize: 11, fill: '#8c93a3' }}
                   scale="time"
                 />
-                <YAxis tick={{ fontSize: 11, fill: '#8c93a3' }} />
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#8c93a3' }}
+                  domain={['auto', 'auto']}
+                  tickFormatter={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`}
+                />
                 <Tooltip
                   labelFormatter={(v) => new Date(Number(v)).toLocaleString()}
                   contentStyle={{ background: '#11141b', border: '1px solid #1c2230' }}
+                  formatter={(v: number) => [`${v >= 0 ? '+' : ''}$${v.toFixed(4)}`, 'Cum PnL']}
                 />
-                <Line type="monotone" dataKey="pnl" stroke="#7dd3fc" strokeWidth={2} dot={false} />
+                <ReferenceLine y={0} stroke="#444c5c" strokeDasharray="2 2" />
+                <Line
+                  type="monotone"
+                  dataKey="pnl"
+                  stroke={cumPnl >= 0 ? '#10b981' : '#ef4444'}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
               </LineChart>
             </ResponsiveContainer>
           ) : (

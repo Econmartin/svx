@@ -62,11 +62,16 @@ CREATE TABLE IF NOT EXISTS trades (
   tx_digest TEXT,
   settled INTEGER NOT NULL DEFAULT 0,
   payout_usdc REAL,
-  pnl_usdc REAL
+  pnl_usdc REAL,
+  redeem_tx_digest TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_trades_ts ON trades(ts_ms);
 CREATE INDEX IF NOT EXISTS ix_trades_oracle ON trades(oracle_id);
 CREATE INDEX IF NOT EXISTS ix_trades_settled ON trades(settled);
+
+-- migration for older databases: add redeem_tx_digest if missing
+-- (sqlite has no IF NOT EXISTS for ADD COLUMN; rely on the schema CREATE
+-- above for new DBs, run a one-shot ALTER for existing)
 
 CREATE TABLE IF NOT EXISTS settlements (
   oracle_id TEXT PRIMARY KEY,
@@ -131,6 +136,16 @@ export class LedgerStore {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
     this.db.exec(SCHEMA);
+    // Backwards-compat migration: add `redeem_tx_digest` if a pre-existing
+    // database doesn't have it yet. The CREATE above is a no-op if the
+    // table already exists (without that column).
+    const cols = this.db
+      .prepare<[], { name: string }>(`PRAGMA table_info(trades)`)
+      .all()
+      .map((r) => r.name);
+    if (!cols.includes('redeem_tx_digest')) {
+      this.db.exec(`ALTER TABLE trades ADD COLUMN redeem_tx_digest TEXT`);
+    }
   }
 
   close(): void {
@@ -364,6 +379,22 @@ export class LedgerStore {
       .get();
     if (!row) return { paused: false, tsMs: 0 };
     return { paused: row.paused === 1, reason: row.reason ?? undefined, tsMs: row.ts_ms };
+  }
+
+  /**
+   * List trades that are settled, won (payout > 0), and not yet redeemed
+   * on-chain. Auto-redeemer iterates this each loop iteration.
+   */
+  unredeemedWinningTrades(): TradeRecord[] {
+    return this.tradeRows(
+      `WHERE settled = 1 AND mode = 'live' AND payout_usdc > 0 AND redeem_tx_digest IS NULL ORDER BY ts_ms ASC`,
+    );
+  }
+
+  markRedeemed(tradeId: string, redeemTxDigest: string): void {
+    this.db
+      .prepare(`UPDATE trades SET redeem_tx_digest = ? WHERE id = ?`)
+      .run(redeemTxDigest, tradeId);
   }
 
   // ---- Read API for dashboard ----

@@ -15,7 +15,8 @@
     "deposit-dusdc": "tsx scripts/deposit-dusdc.ts",
     "force-mint": "tsx scripts/force-mint.ts",
     "redeem": "tsx scripts/redeem.ts",
-    "inspect-position": "tsx scripts/inspect-position.ts"
+    "inspect-position": "tsx scripts/inspect-position.ts",
+    "withdraw-dusdc": "tsx scripts/withdraw-dusdc.ts"
   },
   "dependencies": {
     "@mysten/bcs": "^1.1.0",

@@ -42,6 +42,10 @@ VOLUME /data
 USER svx
 EXPOSE 4321
 
+# Run from the bot package so pnpm's hoisted node_modules resolves both `tsx`
+# and the svx-shared workspace symlink correctly.
+WORKDIR /app/packages/svx-bot
+
 # tini reaps zombies and forwards signals so SIGTERM cleanly stops the loop.
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "--import", "tsx/esm", "packages/svx-bot/src/cli.ts", "start"]
+CMD ["node", "--import", "tsx/esm", "src/cli.ts", "start"]

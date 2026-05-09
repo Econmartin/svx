@@ -9,14 +9,15 @@ RUN apk add --no-cache libc6-compat python3 make g++ tini
 RUN corepack enable && corepack prepare pnpm@8.15.9 --activate
 WORKDIR /app
 
-# ---- deps stage: install workspace deps once and cache ----
+# ---- deps stage: install ALL workspace deps so workspace symlinks are
+# created. With --filter and hoisted layout, pnpm doesn't create the
+# `svx-shared` symlink reliably; full install is the safe path.
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* .npmrc ./
 COPY packages/svx-bot/package.json ./packages/svx-bot/
 COPY packages/svx-shared/package.json ./packages/svx-shared/
 COPY packages/svx-dashboard/package.json ./packages/svx-dashboard/
-RUN pnpm install --frozen-lockfile --prod=false \
-    --filter "svx-bot..." --filter "svx-shared"
+RUN pnpm install --frozen-lockfile --prod=false
 
 # ---- runner stage ----
 FROM base AS runner
@@ -29,8 +30,11 @@ ENV SVX_API_PORT=4321
 RUN addgroup --system --gid 1001 svx && adduser --system --uid 1001 -G svx svx
 
 WORKDIR /app
-# With hoisted node-linker, all deps live at the workspace root.
+# Hoisted layout puts most deps at /app/node_modules, but pnpm still places
+# workspace-package symlinks (like svx-shared → ../../svx-shared) inside the
+# consumer's per-package node_modules — so we copy that too.
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/svx-bot/node_modules ./packages/svx-bot/node_modules
 COPY pnpm-workspace.yaml package.json .npmrc ./
 COPY packages/svx-bot ./packages/svx-bot
 COPY packages/svx-shared ./packages/svx-shared

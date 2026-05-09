@@ -292,6 +292,62 @@ export class LedgerStore {
       .run(Date.now(), navUsdc, realized, unrealized, openPositions);
   }
 
+  /**
+   * Trim each row-heavy table to its retention cap. Runs in a single
+   * transaction. Safe to call frequently — each delete is fast on indexed
+   * tables. Never deletes settled trades or settlements (the audit trail).
+   */
+  prune(retention: {
+    signalsKeep: number;
+    sviSnapshotsKeep: number;
+    polySnapshotsKeep: number;
+    navSnapshotsKeep: number;
+  }): { deletedSignals: number; deletedSvi: number; deletedPoly: number; deletedNav: number } {
+    const tx = this.db.transaction(() => {
+      const dSig = this.db
+        .prepare(
+          `DELETE FROM signals WHERE id IN (
+            SELECT id FROM signals ORDER BY ts_ms DESC LIMIT -1 OFFSET ?
+          )`,
+        )
+        .run(retention.signalsKeep).changes;
+      const dSvi = this.db
+        .prepare(
+          `DELETE FROM svi_snapshots WHERE rowid IN (
+            SELECT rowid FROM svi_snapshots ORDER BY ts_ms DESC LIMIT -1 OFFSET ?
+          )`,
+        )
+        .run(retention.sviSnapshotsKeep).changes;
+      const dPoly = this.db
+        .prepare(
+          `DELETE FROM poly_snapshots WHERE rowid IN (
+            SELECT rowid FROM poly_snapshots ORDER BY ts_ms DESC LIMIT -1 OFFSET ?
+          )`,
+        )
+        .run(retention.polySnapshotsKeep).changes;
+      const dNav = this.db
+        .prepare(
+          `DELETE FROM nav_snapshots WHERE ts_ms IN (
+            SELECT ts_ms FROM nav_snapshots ORDER BY ts_ms DESC LIMIT -1 OFFSET ?
+          )`,
+        )
+        .run(retention.navSnapshotsKeep).changes;
+      return { dSig, dSvi, dPoly, dNav };
+    });
+    const r = tx();
+    return {
+      deletedSignals: r.dSig,
+      deletedSvi: r.dSvi,
+      deletedPoly: r.dPoly,
+      deletedNav: r.dNav,
+    };
+  }
+
+  /** Run SQLite VACUUM to reclaim freed pages back to the OS. */
+  vacuum(): void {
+    this.db.exec('VACUUM');
+  }
+
   setPause(paused: boolean, reason?: string): void {
     this.db
       .prepare(

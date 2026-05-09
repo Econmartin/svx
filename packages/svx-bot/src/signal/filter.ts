@@ -11,11 +11,13 @@ export interface FilterInput {
   polymarketSnapshot: PolymarketSnapshot;
   expiryDeltaMs: number;
   cfg: SvxConfig;
+  /** Predict's UP probability at the matched strike (already computed). */
+  predictProb?: number;
   nowMs?: number;
 }
 
 export function applyFilters(input: FilterInput): FilterReason | null {
-  const { oracleSnapshot: o, polymarketSnapshot: p, expiryDeltaMs, cfg } = input;
+  const { oracleSnapshot: o, polymarketSnapshot: p, expiryDeltaMs, cfg, predictProb } = input;
   const now = input.nowMs ?? Date.now();
 
   if (now - o.timestampMs > cfg.maxSviStalenessSec * 1000) return 'svi_stale';
@@ -29,6 +31,14 @@ export function applyFilters(input: FilterInput): FilterReason | null {
 
   // Settled oracle = no live trade.
   if (o.isSettled) return 'expiry_mismatch';
+
+  // Deep ITM/OTM: protocol rejects asks > 99% or < 1%, and edge is meaningless
+  // when predictProb is near a boundary. Backtest showed these as zero-edge
+  // wins from $76k-when-spot-is-$80k strikes.
+  if (predictProb !== undefined) {
+    if (predictProb > cfg.maxPredictProb) return 'poly_one_sided';
+    if (predictProb < cfg.minPredictProb) return 'poly_one_sided';
+  }
 
   return null;
 }

@@ -72,6 +72,12 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     navUsdc: PAPER_INITIAL_NAV,
   };
 
+  // If we have an operator key + manager record, read the real wallet balance
+  // for the dashboard NAV display, even in paper mode. Live mode below uses
+  // the same value; paper mode just reports it but uses the PAPER_INITIAL_NAV
+  // virtual budget for sizing.
+  let realWalletReader: undefined | (() => Promise<number>);
+
   // Live-trading context — only loaded when paperTrading is false. The
   // operator must have run `setup-manager` first.
   let live: LiveContext | undefined;
@@ -101,13 +107,34 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       managerId: op.managerId,
       operatorAddress: op.operatorAddress,
     };
+    realWalletReader = () => readManagerBalance(live!);
     // Refresh NAV from on-chain manager balance.
-    state.navUsdc = await readManagerBalance(live);
+    state.navUsdc = await realWalletReader();
     log.info('svx.live.context_loaded', {
       operator: op.operatorAddress,
       manager: op.managerId,
       navDusdc: state.navUsdc,
     });
+  } else {
+    // Paper mode: also try to read the real wallet for dashboard display only.
+    // If the operator key isn't present (e.g. SUI_PRIVATE_KEY_BECH32 unset on
+    // a fresh instance), silently fall back to the virtual NAV.
+    try {
+      const { loadOperatorKey: tryLoad } = await import('./exec/keypair.js');
+      const { keypair, address } = tryLoad();
+      const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
+      realWalletReader = async () => {
+        const { totalBalance } = await sui.getBalance({ owner: address, coinType: ADDRESSES.dusdcType });
+        return Number(totalBalance) / Number(QUOTE_UNIT);
+      };
+      const real = await realWalletReader();
+      state.navUsdc = real;
+      log.info('svx.paper.real_wallet_loaded', { address, navDusdc: real, virtualBudget: PAPER_INITIAL_NAV });
+      void keypair; // marked used
+    } catch {
+      // No keypair available — keep the virtual NAV, log nothing (this is the
+      // expected path for fresh instances without a configured operator).
+    }
   }
 
   // Boot the API server for the dashboard. The server is read-only.
@@ -244,6 +271,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       polymarketSnapshot: polySnap,
       expiryDeltaMs: match.expiryDeltaMs,
       cfg,
+      predictProb: spread.predictUp,
     });
 
     let action: SignalAction;

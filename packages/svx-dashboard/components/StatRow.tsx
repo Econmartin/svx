@@ -10,7 +10,7 @@ interface Stat {
 
 export function StatRow({ stats }: { stats: Stat[] }) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
       {stats.map((s) => (
         <div key={s.label} className="rounded border border-border bg-surface px-4 py-3">
           <div className="text-xs uppercase tracking-wider text-muted">{s.label}</div>

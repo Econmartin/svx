@@ -31,12 +31,20 @@ const WORKSPACE_ROOT = findWorkspaceRoot();
 const Schema = z.object({
   paperTrading: z.boolean().default(true),
   spreadThreshold: z.number().min(0).max(1).default(0.03),
-  // Bug-flush defaults: keep trades < $1 and daily loss < $5 until the live
-  // path is proven. Increase via env when you're ready to scale.
-  maxPositionDusdc: z.number().positive().default(0.5),
+  // Week-1 live defaults: per-trade $15, 10 concurrent, daily loss limit $150.
+  // Worst-case 24h loss = 10 * $15 = $150 (matches the daily auto-pause).
+  // Worst-case weekly loss with pauses ≈ $525 — within the $1000 budget.
+  maxPositionDusdc: z.number().positive().default(15),
   maxPositionPct: z.number().min(0).max(1).default(0.05),
-  dailyLossLimitDusdc: z.number().positive().default(5),
-  maxOpenPositions: z.number().int().positive().default(5),
+  dailyLossLimitDusdc: z.number().positive().default(150),
+  maxOpenPositions: z.number().int().positive().default(10),
+  /**
+   * Skip signals where predictProb is in the deep-ITM/OTM tails. The protocol
+   * also rejects asks > 99% or < 1%, so these waste gas on guaranteed
+   * failures. Default is symmetric: skip if predictProb > 0.95 or < 0.05.
+   */
+  minPredictProb: z.number().min(0).max(0.5).default(0.05),
+  maxPredictProb: z.number().min(0.5).max(1).default(0.95),
   maxSviStalenessSec: z.number().positive().default(300),
   polyMaxBidaskVolPts: z.number().positive().default(0.05),
   polyMinVolume24hUsd: z.number().nonnegative().default(1000),
@@ -67,10 +75,12 @@ export function loadConfig(): SvxConfig {
   return Schema.parse({
     paperTrading: parseBool(process.env.PAPER_TRADING, true),
     spreadThreshold: parseNum(process.env.SPREAD_THRESHOLD, 0.03),
-    maxPositionDusdc: parseNum(process.env.MAX_POSITION_DUSDC, 0.5),
+    maxPositionDusdc: parseNum(process.env.MAX_POSITION_DUSDC, 15),
     maxPositionPct: parseNum(process.env.MAX_POSITION_PCT, 0.05),
-    dailyLossLimitDusdc: parseNum(process.env.DAILY_LOSS_LIMIT_DUSDC, 5),
-    maxOpenPositions: parseNum(process.env.MAX_OPEN_POSITIONS, 5),
+    dailyLossLimitDusdc: parseNum(process.env.DAILY_LOSS_LIMIT_DUSDC, 150),
+    maxOpenPositions: parseNum(process.env.MAX_OPEN_POSITIONS, 10),
+    minPredictProb: parseNum(process.env.MIN_PREDICT_PROB, 0.05),
+    maxPredictProb: parseNum(process.env.MAX_PREDICT_PROB, 0.95),
     maxSviStalenessSec: parseNum(process.env.MAX_SVI_STALENESS_SEC, 300),
     polyMaxBidaskVolPts: parseNum(process.env.POLY_MAX_BIDASK_VOL_PTS, 0.05),
     polyMinVolume24hUsd: parseNum(process.env.POLY_MIN_24H_VOLUME_USD, 1000),

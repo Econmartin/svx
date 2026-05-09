@@ -41,13 +41,20 @@ import { RiskGate } from './exec/risk.js';
 import { buildMintTx, buildRedeemTx } from './exec/ptb.js';
 import { submitTx } from './exec/submit.js';
 import { loadOperatorKey } from './exec/keypair.js';
+import { readManagerDusdcBalance } from './exec/manager-balance.js';
 import { startApiServer } from './api/server.js';
 import { log } from './util/log.js';
 
 interface BotState {
   startedAtMs: number;
-  /** For paper mode this is virtual NAV; for live mode it's the manager's dUSDC balance refreshed each loop. */
+  /** Operator wallet dUSDC balance (live mode) or virtual budget (paper). */
   navUsdc: number;
+  /** dUSDC sitting inside the PredictManager — payouts from auto-redeem land
+   *  here. The dashboard surfaces this separately so the operator can see
+   *  their full bankroll (wallet + manager). */
+  managerBalanceUsdc: number;
+  /** Last time we refreshed the on-chain manager balance. */
+  lastManagerBalanceAtMs: number;
   /** Last time we ran prune+vacuum on the SQLite ledger. */
   lastPruneAtMs: number;
   /** Most recent BTC spot from the freshest oracle snapshot. Populated by the
@@ -55,6 +62,8 @@ interface BotState {
    *  ITM/OTM without making its own oracle calls. */
   lastBtcSpot?: { value: number; updatedAtMs: number };
 }
+
+const MANAGER_BALANCE_REFRESH_MS = 30_000;
 
 const PRUNE_INTERVAL_MS = 6 * 3600_000; // every 6 hours
 const RETENTION = {
@@ -84,6 +93,8 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   const state: BotState = {
     startedAtMs: Date.now(),
     navUsdc: PAPER_INITIAL_NAV,
+    managerBalanceUsdc: 0,
+    lastManagerBalanceAtMs: 0,
     lastPruneAtMs: 0,
   };
 
@@ -123,12 +134,19 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       operatorAddress: op.operatorAddress,
     };
     realWalletReader = () => readManagerBalance(live!);
-    // Refresh NAV from on-chain manager balance.
+    // Refresh NAV (operator wallet) and manager balance from on-chain.
     state.navUsdc = await realWalletReader();
+    state.managerBalanceUsdc = await readManagerDusdcBalance(
+      live.sui,
+      live.managerId,
+      live.operatorAddress,
+    );
+    state.lastManagerBalanceAtMs = Date.now();
     log.info('svx.live.context_loaded', {
       operator: op.operatorAddress,
       manager: op.managerId,
-      navDusdc: state.navUsdc,
+      walletDusdc: state.navUsdc,
+      managerDusdc: state.managerBalanceUsdc,
     });
   } else {
     // Paper mode: also try to read the real wallet for dashboard display only.
@@ -455,6 +473,23 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         spread: signal.spread,
         action,
         filterReason,
+      });
+    }
+  }
+
+  // Refresh on-chain manager balance every ~30s (live mode only). Manager
+  // balance grows from auto-redeems and shrinks from per-trade top-ups.
+  if (live && Date.now() - state.lastManagerBalanceAtMs > MANAGER_BALANCE_REFRESH_MS) {
+    try {
+      state.managerBalanceUsdc = await readManagerDusdcBalance(
+        live.sui,
+        live.managerId,
+        live.operatorAddress,
+      );
+      state.lastManagerBalanceAtMs = Date.now();
+    } catch (e) {
+      log.warn('svx.manager_balance.read_failed', {
+        err: e instanceof Error ? e.message : String(e),
       });
     }
   }

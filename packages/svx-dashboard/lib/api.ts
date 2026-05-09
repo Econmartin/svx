@@ -10,7 +10,14 @@ export interface BotStatus {
   paused: boolean;
   pauseReason?: string;
   liveTradingEnabled: boolean;
+  /** Operator wallet dUSDC balance. */
   navUsdc: number;
+  /** dUSDC sitting inside the PredictManager (payouts from auto-redeem). */
+  managerBalanceUsdc?: number;
+  /** When manager balance was last refreshed from chain (ms). */
+  managerBalanceAtMs?: number | null;
+  /** wallet + manager — the operator's full bankroll. */
+  totalBalanceUsdc?: number;
   /** All-time realized PnL across every settled trade (survives restarts). */
   realizedPnlUsdc: number;
   /** Realized PnL over the last rolling 24h — ties to the daily loss limit. */

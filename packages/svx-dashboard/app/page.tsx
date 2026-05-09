@@ -65,9 +65,21 @@ export default function OverviewPage() {
             hint: status?.spotBtcAtMs ? formatRelative(status.spotBtcAtMs) : 'no oracle yet',
           },
           {
-            label: 'NAV (dUSDC)',
+            label: 'Total bankroll',
+            value: formatUsdc(status?.totalBalanceUsdc ?? status?.navUsdc),
+            hint: 'wallet + manager',
+          },
+          {
+            label: 'Wallet',
             value: formatUsdc(status?.navUsdc),
             hint: status?.liveTradingEnabled ? 'live' : 'paper',
+          },
+          {
+            label: 'In manager',
+            value: formatUsdc(status?.managerBalanceUsdc ?? 0),
+            hint: status?.managerBalanceAtMs
+              ? `synced ${formatRelative(status.managerBalanceAtMs)}`
+              : 'awaiting first sync',
           },
           {
             label: 'PnL (all time)',

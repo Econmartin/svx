@@ -19,6 +19,8 @@ interface ApiDeps {
   state: {
     startedAtMs: number;
     navUsdc: number;
+    managerBalanceUsdc?: number;
+    lastManagerBalanceAtMs?: number;
     lastBtcSpot?: { value: number; updatedAtMs: number };
   };
   predict: PredictClient;
@@ -48,6 +50,9 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       pauseReason: pause.reason,
       liveTradingEnabled: !deps.cfg.paperTrading,
       navUsdc: deps.state.navUsdc,
+      managerBalanceUsdc: deps.state.managerBalanceUsdc ?? 0,
+      managerBalanceAtMs: deps.state.lastManagerBalanceAtMs ?? null,
+      totalBalanceUsdc: deps.state.navUsdc + (deps.state.managerBalanceUsdc ?? 0),
       realizedPnlUsdc: realizedAllTime,
       realizedPnl24hUsdc: realized24h,
       unrealizedPnlUsdc: 0,

@@ -38,7 +38,7 @@ import { computeSpread } from './signal/spread.js';
 import { applyFilters } from './signal/filter.js';
 import { sizeTrade } from './exec/sizer.js';
 import { RiskGate } from './exec/risk.js';
-import { buildMintTx } from './exec/ptb.js';
+import { buildMintTx, buildRedeemTx } from './exec/ptb.js';
 import { submitTx } from './exec/submit.js';
 import { loadOperatorKey } from './exec/keypair.js';
 import { startApiServer } from './api/server.js';
@@ -240,7 +240,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
 
   // 2. Reconcile settlements first — pull a fresh oracle list and settle any
   // newly-settled oracles in the local ledger.
-  await reconcileSettlements(predict, ledger);
+  await reconcileSettlements(predict, ledger, live);
 
   // 3. Match by strike grid only — the expiry filter runs in step 4 and is
   // recorded in the signal log so we can see the full consideration set.
@@ -478,19 +478,64 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
   }
 }
 
-async function reconcileSettlements(predict: PredictClient, ledger: LedgerStore): Promise<void> {
+async function reconcileSettlements(
+  predict: PredictClient,
+  ledger: LedgerStore,
+  live?: LiveContext,
+): Promise<void> {
   const all = await predict.listOracles(true);
   const settled = all.filter((o) => o.status === 'settled' && o.settlementPrice != null);
   for (const o of settled) {
     if (o.settlementPrice == null) continue;
     ledger.recordSettlement(o.oracleId, o.underlyingAsset, o.expiryMs, o.settlementPrice, Date.now());
-    const settled = ledger.settleTradesForOracle(o.oracleId, o.settlementPrice, Date.now());
-    if (settled > 0) {
+    const settledCount = ledger.settleTradesForOracle(o.oracleId, o.settlementPrice, Date.now());
+    if (settledCount > 0) {
       log.info('svx.settlements.applied', {
         oracleId: o.oracleId,
         settlementPrice: o.settlementPrice,
-        tradesSettled: settled,
+        tradesSettled: settledCount,
       });
+    }
+  }
+
+  // Auto-redeem winning live trades on-chain. Skip lost trades — payout is
+  // zero and redeeming just burns gas. Money lands in the manager balance.
+  if (live) {
+    const toRedeem = ledger.unredeemedWinningTrades();
+    for (const t of toRedeem) {
+      try {
+        const tx = buildRedeemTx({
+          oracleId: t.oracleId,
+          expiryMs: t.expiryMs,
+          strike: t.strike,
+          direction: t.direction,
+          quantityDusdc: t.quantityDusdc,
+          managerId: live.managerId,
+          permissionless: true,
+        });
+        const result = await submitTx(live.sui, tx, live.keypair);
+        if (result.ok) {
+          ledger.markRedeemed(t.id, result.digest);
+          log.info('svx.redeem.success', {
+            tradeId: t.id,
+            oracleId: t.oracleId,
+            strike: t.strike,
+            payoutUsdc: t.payoutUsdc,
+            digest: result.digest,
+          });
+        } else {
+          log.warn('svx.redeem.failed', {
+            tradeId: t.id,
+            digest: result.digest,
+            error: result.error,
+          });
+        }
+      } catch (e) {
+        log.warn('svx.redeem.error', {
+          tradeId: t.id,
+          err: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
   }
 }

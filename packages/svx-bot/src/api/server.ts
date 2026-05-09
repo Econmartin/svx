@@ -16,7 +16,11 @@ import { log } from '../util/log.js';
 interface ApiDeps {
   ledger: LedgerStore;
   cfg: SvxConfig;
-  state: { startedAtMs: number; navUsdc: number };
+  state: {
+    startedAtMs: number;
+    navUsdc: number;
+    lastBtcSpot?: { value: number; updatedAtMs: number };
+  };
   predict: PredictClient;
   addresses: PredictAddresses;
 }
@@ -46,6 +50,8 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       openPositionCount: open.length,
       signalsLast24h: deps.ledger.countSignalsSince(since),
       tradesLast24h: deps.ledger.countTradesSince(since),
+      spotBtc: deps.state.lastBtcSpot?.value ?? null,
+      spotBtcAtMs: deps.state.lastBtcSpot?.updatedAtMs ?? null,
       predictPackageId: deps.addresses.packageId,
     });
   });

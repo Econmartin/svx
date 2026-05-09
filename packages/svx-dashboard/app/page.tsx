@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { api, formatPct, formatUsdc } from '@/lib/api';
+import { api, formatPct, formatUsdc, formatRelative, type TradeRecord } from '@/lib/api';
 import { usePolling } from '@/lib/usePolling';
 import { StatRow } from '@/components/StatRow';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -11,10 +11,12 @@ export default function OverviewPage() {
   const fetchStatus = useCallback(() => api.status(), []);
   const fetchClosed = useCallback(() => api.positionsClosed(500), []);
   const fetchSignals = useCallback(() => api.signals(20), []);
+  const fetchOpen = useCallback(() => api.positionsOpen(), []);
 
   const { data: status, error: statusError } = usePolling(fetchStatus, 10_000);
   const { data: closed } = usePolling(fetchClosed, 30_000);
   const { data: recentSignals } = usePolling(fetchSignals, 5_000);
+  const { data: open } = usePolling(fetchOpen, 10_000);
 
   // Build a cumulative PnL series from closed trades.
   let cumPnl = 0;
@@ -58,6 +60,11 @@ export default function OverviewPage() {
       <StatRow
         stats={[
           {
+            label: 'BTC spot',
+            value: status?.spotBtc != null ? `$${formatUsdc(status.spotBtc, 0)}` : '—',
+            hint: status?.spotBtcAtMs ? formatRelative(status.spotBtcAtMs) : 'no oracle yet',
+          },
+          {
             label: 'NAV (dUSDC)',
             value: formatUsdc(status?.navUsdc),
             hint: status?.liveTradingEnabled ? 'live' : 'paper',
@@ -79,6 +86,52 @@ export default function OverviewPage() {
           },
         ]}
       />
+
+      <section className="rounded border border-border bg-surface p-4">
+        <h2 className="text-sm uppercase tracking-wider text-muted mb-3">
+          Open positions{open?.length ? ` (${open.length})` : ''}
+        </h2>
+        <div className="overflow-x-auto">
+          <table className="font-mono w-full">
+            <thead>
+              <tr>
+                <th>Opened</th>
+                <th>Strike</th>
+                <th>Side</th>
+                <th>Stake</th>
+                <th>Entry</th>
+                <th>Spot</th>
+                <th>Distance</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {open?.map((t) => {
+                const m = moneyness(t, status?.spotBtc ?? null);
+                return (
+                  <tr key={t.id} className={m.cls}>
+                    <td className="text-muted">{new Date(t.timestampMs).toLocaleTimeString()}</td>
+                    <td>${t.strike.toFixed(0)}</td>
+                    <td>{t.direction}</td>
+                    <td>{formatUsdc(t.costUsdc)}</td>
+                    <td>{formatPct(t.costPrice)}</td>
+                    <td>{m.spotLabel}</td>
+                    <td>{m.distLabel}</td>
+                    <td className="text-xs">{m.statusLabel}</td>
+                  </tr>
+                );
+              })}
+              {!open?.length && (
+                <tr>
+                  <td colSpan={8} className="text-center text-muted py-4">
+                    No open positions.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="rounded border border-border bg-surface p-4">
         <h2 className="text-sm uppercase tracking-wider text-muted mb-3">Cumulative realized PnL</h2>
@@ -167,4 +220,28 @@ function rowClass(action: string): string {
   if (action === 'paper_executed' || action === 'live_executed') return 'text-win';
   if (action === 'filtered') return 'text-muted';
   return '';
+}
+
+interface Moneyness {
+  cls: string;
+  spotLabel: string;
+  distLabel: string;
+  statusLabel: string;
+}
+
+function moneyness(t: TradeRecord, spot: number | null): Moneyness {
+  if (spot == null) {
+    return { cls: 'text-muted', spotLabel: '—', distLabel: '—', statusLabel: 'no spot' };
+  }
+  // direction='up' wins if spot > strike at expiry; 'down' wins if spot <= strike.
+  const isWinning = t.direction === 'up' ? spot > t.strike : spot <= t.strike;
+  const distAbs = spot - t.strike;
+  const distPct = distAbs / t.strike;
+  const distSign = distAbs >= 0 ? '+' : '';
+  return {
+    cls: isWinning ? 'text-win' : 'text-loss',
+    spotLabel: `$${spot.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+    distLabel: `${distSign}${distAbs.toFixed(0)} (${distSign}${(distPct * 100).toFixed(2)}%)`,
+    statusLabel: isWinning ? 'ITM' : 'OTM',
+  };
 }

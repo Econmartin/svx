@@ -11,7 +11,10 @@ export interface BotStatus {
   pauseReason?: string;
   liveTradingEnabled: boolean;
   navUsdc: number;
+  /** All-time realized PnL across every settled trade (survives restarts). */
   realizedPnlUsdc: number;
+  /** Realized PnL over the last rolling 24h — ties to the daily loss limit. */
+  realizedPnl24hUsdc?: number;
   unrealizedPnlUsdc: number;
   openPositionCount: number;
   signalsLast24h: number;

@@ -70,14 +70,14 @@ export default function OverviewPage() {
             hint: status?.liveTradingEnabled ? 'live' : 'paper',
           },
           {
-            label: 'Realized PnL',
+            label: 'PnL (all time)',
             value: formatUsdc(status?.realizedPnlUsdc),
             hint: status ? `${closed?.length ?? 0} closed trades` : '',
           },
           {
-            label: 'Win rate',
-            value: closed && closed.length > 0 ? formatPct(winRate, 1) : '—',
-            hint: closed ? `${wins}/${closed.length}` : '',
+            label: 'PnL (24h)',
+            value: formatUsdc(status?.realizedPnl24hUsdc ?? 0),
+            hint: closed && closed.length > 0 ? `win rate ${formatPct(winRate, 0)} (${wins}/${closed.length})` : '',
           },
           {
             label: 'Signals 24h',

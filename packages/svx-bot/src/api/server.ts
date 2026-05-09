@@ -35,9 +35,12 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
   });
 
   app.get('/status', (_req, res) => {
-    const since = Date.now() - 24 * 3600_000;
+    const since24h = Date.now() - 24 * 3600_000;
     const open = deps.ledger.openTrades();
-    const realized = deps.ledger.realizedPnlSince(deps.state.startedAtMs);
+    // All-time realized PnL — survives bot restarts. Falls back to 0 if the
+    // ledger is empty.
+    const realizedAllTime = deps.ledger.realizedPnlSince(0);
+    const realized24h = deps.ledger.realizedPnlSince(since24h);
     const pause = deps.ledger.getPause();
     res.json({
       startedAtMs: deps.state.startedAtMs,
@@ -45,11 +48,12 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       pauseReason: pause.reason,
       liveTradingEnabled: !deps.cfg.paperTrading,
       navUsdc: deps.state.navUsdc,
-      realizedPnlUsdc: realized,
+      realizedPnlUsdc: realizedAllTime,
+      realizedPnl24hUsdc: realized24h,
       unrealizedPnlUsdc: 0,
       openPositionCount: open.length,
-      signalsLast24h: deps.ledger.countSignalsSince(since),
-      tradesLast24h: deps.ledger.countTradesSince(since),
+      signalsLast24h: deps.ledger.countSignalsSince(since24h),
+      tradesLast24h: deps.ledger.countTradesSince(since24h),
       spotBtc: deps.state.lastBtcSpot?.value ?? null,
       spotBtcAtMs: deps.state.lastBtcSpot?.updatedAtMs ?? null,
       predictPackageId: deps.addresses.packageId,

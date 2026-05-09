@@ -16,6 +16,8 @@ export interface BotStatus {
   openPositionCount: number;
   signalsLast24h: number;
   tradesLast24h: number;
+  spotBtc: number | null;
+  spotBtcAtMs: number | null;
   predictPackageId: string;
 }
 

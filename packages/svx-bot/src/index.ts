@@ -50,6 +50,10 @@ interface BotState {
   navUsdc: number;
   /** Last time we ran prune+vacuum on the SQLite ledger. */
   lastPruneAtMs: number;
+  /** Most recent BTC spot from the freshest oracle snapshot. Populated by the
+   *  main loop on each iteration so the dashboard can colour open positions
+   *  ITM/OTM without making its own oracle calls. */
+  lastBtcSpot?: { value: number; updatedAtMs: number };
 }
 
 const PRUNE_INTERVAL_MS = 6 * 3600_000; // every 6 hours
@@ -262,6 +266,15 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       }
     }),
   );
+
+  // Stash the freshest spot we just pulled so /status can serve it.
+  let freshest: OracleSnapshot | undefined;
+  for (const s of oracleSnapshots.values()) {
+    if (!freshest || s.timestampMs > freshest.timestampMs) freshest = s;
+  }
+  if (freshest) {
+    state.lastBtcSpot = { value: freshest.spot, updatedAtMs: freshest.timestampMs };
+  }
 
   for (const match of matches) {
     const oracleSnap = oracleSnapshots.get(match.oracle.oracleId);

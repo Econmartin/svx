@@ -1,0 +1,84 @@
+version: "3.9"
+
+# Coolify deploys this stack as a single application.
+# - The bot exposes port 4321 (read-only API). Coolify routes
+#   `https://${SERVICE_FQDN_BOT_4321}` → bot:4321 automatically.
+# - The dashboard exposes port 3030 and is the user-facing URL.
+# - Persistent SQLite ledger + operator.json live in the `svx-data` volume.
+#
+# Required secrets (set in the Coolify env panel — DO NOT commit):
+#   SUI_PRIVATE_KEY_BECH32   — operator's bech32-encoded ed25519 secret key
+#   OPERATOR_JSON            — JSON string of {operatorAddress, managerId, ...}
+#                              (only needed for live mode; paper mode ignores it)
+#
+# Optional overrides (sensible defaults if unset):
+#   PAPER_TRADING            — true | false (default true)
+#   MAX_POSITION_DUSDC       — default 0.5
+#   DAILY_LOSS_LIMIT_DUSDC   — default 5
+#   SPREAD_THRESHOLD         — default 0.03
+#   EXPIRY_TOLERANCE_SEC     — default 3600
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    restart: unless-stopped
+    environment:
+      # Coolify magic env: generates a public FQDN and routes :4321 to it.
+      - SERVICE_FQDN_BOT_4321
+      - NODE_ENV=production
+      - SUI_NETWORK=testnet
+      - SUI_RPC_URL=${SUI_RPC_URL:-https://fullnode.testnet.sui.io:443}
+      - PREDICT_SERVER_URL=${PREDICT_SERVER_URL:-https://predict-server.testnet.mystenlabs.com}
+      - PAPER_TRADING=${PAPER_TRADING:-true}
+      - SPREAD_THRESHOLD=${SPREAD_THRESHOLD:-0.03}
+      - MAX_POSITION_DUSDC=${MAX_POSITION_DUSDC:-0.5}
+      - MAX_POSITION_PCT=${MAX_POSITION_PCT:-0.05}
+      - DAILY_LOSS_LIMIT_DUSDC=${DAILY_LOSS_LIMIT_DUSDC:-5}
+      - MAX_OPEN_POSITIONS=${MAX_OPEN_POSITIONS:-5}
+      - MAX_SVI_STALENESS_SEC=${MAX_SVI_STALENESS_SEC:-300}
+      - EXPIRY_TOLERANCE_SEC=${EXPIRY_TOLERANCE_SEC:-3600}
+      - SVX_LOG_LEVEL=${SVX_LOG_LEVEL:-info}
+      - SVX_LOOP_INTERVAL_MS=${SVX_LOOP_INTERVAL_MS:-15000}
+      # Secrets — set these in the Coolify env panel:
+      - SUI_PRIVATE_KEY_BECH32
+      - OPERATOR_JSON
+    volumes:
+      - svx-data:/data
+    expose:
+      - "4321"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4321/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+      args:
+        # Bake the public bot URL into the client bundle at build time.
+        # In Coolify, set this to the bot service's FQDN (with https://).
+        NEXT_PUBLIC_SVX_API: ${NEXT_PUBLIC_SVX_API:-http://bot:4321}
+    restart: unless-stopped
+    environment:
+      - SERVICE_FQDN_DASHBOARD_3030
+      - NODE_ENV=production
+      - NEXT_PUBLIC_SVX_API=${NEXT_PUBLIC_SVX_API:-http://bot:4321}
+    expose:
+      - "3030"
+    depends_on:
+      bot:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3030"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  svx-data:

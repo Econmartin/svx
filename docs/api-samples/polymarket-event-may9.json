@@ -1,0 +1,21 @@
+{
+  "_comment": "Trimmed sample of GET /events?slug=bitcoin-above-on-may-9 on gamma-api.polymarket.com — captured 2026-05-09",
+  "title": "Bitcoin above ___ on May 9?",
+  "slug": "bitcoin-above-on-may-9",
+  "endDate": "2026-05-09T16:00:00Z",
+  "volume24hr": 694978.79,
+  "markets": [
+    {
+      "question": "Will the price of Bitcoin be above $80,000 on May 9?",
+      "slug": "bitcoin-above-80k-on-may-9",
+      "endDate": "2026-05-09T16:00:00Z",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "outcomePrices": "[\"0.625\", \"0.375\"]",
+      "clobTokenIds": "[\"17604734530299843704753457445295441601641542260659724304121984424407980724803\", \"61669146929264827478471290390287978648911963387846136110278655580949742956744\"]",
+      "conditionId": "0x6e7992b689699d4db864dfc77f679b3ca364d02b42fe613087939bf92f911eeb",
+      "orderPriceMinTickSize": 0.01,
+      "volume24hr": 67833.86,
+      "liquidity": "27459.58"
+    }
+  ]
+}

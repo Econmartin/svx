@@ -1,0 +1,22 @@
+{
+  "_comment": "Sample GET /book?token_id=... from clob.polymarket.com — captured 2026-05-09. NOTE: bids and asks are sorted ascending; best bid = max(price), best ask = min(price).",
+  "market": "0x6e7992b689699d4db864dfc77f679b3ca364d02b42fe613087939bf92f911eeb",
+  "asset_id": "17604734530299843704753457445295441601641542260659724304121984424407980724803",
+  "timestamp": "1778284138702",
+  "bids": [
+    { "price": "0.01", "size": "42555" },
+    { "price": "0.50", "size": "140" },
+    { "price": "0.62", "size": "8092.82" },
+    { "price": "0.63", "size": "881.02" }
+  ],
+  "asks": [
+    { "price": "0.99", "size": "41850.07" },
+    { "price": "0.66", "size": "6777.7" },
+    { "price": "0.65", "size": "1069" },
+    { "price": "0.64", "size": "859.6" }
+  ],
+  "min_order_size": "5",
+  "tick_size": "0.01",
+  "neg_risk": false,
+  "last_trade_price": "0.370"
+}

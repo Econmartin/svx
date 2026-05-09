@@ -1,0 +1,31 @@
+# Build inputs only — keep the image small
+node_modules
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+
+# Local state — never bake secrets or runtime data into images
+.env
+.env.*
+!.env.example
+data
+logs
+*.sqlite
+*.sqlite-*
+
+# OS / editor
+.DS_Store
+.idea
+.vscode
+*.swp
+
+# Git
+.git
+.gitignore
+.github
+
+# Repos cloned for reference, not needed at runtime
+deepbookv3-predict
+deepbook-sandbox

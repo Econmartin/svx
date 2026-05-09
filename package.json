@@ -1,0 +1,16 @@
+{
+  "name": "svx",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SVX — DeepBook Predict vol-arb bot (Sui Overflow 2026)",
+  "packageManager": "pnpm@8.15.9",
+  "scripts": {
+    "build": "pnpm -r --filter '!svx-dashboard' build",
+    "test": "pnpm -r --filter '!svx-dashboard' test",
+    "lint": "pnpm -r --filter '!svx-dashboard' lint",
+    "svx": "pnpm --filter svx-bot exec tsx src/cli.ts"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

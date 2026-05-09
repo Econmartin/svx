@@ -1,0 +1,50 @@
+# SVX dashboard — Next.js 14 read-only viewer.
+# Uses Next.js standalone output for a small runtime image.
+
+FROM node:20-alpine AS base
+RUN apk add --no-cache libc6-compat
+RUN corepack enable && corepack prepare pnpm@8.15.9 --activate
+WORKDIR /app
+
+# ---- deps stage ----
+FROM base AS deps
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
+COPY packages/svx-dashboard/package.json ./packages/svx-dashboard/
+COPY packages/svx-shared/package.json ./packages/svx-shared/
+COPY packages/svx-bot/package.json ./packages/svx-bot/
+RUN pnpm install --frozen-lockfile --prod=false \
+    --filter "svx-dashboard..." --filter "svx-shared"
+
+# ---- builder stage ----
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/svx-dashboard/node_modules ./packages/svx-dashboard/node_modules
+COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
+COPY packages/svx-dashboard ./packages/svx-dashboard
+COPY packages/svx-shared ./packages/svx-shared
+WORKDIR /app/packages/svx-dashboard
+# Allow the API URL to be baked into the client bundle at build time. Coolify
+# can override it via build-arg if you want a different default.
+ARG NEXT_PUBLIC_SVX_API=http://127.0.0.1:4321
+ENV NEXT_PUBLIC_SVX_API=$NEXT_PUBLIC_SVX_API
+RUN pnpm build
+
+# ---- runner stage ----
+FROM base AS runner
+ENV NODE_ENV=production
+ENV PORT=3030
+ENV HOSTNAME=0.0.0.0
+
+RUN addgroup --system --gid 1001 nextjs && adduser --system --uid 1001 -G nextjs nextjs
+
+WORKDIR /app
+# Standalone output bundles minimal node_modules + a server.js.
+# `outputFileTracingRoot` is set to the workspace root in next.config.js,
+# so the standalone tree mirrors that layout.
+COPY --from=builder --chown=nextjs:nextjs /app/packages/svx-dashboard/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/packages/svx-dashboard/.next/static ./packages/svx-dashboard/.next/static
+COPY --from=builder --chown=nextjs:nextjs /app/packages/svx-dashboard/public ./packages/svx-dashboard/public
+
+USER nextjs
+EXPOSE 3030
+CMD ["node", "packages/svx-dashboard/server.js"]

@@ -1,0 +1,33 @@
+{
+  "_comment": "Sample response from GET /oracles/{id}/state on predict-server.testnet.mystenlabs.com — captured 2026-05-09",
+  "oracle": {
+    "predict_id": "0xc8736204d12f0a7277c86388a68bf8a194b0a14c5538ad13f22cbd8e2a38028a",
+    "oracle_id": "0xa3f0af079e68050412859d05964c7a9ca8ac42bc29b7d9ba26b03b7d884b7618",
+    "oracle_cap_id": "0x09c3dfff1abb4cd648753805c18a05bcc03d2a4c8f9f7a04b928568aed59f9e3",
+    "underlying_asset": "BTC",
+    "expiry": 1778291100000,
+    "min_strike": 50000000000000,
+    "tick_size": 1000000000,
+    "status": "active",
+    "activated_at": 1778283965241,
+    "settlement_price": null,
+    "settled_at": null,
+    "created_checkpoint": 334779588
+  },
+  "latest_price": {
+    "spot": 80180915547775,
+    "forward": 80172628814477,
+    "onchain_timestamp": 1778284040168
+  },
+  "latest_svi": {
+    "a": 4717,
+    "b": 710207,
+    "rho": 520421282,
+    "rho_negative": false,
+    "m": 1396496,
+    "m_negative": false,
+    "sigma": 1028304,
+    "onchain_timestamp": 1778284023138
+  },
+  "ask_bounds": null
+}

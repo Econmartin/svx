@@ -9,18 +9,18 @@ RUN apk add --no-cache libc6-compat
 RUN corepack enable && corepack prepare pnpm@8.15.9 --activate
 WORKDIR /app
 
-# ---- deps stage: install dashboard's deps with hoisted layout ----
+# ---- deps stage: install ALL workspace deps so workspace symlinks are created.
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* .npmrc ./
 COPY packages/svx-dashboard/package.json ./packages/svx-dashboard/
 COPY packages/svx-shared/package.json ./packages/svx-shared/
 COPY packages/svx-bot/package.json ./packages/svx-bot/
-RUN pnpm install --frozen-lockfile --prod=false \
-    --filter "svx-dashboard..." --filter "svx-shared"
+RUN pnpm install --frozen-lockfile --prod=false
 
 # ---- builder stage ----
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/svx-dashboard/node_modules ./packages/svx-dashboard/node_modules
 COPY pnpm-workspace.yaml package.json tsconfig.base.json .npmrc ./
 COPY packages/svx-dashboard ./packages/svx-dashboard
 COPY packages/svx-shared ./packages/svx-shared

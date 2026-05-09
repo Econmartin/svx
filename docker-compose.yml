@@ -53,10 +53,11 @@ services:
       - "4321"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4321/health"]
-      interval: 30s
+      interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      # Generous so first-boot gets enough time on slow shared infra (Coolify).
+      start_period: 90s
 
   dashboard:
     build:
@@ -74,15 +75,12 @@ services:
       NEXT_PUBLIC_SVX_API: "${NEXT_PUBLIC_SVX_API:-http://bot:4321}"
     expose:
       - "3030"
+    # Plain depends_on — start order only, NOT health gating. The dashboard
+    # is a static-rendering Next.js app that simply 404s its API calls until
+    # the bot is up. This keeps the stack from getting wedged when one
+    # service is slow to come healthy on Coolify.
     depends_on:
-      bot:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3030"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+      - bot
 
 volumes:
   svx-data:

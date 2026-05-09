@@ -1,14 +1,9 @@
-const path = require('node:path');
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Standalone output bundles only what's needed for runtime — image size
-  // shrinks by ~10x and the production container needs no node_modules.
-  output: 'standalone',
-  // For pnpm-workspace monorepos, point the file tracer at the workspace root
-  // so symlinked workspace packages (`svx-shared`) get traced into the bundle.
-  outputFileTracingRoot: path.join(__dirname, '../..'),
+  // No `output: 'standalone'` — Next's standalone tracer is flaky in our
+  // pnpm-workspace Docker builds. The runtime image instead ships the full
+  // node_modules and uses `next start`. Image is ~30MB larger but reliable.
   env: {
     NEXT_PUBLIC_SVX_API: process.env.NEXT_PUBLIC_SVX_API ?? 'http://127.0.0.1:4321',
   },

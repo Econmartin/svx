@@ -11,7 +11,7 @@ WORKDIR /app
 
 # ---- deps stage: install workspace deps once and cache ----
 FROM base AS deps
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* .npmrc ./
 COPY packages/svx-bot/package.json ./packages/svx-bot/
 COPY packages/svx-shared/package.json ./packages/svx-shared/
 COPY packages/svx-dashboard/package.json ./packages/svx-dashboard/
@@ -29,9 +29,9 @@ ENV SVX_API_PORT=4321
 RUN addgroup --system --gid 1001 svx && adduser --system --uid 1001 -G svx svx
 
 WORKDIR /app
+# With hoisted node-linker, all deps live at the workspace root.
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/svx-bot/node_modules ./packages/svx-bot/node_modules
-COPY pnpm-workspace.yaml package.json ./
+COPY pnpm-workspace.yaml package.json .npmrc ./
 COPY packages/svx-bot ./packages/svx-bot
 COPY packages/svx-shared ./packages/svx-shared
 

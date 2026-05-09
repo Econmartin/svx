@@ -26,9 +26,6 @@ ENV SVX_DATA_DIR=/data
 ENV SVX_API_HOST=0.0.0.0
 ENV SVX_API_PORT=4321
 
-# Non-root user
-RUN addgroup --system --gid 1001 svx && adduser --system --uid 1001 -G svx svx
-
 WORKDIR /app
 # Hoisted layout puts most deps at /app/node_modules, but pnpm still places
 # workspace-package symlinks (like svx-shared → ../../svx-shared) inside the
@@ -39,11 +36,12 @@ COPY pnpm-workspace.yaml package.json .npmrc ./
 COPY packages/svx-bot ./packages/svx-bot
 COPY packages/svx-shared ./packages/svx-shared
 
-# Persistent data dir (SQLite ledger + operator.json)
-RUN mkdir -p /data && chown -R svx:svx /data /app
+# Persistent data dir (SQLite ledger + operator.json). Running as root so
+# Coolify's named-volume mount (root-owned by default) is writable, and to
+# skip the heavy `chown -R … /app` that was killing the Coolify builder.
+RUN mkdir -p /data
 VOLUME /data
 
-USER svx
 EXPOSE 4321
 
 # Run from the bot package so pnpm's hoisted node_modules resolves both `tsx`

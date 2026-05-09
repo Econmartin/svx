@@ -1,0 +1,47 @@
+# SVX bot — runs the trading scheduler + the read-only API server on :4321.
+#
+# This image bundles `svx-bot` and `svx-shared`. It does NOT compile to JS;
+# tsx executes TypeScript directly, which adds ~100ms cold start cost and
+# saves a build step. Acceptable for a long-running bot process.
+
+FROM node:20-alpine AS base
+RUN apk add --no-cache libc6-compat python3 make g++ tini
+RUN corepack enable && corepack prepare pnpm@8.15.9 --activate
+WORKDIR /app
+
+# ---- deps stage: install workspace deps once and cache ----
+FROM base AS deps
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
+COPY packages/svx-bot/package.json ./packages/svx-bot/
+COPY packages/svx-shared/package.json ./packages/svx-shared/
+COPY packages/svx-dashboard/package.json ./packages/svx-dashboard/
+RUN pnpm install --frozen-lockfile --prod=false \
+    --filter "svx-bot..." --filter "svx-shared"
+
+# ---- runner stage ----
+FROM base AS runner
+ENV NODE_ENV=production
+ENV SVX_DATA_DIR=/data
+ENV SVX_API_HOST=0.0.0.0
+ENV SVX_API_PORT=4321
+
+# Non-root user
+RUN addgroup --system --gid 1001 svx && adduser --system --uid 1001 -G svx svx
+
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/svx-bot/node_modules ./packages/svx-bot/node_modules
+COPY pnpm-workspace.yaml package.json ./
+COPY packages/svx-bot ./packages/svx-bot
+COPY packages/svx-shared ./packages/svx-shared
+
+# Persistent data dir (SQLite ledger + operator.json)
+RUN mkdir -p /data && chown -R svx:svx /data /app
+VOLUME /data
+
+USER svx
+EXPOSE 4321
+
+# tini reaps zombies and forwards signals so SIGTERM cleanly stops the loop.
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "--import", "tsx/esm", "packages/svx-bot/src/cli.ts", "start"]

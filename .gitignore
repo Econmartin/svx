@@ -1,0 +1,26 @@
+node_modules/
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# data
+*.sqlite
+*.sqlite-journal
+*.db
+data/
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# logs
+*.log
+logs/

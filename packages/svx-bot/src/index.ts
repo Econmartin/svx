@@ -48,7 +48,17 @@ interface BotState {
   startedAtMs: number;
   /** For paper mode this is virtual NAV; for live mode it's the manager's dUSDC balance refreshed each loop. */
   navUsdc: number;
+  /** Last time we ran prune+vacuum on the SQLite ledger. */
+  lastPruneAtMs: number;
 }
+
+const PRUNE_INTERVAL_MS = 6 * 3600_000; // every 6 hours
+const RETENTION = {
+  signalsKeep: 50_000, // ~few weeks of high-signal rows after the log floor
+  sviSnapshotsKeep: 20_000, // surface viewer history
+  polySnapshotsKeep: 50_000,
+  navSnapshotsKeep: 10_000,
+};
 
 interface LiveContext {
   sui: SuiClient;
@@ -70,6 +80,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   const state: BotState = {
     startedAtMs: Date.now(),
     navUsdc: PAPER_INITIAL_NAV,
+    lastPruneAtMs: 0,
   };
 
   // If we have an operator key + manager record, read the real wallet balance
@@ -322,6 +333,19 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       }
     }
 
+    const observedSpread =
+      spread.decision?.edge ?? Math.max(spread.spreadBuyOnPoly, spread.spreadSellOnPoly);
+
+    // Disk-saving: skip persisting low-signal rows. We always log executed
+    // and risk-blocked signals; we skip cheap-to-recompute filtered rows
+    // whose spread is well below threshold (the boring 90% of the stream).
+    const isExecuted = action === 'paper_executed' || action === 'live_executed';
+    const isRiskBlocked = action === 'filtered' && filterReason === undefined;
+    const meetsLogFloor = observedSpread >= cfg.spreadThreshold * cfg.signalLogMinSpreadFrac;
+    if (!isExecuted && !isRiskBlocked && !meetsLogFloor) {
+      continue;
+    }
+
     const signal: Omit<SignalRecord, 'id'> = {
       timestampMs: Date.now(),
       oracleId: oracleSnap.oracleId,
@@ -333,7 +357,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       predictIv: spread.predictIv,
       polyProb: spread.polyYesAsk,
       polyIv: spread.polyIv ?? 0,
-      spread: spread.decision?.edge ?? Math.max(spread.spreadBuyOnPoly, spread.spreadSellOnPoly),
+      spread: observedSpread,
       ivSpread: spread.decision?.ivEdge ?? 0,
       action,
       filterReason: filterReason ?? undefined,
@@ -429,6 +453,16 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     /* unrealized */ 0,
     ledger.openTrades().length,
   );
+
+  // Periodic ledger prune + vacuum. Cheap (single tx) and bounds disk usage.
+  if (Date.now() - state.lastPruneAtMs > PRUNE_INTERVAL_MS) {
+    const r = ledger.prune(RETENTION);
+    if (r.deletedSignals + r.deletedSvi + r.deletedPoly + r.deletedNav > 0) {
+      log.info('svx.ledger.pruned', r);
+      ledger.vacuum();
+    }
+    state.lastPruneAtMs = Date.now();
+  }
 }
 
 async function reconcileSettlements(predict: PredictClient, ledger: LedgerStore): Promise<void> {

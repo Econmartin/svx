@@ -45,6 +45,15 @@ const Schema = z.object({
    */
   minPredictProb: z.number().min(0).max(0.5).default(0.05),
   maxPredictProb: z.number().min(0.5).max(1).default(0.95),
+  /**
+   * Don't write signals to the ledger if the action is 'filtered' AND the
+   * absolute spread is below this fraction of the threshold. The bot still
+   * EVALUATES every (oracle, strike) pair every loop — it just doesn't
+   * persist boring rows. Default 0.3 = "log if spread > 30% of threshold,
+   * i.e. > 0.9% by default; otherwise skip." Cuts ~80% of disk writes.
+   * Set to 0 to log everything (old behavior).
+   */
+  signalLogMinSpreadFrac: z.number().min(0).max(1).default(0.3),
   maxSviStalenessSec: z.number().positive().default(300),
   polyMaxBidaskVolPts: z.number().positive().default(0.05),
   polyMinVolume24hUsd: z.number().nonnegative().default(1000),
@@ -81,6 +90,7 @@ export function loadConfig(): SvxConfig {
     maxOpenPositions: parseNum(process.env.MAX_OPEN_POSITIONS, 10),
     minPredictProb: parseNum(process.env.MIN_PREDICT_PROB, 0.05),
     maxPredictProb: parseNum(process.env.MAX_PREDICT_PROB, 0.95),
+    signalLogMinSpreadFrac: parseNum(process.env.SIGNAL_LOG_MIN_SPREAD_FRAC, 0.3),
     maxSviStalenessSec: parseNum(process.env.MAX_SVI_STALENESS_SEC, 300),
     polyMaxBidaskVolPts: parseNum(process.env.POLY_MAX_BIDASK_VOL_PTS, 0.05),
     polyMinVolume24hUsd: parseNum(process.env.POLY_MIN_24H_VOLUME_USD, 1000),

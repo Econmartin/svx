@@ -451,6 +451,13 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         costUsdc: signalCost,
         txDigest,
         settled: false,
+        // analytics fields — captured at execution time so we can audit
+        // calibration / slippage / time-decay later.
+        msToExpiryAtExec: oracleSnap.expiryMs - signal.timestampMs,
+        predictProbAtExec: spread.predictUp,
+        polyAskAtExec: spread.polyYesAsk,
+        predictIvAtExec: spread.predictIv,
+        edgeAtExec: spread.decision?.edge ?? observedSpread,
       });
       if (mode === 'paper') {
         state.navUsdc -= signalCost;

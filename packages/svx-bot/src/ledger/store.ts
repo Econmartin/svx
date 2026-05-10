@@ -136,16 +136,22 @@ export class LedgerStore {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
     this.db.exec(SCHEMA);
-    // Backwards-compat migration: add `redeem_tx_digest` if a pre-existing
-    // database doesn't have it yet. The CREATE above is a no-op if the
-    // table already exists (without that column).
+    // Backwards-compat migrations: add columns to existing DBs in-place.
     const cols = this.db
       .prepare<[], { name: string }>(`PRAGMA table_info(trades)`)
       .all()
       .map((r) => r.name);
-    if (!cols.includes('redeem_tx_digest')) {
-      this.db.exec(`ALTER TABLE trades ADD COLUMN redeem_tx_digest TEXT`);
-    }
+    const ensureColumn = (name: string, type: string) => {
+      if (!cols.includes(name)) this.db.exec(`ALTER TABLE trades ADD COLUMN ${name} ${type}`);
+    };
+    ensureColumn('redeem_tx_digest', 'TEXT');
+    ensureColumn('settlement_price', 'REAL');
+    ensureColumn('settled_at_ms', 'INTEGER');
+    ensureColumn('ms_to_expiry_at_exec', 'INTEGER');
+    ensureColumn('predict_prob_at_exec', 'REAL');
+    ensureColumn('poly_ask_at_exec', 'REAL');
+    ensureColumn('predict_iv_at_exec', 'REAL');
+    ensureColumn('edge_at_exec', 'REAL');
   }
 
   close(): void {
@@ -185,14 +191,25 @@ export class LedgerStore {
     return id;
   }
 
-  insertTrade(t: Omit<TradeRecord, 'id'> & { id?: string }): string {
+  insertTrade(
+    t: Omit<TradeRecord, 'id'> & {
+      id?: string;
+      msToExpiryAtExec?: number;
+      predictProbAtExec?: number;
+      polyAskAtExec?: number;
+      predictIvAtExec?: number;
+      edgeAtExec?: number;
+    },
+  ): string {
     const id = t.id ?? randomUUID();
     this.db
       .prepare(
         `INSERT INTO trades (id, signal_id, ts_ms, mode, oracle_id, underlying, expiry_ms, strike,
-         direction, quantity_dusdc, cost_price, cost_usdc, tx_digest, settled, payout_usdc, pnl_usdc)
+         direction, quantity_dusdc, cost_price, cost_usdc, tx_digest, settled, payout_usdc, pnl_usdc,
+         ms_to_expiry_at_exec, predict_prob_at_exec, poly_ask_at_exec, predict_iv_at_exec, edge_at_exec)
          VALUES (@id, @sigId, @ts, @mode, @oracleId, @underlying, @expiry, @strike,
-         @dir, @qty, @cp, @cost, @txd, @settled, @payout, @pnl)`,
+         @dir, @qty, @cp, @cost, @txd, @settled, @payout, @pnl,
+         @msToE, @ppe, @pae, @pive, @edge)`,
       )
       .run({
         id,
@@ -211,6 +228,11 @@ export class LedgerStore {
         settled: t.settled ? 1 : 0,
         payout: t.payoutUsdc ?? null,
         pnl: t.pnlUsdc ?? null,
+        msToE: t.msToExpiryAtExec ?? null,
+        ppe: t.predictProbAtExec ?? null,
+        pae: t.polyAskAtExec ?? null,
+        pive: t.predictIvAtExec ?? null,
+        edge: t.edgeAtExec ?? null,
       });
     return id;
   }
@@ -238,7 +260,9 @@ export class LedgerStore {
       )
       .all(oracleId);
     const upd = this.db.prepare(
-      `UPDATE trades SET settled = 1, payout_usdc = @payout, pnl_usdc = @pnl WHERE id = @id`,
+      `UPDATE trades SET settled = 1, payout_usdc = @payout, pnl_usdc = @pnl,
+                          settlement_price = @sprice, settled_at_ms = @sat
+       WHERE id = @id`,
     );
     const tx = this.db.transaction((items: typeof trades) => {
       let count = 0;
@@ -246,12 +270,11 @@ export class LedgerStore {
         const won = t.direction === 'up' ? settlementPrice > t.strike : settlementPrice <= t.strike;
         const payout = won ? t.quantity_dusdc : 0;
         const pnl = payout - t.cost_usdc;
-        upd.run({ payout, pnl, id: t.id });
+        upd.run({ payout, pnl, sprice: settlementPrice, sat: nowMs, id: t.id });
         count++;
       }
       return count;
     });
-    void nowMs;
     return tx(trades);
   }
 
@@ -544,6 +567,14 @@ export class LedgerStore {
           settled: number;
           payout_usdc: number | null;
           pnl_usdc: number | null;
+          settlement_price: number | null;
+          settled_at_ms: number | null;
+          ms_to_expiry_at_exec: number | null;
+          predict_prob_at_exec: number | null;
+          poly_ask_at_exec: number | null;
+          predict_iv_at_exec: number | null;
+          edge_at_exec: number | null;
+          redeem_tx_digest: string | null;
         }
       >(`SELECT * FROM trades ${suffix}`)
       .all(...params);
@@ -564,6 +595,14 @@ export class LedgerStore {
       settled: r.settled === 1,
       payoutUsdc: r.payout_usdc ?? undefined,
       pnlUsdc: r.pnl_usdc ?? undefined,
+      settlementPrice: r.settlement_price ?? undefined,
+      settledAtMs: r.settled_at_ms ?? undefined,
+      msToExpiryAtExec: r.ms_to_expiry_at_exec ?? undefined,
+      predictProbAtExec: r.predict_prob_at_exec ?? undefined,
+      polyAskAtExec: r.poly_ask_at_exec ?? undefined,
+      predictIvAtExec: r.predict_iv_at_exec ?? undefined,
+      edgeAtExec: r.edge_at_exec ?? undefined,
+      redeemTxDigest: r.redeem_tx_digest ?? undefined,
     }));
   }
 }

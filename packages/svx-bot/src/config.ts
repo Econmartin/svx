@@ -8,8 +8,6 @@ import { z } from 'zod';
 import path from 'node:path';
 import fs from 'node:fs';
 
-loadEnv();
-
 /**
  * Resolve the workspace root by walking up from cwd until we find
  * `pnpm-workspace.yaml`. This lets the bot write to `<workspace>/data`
@@ -27,6 +25,16 @@ function findWorkspaceRoot(start = process.cwd()): string {
 }
 
 const WORKSPACE_ROOT = findWorkspaceRoot();
+
+// Load .env from the workspace root (not cwd) so scripts run via
+// `pnpm --filter <pkg> <script>` still pick up secrets. Falls back to default
+// dotenv behavior in production where there's no .env file.
+const workspaceEnv = path.join(WORKSPACE_ROOT, '.env');
+if (fs.existsSync(workspaceEnv)) {
+  loadEnv({ path: workspaceEnv });
+} else {
+  loadEnv();
+}
 
 const Schema = z.object({
   paperTrading: z.boolean().default(true),
@@ -69,6 +77,29 @@ const Schema = z.object({
   circuitBreakerLosses: z.number().int().positive().default(5),
   polymarketGammaBase: z.string().url().default('https://gamma-api.polymarket.com'),
   polymarketClobBase: z.string().url().default('https://clob.polymarket.com'),
+
+  // === Polymarket execution (v2 second leg, OFF by default) ===
+  polyExecutionEnabled: z.boolean().default(false),
+  /** 'amoy' (testnet, chain 80002) or 'polygon' (mainnet, chain 137). */
+  polyNetwork: z.enum(['amoy', 'polygon']).default('amoy'),
+  /** Optional override for the CLOB host. If empty, derived from polyNetwork. */
+  polyClobHost: z.string().default(''),
+  /** Optional override for the Polygon RPC. If empty, derived from polyNetwork. */
+  polyRpcUrl: z.string().default(''),
+  /** Per-trade pUSD cap on the Polymarket leg. Start tiny. */
+  maxPolyPositionUsdc: z.number().positive().default(2),
+  /** Hard cap on concurrent open Polymarket positions. Total open exposure
+   *  is bounded above by maxPolyPositionUsdc * maxOpenPolyPositions. */
+  maxOpenPolyPositions: z.number().int().positive().default(5),
+  /** Refuse to fire if the best ask has fewer than this many shares available
+   *  at our price level (we'd partial-fill at bad average prices otherwise). */
+  polyMinBookDepthShares: z.number().int().positive().default(20),
+  /** Daily pUSD loss limit on Polymarket leg — symmetric to dUSDC limit but
+   *  separate because we're spending pUSD, not dUSDC. */
+  dailyPolyLossLimitUsdc: z.number().positive().default(10),
+  /** Max time (ms) to wait for the Polymarket leg to fill before we abort. */
+  polyFillTimeoutMs: z.number().int().positive().default(30_000),
+
   dataDir: z.string().default('./data'),
   apiHost: z.string().default('127.0.0.1'),
   apiPort: z.number().int().positive().default(4321),
@@ -107,6 +138,15 @@ export function loadConfig(): SvxConfig {
     circuitBreakerLosses: parseNum(process.env.CIRCUIT_BREAKER_LOSSES, 5),
     polymarketGammaBase: process.env.POLYMARKET_API_BASE ?? 'https://gamma-api.polymarket.com',
     polymarketClobBase: process.env.POLYMARKET_CLOB_BASE ?? 'https://clob.polymarket.com',
+    polyExecutionEnabled: parseBool(process.env.POLY_EXECUTION_ENABLED, false),
+    polyNetwork: (process.env.POLY_NETWORK as 'amoy' | 'polygon' | undefined) ?? 'amoy',
+    polyClobHost: process.env.POLY_CLOB_HOST ?? '',
+    polyRpcUrl: process.env.POLY_RPC_URL ?? '',
+    maxPolyPositionUsdc: parseNum(process.env.MAX_POLY_POSITION_USDC, 2),
+    maxOpenPolyPositions: parseNum(process.env.MAX_OPEN_POLY_POSITIONS, 5),
+    polyMinBookDepthShares: parseNum(process.env.POLY_MIN_BOOK_DEPTH_SHARES, 20),
+    dailyPolyLossLimitUsdc: parseNum(process.env.DAILY_POLY_LOSS_LIMIT_USDC, 10),
+    polyFillTimeoutMs: parseNum(process.env.POLY_FILL_TIMEOUT_MS, 30_000),
     dataDir: process.env.SVX_DATA_DIR ?? path.join(WORKSPACE_ROOT, 'data'),
     apiHost: process.env.SVX_API_HOST ?? '127.0.0.1',
     apiPort: parseNum(process.env.SVX_API_PORT, 4321),

@@ -82,5 +82,91 @@ services:
     depends_on:
       - bot
 
+  # ===========================================================================
+  # bot-mainnet — parallel instance running mainnet Polymarket execution.
+  #
+  # Sui side stays on TESTNET (Predict has no mainnet deployment yet) and runs
+  # in PAPER mode by default — the Predict signals inform Polymarket trades
+  # without minting on Sui. The Polymarket leg trades real money on Polygon
+  # mainnet, gated by `MAINNET_POLY_EXECUTION_ENABLED` (defaults false).
+  #
+  # All env vars are MAINNET_-prefixed in the host shell / Coolify panel and
+  # mapped to the standard names inside the container so the bot code is
+  # unchanged. Separate volume keeps the SQLite ledger isolated from the
+  # testnet bot.
+  #
+  # Required Coolify secrets (only when MAINNET_POLY_EXECUTION_ENABLED=true):
+  #   MAINNET_POLY_PRIVATE_KEY
+  #   MAINNET_POLY_API_KEY
+  #   MAINNET_POLY_API_SECRET
+  #   MAINNET_POLY_API_PASSPHRASE
+  # ===========================================================================
+  bot-mainnet:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    restart: unless-stopped
+    environment:
+      SERVICE_FQDN_BOT_MAINNET_4321: ""
+      NODE_ENV: production
+      # Sui stays on testnet — Predict has no mainnet yet. Paper-trading by
+      # default means signals don't mint on Sui; only Polymarket fires.
+      SUI_NETWORK: testnet
+      SUI_RPC_URL: "${MAINNET_SUI_RPC_URL:-https://fullnode.testnet.sui.io:443}"
+      PREDICT_SERVER_URL: "${MAINNET_PREDICT_SERVER_URL:-https://predict-server.testnet.mystenlabs.com}"
+      PAPER_TRADING: "${MAINNET_PAPER_TRADING:-true}"
+      SPREAD_THRESHOLD: "${MAINNET_SPREAD_THRESHOLD:-0.03}"
+      MAX_POSITION_DUSDC: "${MAINNET_MAX_POSITION_DUSDC:-0.5}"
+      MAX_POSITION_PCT: "${MAINNET_MAX_POSITION_PCT:-0.05}"
+      DAILY_LOSS_LIMIT_DUSDC: "${MAINNET_DAILY_LOSS_LIMIT_DUSDC:-5}"
+      MAX_OPEN_POSITIONS: "${MAINNET_MAX_OPEN_POSITIONS:-5}"
+      MAX_SVI_STALENESS_SEC: "${MAINNET_MAX_SVI_STALENESS_SEC:-300}"
+      EXPIRY_TOLERANCE_SEC: "${MAINNET_EXPIRY_TOLERANCE_SEC:-3600}"
+      SVX_LOG_LEVEL: "${MAINNET_SVX_LOG_LEVEL:-info}"
+      SVX_LOOP_INTERVAL_MS: "${MAINNET_SVX_LOOP_INTERVAL_MS:-15000}"
+      # Polymarket execution — the whole point of this instance.
+      POLY_EXECUTION_ENABLED: "${MAINNET_POLY_EXECUTION_ENABLED:-false}"
+      POLY_NETWORK: "${MAINNET_POLY_NETWORK:-polygon}"
+      POLY_RPC_URL: "${MAINNET_POLY_RPC_URL:-}"
+      POLY_CLOB_HOST: "${MAINNET_POLY_CLOB_HOST:-}"
+      MAX_POLY_POSITION_USDC: "${MAINNET_MAX_POLY_POSITION_USDC:-2}"
+      MAX_OPEN_POLY_POSITIONS: "${MAINNET_MAX_OPEN_POLY_POSITIONS:-5}"
+      POLY_MIN_BOOK_DEPTH_SHARES: "${MAINNET_POLY_MIN_BOOK_DEPTH_SHARES:-20}"
+      DAILY_POLY_LOSS_LIMIT_USDC: "${MAINNET_DAILY_POLY_LOSS_LIMIT_USDC:-10}"
+      # Secrets — set in Coolify panel.
+      SUI_PRIVATE_KEY_BECH32: "${MAINNET_SUI_PRIVATE_KEY_BECH32:-}"
+      OPERATOR_JSON: "${MAINNET_OPERATOR_JSON:-}"
+      POLY_PRIVATE_KEY: "${MAINNET_POLY_PRIVATE_KEY:-}"
+      POLY_API_KEY: "${MAINNET_POLY_API_KEY:-}"
+      POLY_API_SECRET: "${MAINNET_POLY_API_SECRET:-}"
+      POLY_API_PASSPHRASE: "${MAINNET_POLY_API_PASSPHRASE:-}"
+    volumes:
+      - svx-data-mainnet:/data
+    expose:
+      - "4321"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4321/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  dashboard-mainnet:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+      args:
+        NEXT_PUBLIC_SVX_API: "${MAINNET_NEXT_PUBLIC_SVX_API:-http://bot-mainnet:4321}"
+    restart: unless-stopped
+    environment:
+      SERVICE_FQDN_DASHBOARD_MAINNET_3030: ""
+      NODE_ENV: production
+      NEXT_PUBLIC_SVX_API: "${MAINNET_NEXT_PUBLIC_SVX_API:-http://bot-mainnet:4321}"
+    expose:
+      - "3030"
+    depends_on:
+      - bot-mainnet
+
 volumes:
   svx-data:
+  svx-data-mainnet:

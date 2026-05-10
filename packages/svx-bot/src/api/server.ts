@@ -22,6 +22,15 @@ interface ApiDeps {
     managerBalanceUsdc?: number;
     lastManagerBalanceAtMs?: number;
     lastBtcSpot?: { value: number; updatedAtMs: number };
+    /** Polymarket pUSD wallet balance — populated by main loop when polyExec
+     *  is active. Lets the dashboard show poly bankroll alongside Sui NAV. */
+    polyBalance?: {
+      address: `0x${string}`;
+      network: 'amoy' | 'polygon';
+      pUsd: number;
+      gasPol: number;
+      updatedAtMs: number;
+    };
   };
   predict: PredictClient;
   addresses: PredictAddresses;
@@ -62,6 +71,13 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       spotBtc: deps.state.lastBtcSpot?.value ?? null,
       spotBtcAtMs: deps.state.lastBtcSpot?.updatedAtMs ?? null,
       predictPackageId: deps.addresses.packageId,
+      // Polymarket leg state (null when polyExec is disabled).
+      polyExecutionEnabled: deps.cfg.polyExecutionEnabled,
+      polyNetwork: deps.cfg.polyExecutionEnabled ? deps.cfg.polyNetwork : null,
+      polyAddress: deps.state.polyBalance?.address ?? null,
+      polyPusdBalance: deps.state.polyBalance?.pUsd ?? null,
+      polyGasPol: deps.state.polyBalance?.gasPol ?? null,
+      polyBalanceAtMs: deps.state.polyBalance?.updatedAtMs ?? null,
     });
   });
 

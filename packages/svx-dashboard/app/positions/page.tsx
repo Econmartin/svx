@@ -1,8 +1,19 @@
 'use client';
 
 import { useCallback } from 'react';
-import { api, formatPct, formatTime, formatUsdc } from '@/lib/api';
+import { api, formatPct, formatTime, formatUsdc, type TradeRecord } from '@/lib/api';
 import { usePolling } from '@/lib/usePolling';
+
+function polyLegLabel(t: TradeRecord): string {
+  if (!t.polyStatus) return '—';
+  const out = t.polyOutcome ?? '?';
+  const px = t.polyFillPrice != null ? `@${t.polyFillPrice.toFixed(3)}` : '';
+  const sh = t.polyFilledShares != null ? `${t.polyFilledShares.toFixed(2)} sh` : '';
+  if (t.polyStatus === 'filled') return `${out.toUpperCase()} ${sh} ${px}`.trim();
+  if (t.polyStatus === 'partial') return `partial ${out} ${sh} ${px}`.trim();
+  if (t.polyStatus === 'failed') return 'failed';
+  return t.polyStatus;
+}
 
 export default function PositionsPage() {
   const { data: open } = usePolling(useCallback(() => api.positionsOpen(), []), 10_000);
@@ -23,6 +34,7 @@ export default function PositionsPage() {
                 <th>Qty</th>
                 <th>Cost px</th>
                 <th>Cost $</th>
+                <th>Poly leg</th>
                 <th>Expiry</th>
               </tr>
             </thead>
@@ -36,12 +48,13 @@ export default function PositionsPage() {
                   <td>{formatUsdc(t.quantityDusdc)}</td>
                   <td>{formatPct(t.costPrice, 2)}</td>
                   <td>{formatUsdc(t.costUsdc)}</td>
+                  <td className="text-xs">{polyLegLabel(t)}</td>
                   <td className="text-muted text-xs">{formatTime(t.expiryMs)}</td>
                 </tr>
               ))}
               {!open?.length && (
                 <tr>
-                  <td colSpan={8} className="text-center text-muted py-4">
+                  <td colSpan={9} className="text-center text-muted py-4">
                     No open positions.
                   </td>
                 </tr>

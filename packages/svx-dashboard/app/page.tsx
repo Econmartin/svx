@@ -96,6 +96,17 @@ export default function OverviewPage() {
             value: status?.signalsLast24h ?? '—',
             hint: `${status?.tradesLast24h ?? 0} executed`,
           },
+          ...(status?.polyExecutionEnabled
+            ? [
+                {
+                  label: `pUSD (${status.polyNetwork ?? 'poly'})`,
+                  value: formatUsdc(status.polyPusdBalance ?? 0),
+                  hint: status.polyBalanceAtMs
+                    ? `synced ${formatRelative(status.polyBalanceAtMs)}`
+                    : 'awaiting first sync',
+                },
+              ]
+            : []),
         ]}
       />
 

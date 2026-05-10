@@ -43,6 +43,7 @@ services:
       EXPIRY_TOLERANCE_SEC: "${EXPIRY_TOLERANCE_SEC:-3600}"
       SVX_LOG_LEVEL: "${SVX_LOG_LEVEL:-info}"
       SVX_LOOP_INTERVAL_MS: "${SVX_LOOP_INTERVAL_MS:-15000}"
+      SVX_INSTANCE_LABEL: "${SVX_INSTANCE_LABEL:-testnet}"
       # Secrets — set these in the Coolify env panel. Defaults to empty so
       # paper mode runs cleanly without them.
       SUI_PRIVATE_KEY_BECH32: "${SUI_PRIVATE_KEY_BECH32:-}"
@@ -124,6 +125,7 @@ services:
       EXPIRY_TOLERANCE_SEC: "${MAINNET_EXPIRY_TOLERANCE_SEC:-3600}"
       SVX_LOG_LEVEL: "${MAINNET_SVX_LOG_LEVEL:-info}"
       SVX_LOOP_INTERVAL_MS: "${MAINNET_SVX_LOOP_INTERVAL_MS:-15000}"
+      SVX_INSTANCE_LABEL: "${MAINNET_SVX_INSTANCE_LABEL:-mainnet}"
       # Polymarket execution — the whole point of this instance.
       POLY_EXECUTION_ENABLED: "${MAINNET_POLY_EXECUTION_ENABLED:-false}"
       POLY_NETWORK: "${MAINNET_POLY_NETWORK:-polygon}"

@@ -208,22 +208,23 @@ export function loadPolyCreds(cfg: SvxConfig): ApiKeyCreds | null {
 }
 
 /**
- * Construct a PolymarketExecClient if the bot is configured to execute
- * Polymarket orders AND has both a private key and L2 creds. Returns null
- * otherwise (paper mode, or misconfigured) so the caller can no-op cleanly.
+ * Construct a PolymarketExecClient whenever the operator has provided a
+ * private key + L2 creds — regardless of whether `POLY_EXECUTION_ENABLED`
+ * is on. The flag only gates ORDER SUBMISSION; balance reads, address
+ * surfacing, and orderbook queries should always be available so the
+ * dashboard can show "you have $X pUSD, ready to fire when you flip the
+ * switch." Returns null only when secrets aren't configured at all.
  */
 export function tryCreatePolymarketExecClient(cfg: SvxConfig): PolymarketExecClient | null {
-  if (!cfg.polyExecutionEnabled) return null;
   if (!process.env.POLY_PRIVATE_KEY) {
-    log.warn('svx.poly.skip_init', {
-      reason: 'POLY_EXECUTION_ENABLED=true but POLY_PRIVATE_KEY missing',
-    });
+    // Don't warn — this is the expected path for instances that haven't
+    // configured a Poly wallet yet (e.g. the existing testnet bot).
     return null;
   }
   const creds = loadPolyCreds(cfg);
   if (!creds) {
     log.warn('svx.poly.skip_init', {
-      reason: 'no L2 creds — set POLY_API_{KEY,SECRET,PASSPHRASE} or run setup-poly-wallet',
+      reason: 'POLY_PRIVATE_KEY set but no L2 creds — run setup-poly-wallet',
     });
     return null;
   }

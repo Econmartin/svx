@@ -104,6 +104,11 @@ const Schema = z.object({
   apiHost: z.string().default('127.0.0.1'),
   apiPort: z.number().int().positive().default(4321),
   loopIntervalMs: z.number().int().positive().default(15_000),
+
+  /** Optional human label for this bot instance ("testnet", "mainnet", etc.).
+   *  Surfaced on /status and the dashboard header so two parallel deployments
+   *  are visually distinguishable. Defaults to '' (no label shown). */
+  instanceLabel: z.string().default(''),
 });
 
 export type SvxConfig = z.infer<typeof Schema>;
@@ -151,6 +156,7 @@ export function loadConfig(): SvxConfig {
     apiHost: process.env.SVX_API_HOST ?? '127.0.0.1',
     apiPort: parseNum(process.env.SVX_API_PORT, 4321),
     loopIntervalMs: parseNum(process.env.SVX_LOOP_INTERVAL_MS, 15_000),
+    instanceLabel: process.env.SVX_INSTANCE_LABEL ?? '',
   });
 }
 

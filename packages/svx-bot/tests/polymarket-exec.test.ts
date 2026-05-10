@@ -44,6 +44,7 @@ const baseCfg: SvxConfig = {
   apiHost: '127.0.0.1',
   apiPort: 4321,
   loopIntervalMs: 15_000,
+  instanceLabel: '',
 };
 
 describe('parsePolyFillResponse', () => {

@@ -28,6 +28,10 @@ COPY packages/svx-shared ./packages/svx-shared
 WORKDIR /app/packages/svx-dashboard
 ARG NEXT_PUBLIC_SVX_API=http://127.0.0.1:4321
 ENV NEXT_PUBLIC_SVX_API=$NEXT_PUBLIC_SVX_API
+# Optional second bot URL — when set, /mainnet pages on the dashboard poll
+# this URL instead of the testnet bot. Leave empty in single-bot setups.
+ARG NEXT_PUBLIC_SVX_API_MAINNET=
+ENV NEXT_PUBLIC_SVX_API_MAINNET=$NEXT_PUBLIC_SVX_API_MAINNET
 RUN pnpm build
 
 # ---- runner stage ----

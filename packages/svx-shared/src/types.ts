@@ -53,9 +53,17 @@ export interface PolymarketSnapshot {
   yesAskSize: number;
   noBid: number;
   noAsk: number;
+  /** Optional — recent additions, omitted by older readers. Computed from
+   *  the No-side order book when present; otherwise execution code falls
+   *  back to mirroring yesBidSize / yesAskSize. */
+  noBidSize?: number;
+  noAskSize?: number;
   /** Trailing-24h notional volume in USD on this market. */
   volume24hUsd: number;
   fetchedAtMs: number;
+  /** CLOB token IDs for the Yes/No outcomes — required to submit orders. */
+  yesTokenId?: string;
+  noTokenId?: string;
 }
 
 export type SignalAction =
@@ -138,6 +146,30 @@ export interface TradeRecord {
   edgeAtExec?: number;
   /** Tx digest of the on-chain redeem call (live mode only, after settle). */
   redeemTxDigest?: string;
+
+  // === Polymarket execution leg (populated when POLY_EXECUTION_ENABLED) ===
+  /** Network the Polymarket order was placed on. */
+  polyNetwork?: 'amoy' | 'polygon';
+  /** Polymarket CLOB token ID we traded (Yes or No outcome). */
+  polyTokenId?: string;
+  /** Polymarket condition ID (the market). */
+  polyConditionId?: string;
+  /** 'buy' (long Yes/No) or 'sell' (short Yes/No). */
+  polySide?: 'buy' | 'sell';
+  /** 'yes' or 'no' — which outcome we traded. */
+  polyOutcome?: 'yes' | 'no';
+  /** Polymarket order id returned by the CLOB. */
+  polyOrderId?: string;
+  /** Shares actually filled (may be partial for FAK; FOK is all-or-nothing). */
+  polyFilledShares?: number;
+  /** Average fill price (probability, 0..1). */
+  polyFillPrice?: number;
+  /** Total pUSD spent (BUY) or received (SELL). */
+  polyCostUsdc?: number;
+  /** Polygon tx hash for the on-chain settlement of the fill. */
+  polyTxHash?: string;
+  /** Status of the Poly leg: 'submitted' | 'filled' | 'failed' | 'partial'. */
+  polyStatus?: 'submitted' | 'filled' | 'failed' | 'partial';
 }
 
 export interface RiskDecision {

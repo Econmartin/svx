@@ -29,6 +29,13 @@ export interface BotStatus {
   spotBtc: number | null;
   spotBtcAtMs: number | null;
   predictPackageId: string;
+  // Polymarket execution leg.
+  polyExecutionEnabled?: boolean;
+  polyNetwork?: 'amoy' | 'polygon' | null;
+  polyAddress?: `0x${string}` | null;
+  polyPusdBalance?: number | null;
+  polyGasPol?: number | null;
+  polyBalanceAtMs?: number | null;
 }
 
 export interface SignalRecord {
@@ -68,6 +75,18 @@ export interface TradeRecord {
   settled: boolean;
   payoutUsdc?: number;
   pnlUsdc?: number;
+  // Polymarket execution leg (populated when POLY_EXECUTION_ENABLED).
+  polyNetwork?: 'amoy' | 'polygon';
+  polyTokenId?: string;
+  polyConditionId?: string;
+  polySide?: 'buy' | 'sell';
+  polyOutcome?: 'yes' | 'no';
+  polyOrderId?: string;
+  polyFilledShares?: number;
+  polyFillPrice?: number;
+  polyCostUsdc?: number;
+  polyTxHash?: string;
+  polyStatus?: 'submitted' | 'filled' | 'failed' | 'partial';
 }
 
 export interface OracleSummary {

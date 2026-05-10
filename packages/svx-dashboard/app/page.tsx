@@ -36,7 +36,20 @@ export default function OverviewPage() {
     <div className="space-y-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">SVX Overview</h1>
+          <h1 className="text-2xl font-semibold flex items-center gap-3">
+            SVX Overview
+            {status?.instanceLabel && (
+              <span
+                className={`text-xs uppercase tracking-wider px-2 py-0.5 rounded font-mono ${
+                  status.instanceLabel === 'mainnet'
+                    ? 'bg-loss/20 text-loss border border-loss/40'
+                    : 'bg-accent/20 text-accent border border-accent/40'
+                }`}
+              >
+                {status.instanceLabel}
+              </span>
+            )}
+          </h1>
           <p className="text-muted text-sm mt-1">
             Cross-venue volatility arbitrage between DeepBook Predict and Polymarket BTC binaries.
           </p>
@@ -96,14 +109,22 @@ export default function OverviewPage() {
             value: status?.signalsLast24h ?? '—',
             hint: `${status?.tradesLast24h ?? 0} executed`,
           },
-          ...(status?.polyExecutionEnabled
+          // Show the pUSD stat whenever a Poly wallet is configured (independent
+          // of POLY_EXECUTION_ENABLED) so the operator can see "I have $X pUSD
+          // ready to fire" before flipping the execution switch. The exec
+          // gate is reflected in the hint instead.
+          ...(status?.polyAddress
             ? [
                 {
                   label: `pUSD (${status.polyNetwork ?? 'poly'})`,
                   value: formatUsdc(status.polyPusdBalance ?? 0),
-                  hint: status.polyBalanceAtMs
-                    ? `synced ${formatRelative(status.polyBalanceAtMs)}`
-                    : 'awaiting first sync',
+                  hint: status.polyExecutionEnabled
+                    ? status.polyBalanceAtMs
+                      ? `live · synced ${formatRelative(status.polyBalanceAtMs)}`
+                      : 'live · awaiting sync'
+                    : status.polyBalanceAtMs
+                      ? `read-only · ${formatRelative(status.polyBalanceAtMs)}`
+                      : 'read-only · awaiting sync',
                 },
               ]
             : []),

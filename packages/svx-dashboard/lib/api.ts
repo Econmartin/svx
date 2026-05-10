@@ -29,6 +29,8 @@ export interface BotStatus {
   spotBtc: number | null;
   spotBtcAtMs: number | null;
   predictPackageId: string;
+  /** Human label for this bot ("testnet", "mainnet", etc.) — null when unset. */
+  instanceLabel?: string | null;
   // Polymarket execution leg.
   polyExecutionEnabled?: boolean;
   polyNetwork?: 'amoy' | 'polygon' | null;

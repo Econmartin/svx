@@ -1,9 +1,18 @@
 /**
  * Tiny client-side API wrapper. Pure fetch, no caching. The dashboard is
  * read-only and polls every few seconds via SWR-like patterns.
+ *
+ * Two API instances ship by default:
+ *   - `api`         → testnet Predict bot (NEXT_PUBLIC_SVX_API)
+ *   - `apiMainnet`  → mainnet Polymarket bot (NEXT_PUBLIC_SVX_API_MAINNET)
+ *
+ * Pages under `/` use `api`; pages under `/mainnet` use `apiMainnet`. Both
+ * URLs are baked into the client bundle at build time via Dockerfile.dashboard
+ * args + docker-compose.
  */
 
-const BASE = process.env.NEXT_PUBLIC_SVX_API ?? 'http://127.0.0.1:4321';
+const TESTNET_BASE = process.env.NEXT_PUBLIC_SVX_API ?? 'http://127.0.0.1:4321';
+const MAINNET_BASE = process.env.NEXT_PUBLIC_SVX_API_MAINNET ?? '';
 
 export interface BotStatus {
   startedAtMs: number;
@@ -117,20 +126,43 @@ export interface SurfaceResponse {
   points: SurfacePoint[];
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`${path}: ${res.status} ${res.statusText}`);
-  return res.json();
+function makeGet(base: string) {
+  return async function get<T>(path: string): Promise<T> {
+    if (!base) throw new Error(`API base URL not configured for ${path}`);
+    const res = await fetch(`${base}${path}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`${path}: ${res.status} ${res.statusText}`);
+    return res.json();
+  };
 }
 
-export const api = {
-  status: () => get<BotStatus>('/status'),
-  signals: (limit = 100) => get<SignalRecord[]>(`/signals?limit=${limit}`),
-  positionsOpen: () => get<TradeRecord[]>('/positions/open'),
-  positionsClosed: (limit = 500) => get<TradeRecord[]>(`/positions/closed?limit=${limit}`),
-  oracles: () => get<OracleSummary[]>('/oracles'),
-  surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
-};
+/**
+ * Build an API client for the given bot base URL. Each route group on the
+ * dashboard wires up its own client (testnet predict bot, mainnet polymarket
+ * bot, etc.) so a single Next.js deployment can poll multiple bots.
+ */
+export function createApi(base: string) {
+  const get = makeGet(base);
+  return {
+    /** True when this client has a configured base URL — false for the mainnet
+     *  client when NEXT_PUBLIC_SVX_API_MAINNET wasn't set at build time. */
+    enabled: !!base,
+    base,
+    status: () => get<BotStatus>('/status'),
+    signals: (limit = 100) => get<SignalRecord[]>(`/signals?limit=${limit}`),
+    positionsOpen: () => get<TradeRecord[]>('/positions/open'),
+    positionsClosed: (limit = 500) => get<TradeRecord[]>(`/positions/closed?limit=${limit}`),
+    oracles: () => get<OracleSummary[]>('/oracles'),
+    surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
+  };
+}
+
+export type ApiClient = ReturnType<typeof createApi>;
+
+/** Default — used by every page under `/` (testnet Predict bot). */
+export const api = createApi(TESTNET_BASE);
+
+/** Used by every page under `/mainnet/*` (mainnet Polymarket bot). */
+export const apiMainnet = createApi(MAINNET_BASE);
 
 export function formatUsdc(x: number | undefined | null, places = 2): string {
   if (x == null || !isFinite(x)) return '—';

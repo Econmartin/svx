@@ -8,11 +8,17 @@ export const metadata: Metadata = {
     'A fully-automated bot that trades the spread between DeepBook Predict (SVI surface) and Polymarket BTC binaries.',
 };
 
+/**
+ * Top-nav layout. Pages under `/` (Overview/Signals/Positions/Surface) are
+ * the testnet Predict view; `/mainnet` is the Polymarket execution view
+ * pointed at the bot-mainnet service. Both share the same dashboard build.
+ */
 const NAV = [
   ['Overview', '/'],
   ['Signals', '/signals'],
   ['Positions', '/positions'],
   ['Surface', '/surface'],
+  ['Mainnet (Polymarket)', '/mainnet'],
   ['About', '/about'],
 ] as const;
 

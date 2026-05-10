@@ -65,15 +65,19 @@ services:
       context: .
       dockerfile: Dockerfile.dashboard
       args:
-        # Bake the public bot URL into the client bundle at build time.
+        # Bake the public bot URLs into the client bundle at build time.
         # In Coolify, set NEXT_PUBLIC_SVX_API to the bot's public FQDN
-        # (with https://) once you've assigned the bot a domain.
+        # (with https://) once you've assigned the bot a domain. The mainnet
+        # URL is optional — set it to bot-mainnet's FQDN to enable the
+        # `/mainnet` (Polymarket) page; leave empty otherwise.
         NEXT_PUBLIC_SVX_API: "${NEXT_PUBLIC_SVX_API:-http://bot:4321}"
+        NEXT_PUBLIC_SVX_API_MAINNET: "${NEXT_PUBLIC_SVX_API_MAINNET:-http://bot-mainnet:4321}"
     restart: unless-stopped
     environment:
       SERVICE_FQDN_DASHBOARD_3030: ""
       NODE_ENV: production
       NEXT_PUBLIC_SVX_API: "${NEXT_PUBLIC_SVX_API:-http://bot:4321}"
+      NEXT_PUBLIC_SVX_API_MAINNET: "${NEXT_PUBLIC_SVX_API_MAINNET:-http://bot-mainnet:4321}"
     expose:
       - "3030"
     # Plain depends_on — start order only, NOT health gating. The dashboard
@@ -153,21 +157,10 @@ services:
       retries: 5
       start_period: 90s
 
-  dashboard-mainnet:
-    build:
-      context: .
-      dockerfile: Dockerfile.dashboard
-      args:
-        NEXT_PUBLIC_SVX_API: "${MAINNET_NEXT_PUBLIC_SVX_API:-http://bot-mainnet:4321}"
-    restart: unless-stopped
-    environment:
-      SERVICE_FQDN_DASHBOARD_MAINNET_3030: ""
-      NODE_ENV: production
-      NEXT_PUBLIC_SVX_API: "${MAINNET_NEXT_PUBLIC_SVX_API:-http://bot-mainnet:4321}"
-    expose:
-      - "3030"
-    depends_on:
-      - bot-mainnet
+  # NOTE: dashboard-mainnet was removed — the single `dashboard` service now
+  # serves both the testnet Predict view (under /) and the mainnet Polymarket
+  # view (under /mainnet) by polling both bots. The mainnet bot URL is baked
+  # into the client bundle at build time via NEXT_PUBLIC_SVX_API_MAINNET above.
 
 volumes:
   svx-data:

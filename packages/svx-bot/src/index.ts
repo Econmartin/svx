@@ -188,15 +188,17 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     }
   }
 
-  // Optional Polymarket execution client. Returns null if any of the gating
-  // env vars are missing (POLY_EXECUTION_ENABLED + POLY_PRIVATE_KEY + L2 creds).
-  // Safe to leave null — the loop just skips the Polymarket leg in that case.
+  // Polymarket client — loaded whenever POLY_PRIVATE_KEY + L2 creds exist,
+  // independent of POLY_EXECUTION_ENABLED. The flag only gates ORDER
+  // submission downstream; balance/orderbook reads always work so the
+  // dashboard can surface the wallet state ahead of going live.
   const polyExec = tryCreatePolymarketExecClient(cfg);
   if (polyExec) {
-    log.info('svx.poly.exec_enabled', {
+    log.info(cfg.polyExecutionEnabled ? 'svx.poly.exec_enabled' : 'svx.poly.read_only', {
       address: polyExec.address,
       network: polyExec.endpoints.network,
       clobHost: polyExec.endpoints.clobHost,
+      executionEnabled: cfg.polyExecutionEnabled,
       perTradeCapUsdc: cfg.maxPolyPositionUsdc,
       maxOpenPositions: cfg.maxOpenPolyPositions,
     });
@@ -512,7 +514,9 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           }
         | undefined;
 
-      if (polyExec && polySnap.yesTokenId && polySnap.noTokenId) {
+      // Only fire orders when the kill-switch is on. Without it, polyExec is
+      // still loaded for read-only balance/orderbook surfacing on the dashboard.
+      if (cfg.polyExecutionEnabled && polyExec && polySnap.yesTokenId && polySnap.noTokenId) {
         const outcome: 'yes' | 'no' = predictDirection === 'down' ? 'yes' : 'no';
         const polyTokenId = outcome === 'yes' ? polySnap.yesTokenId : polySnap.noTokenId;
         const polyEntryPrice = outcome === 'yes' ? polySnap.yesAsk : polySnap.noAsk;

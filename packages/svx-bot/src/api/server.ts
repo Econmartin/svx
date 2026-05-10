@@ -71,9 +71,17 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       spotBtc: deps.state.lastBtcSpot?.value ?? null,
       spotBtcAtMs: deps.state.lastBtcSpot?.updatedAtMs ?? null,
       predictPackageId: deps.addresses.packageId,
-      // Polymarket leg state (null when polyExec is disabled).
+      /** Optional instance label ("testnet", "mainnet", etc.) — null when
+       *  unset. Dashboard uses it to render a header badge so two parallel
+       *  deployments are visually distinguishable. */
+      instanceLabel: deps.cfg.instanceLabel || null,
+      // Polymarket leg state.
+      // - executionEnabled: gate for whether the bot will SUBMIT orders.
+      // - polyAddress / pUSD / gas: surfaced whenever a Poly wallet is
+      //   configured (independent of the execution gate), so the dashboard
+      //   can show "you have $X pUSD ready" before flipping the switch.
       polyExecutionEnabled: deps.cfg.polyExecutionEnabled,
-      polyNetwork: deps.cfg.polyExecutionEnabled ? deps.cfg.polyNetwork : null,
+      polyNetwork: deps.state.polyBalance?.network ?? null,
       polyAddress: deps.state.polyBalance?.address ?? null,
       polyPusdBalance: deps.state.polyBalance?.pUsd ?? null,
       polyGasPol: deps.state.polyBalance?.gasPol ?? null,

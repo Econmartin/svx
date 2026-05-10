@@ -344,23 +344,42 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         cfg,
       });
 
-      const decision = risk.check({
-        costUsdc: sized.costUsdc,
-        edge: spread.decision.edge,
-        openPositionCount: ledger.openTrades().length,
-        rolling24hPnlUsdc: ledger.realizedPnlSince(Date.now() - 24 * 3600_000),
-        navUsdc: state.navUsdc,
-      });
-
-      if (!decision.ok) {
+      // Concentration check: don't pyramid into the same (oracle, strike,
+      // direction) beyond the per-signal cap. Forces diversification across
+      // distinct settlement events.
+      const sameSignalOpen = ledger.countOpenPositionsForSignal(
+        oracleSnap.oracleId,
+        polySnap.strike,
+        predictDirection,
+      );
+      if (sameSignalOpen >= cfg.maxPositionsPerSignal) {
         action = 'filtered';
-        log.info('svx.signal.risk_blocked', { reason: decision.reason });
-      } else if (sized.quantityDusdc <= 0) {
-        action = 'filtered';
+        log.info('svx.signal.concentration_blocked', {
+          oracleId: oracleSnap.oracleId.slice(0, 10),
+          strike: polySnap.strike,
+          direction: predictDirection,
+          openCount: sameSignalOpen,
+          cap: cfg.maxPositionsPerSignal,
+        });
       } else {
-        action = cfg.paperTrading ? 'paper_executed' : 'live_executed';
-        signalNotional = sized.quantityDusdc;
-        signalCost = sized.costUsdc;
+        const decision = risk.check({
+          costUsdc: sized.costUsdc,
+          edge: spread.decision.edge,
+          openPositionCount: ledger.openTrades().length,
+          rolling24hPnlUsdc: ledger.realizedPnlSince(Date.now() - 24 * 3600_000),
+          navUsdc: state.navUsdc,
+        });
+
+        if (!decision.ok) {
+          action = 'filtered';
+          log.info('svx.signal.risk_blocked', { reason: decision.reason });
+        } else if (sized.quantityDusdc <= 0) {
+          action = 'filtered';
+        } else {
+          action = cfg.paperTrading ? 'paper_executed' : 'live_executed';
+          signalNotional = sized.quantityDusdc;
+          signalCost = sized.costUsdc;
+        }
       }
     }
 

@@ -405,6 +405,24 @@ export class LedgerStore {
   }
 
   /**
+   * Count open (unsettled) live or paper positions for a specific signal —
+   * the concentration cap reads this to decide whether to pyramid further.
+   */
+  countOpenPositionsForSignal(
+    oracleId: string,
+    strike: number,
+    direction: 'up' | 'down',
+  ): number {
+    const r = this.db
+      .prepare<[string, number, string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM trades
+         WHERE settled = 0 AND oracle_id = ? AND strike = ? AND direction = ?`,
+      )
+      .get(oracleId, strike, direction);
+    return r?.c ?? 0;
+  }
+
+  /**
    * List trades that are settled, won (payout > 0), and not yet redeemed
    * on-chain. Auto-redeemer iterates this each loop iteration.
    */

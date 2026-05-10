@@ -39,6 +39,14 @@ const Schema = z.object({
   dailyLossLimitDusdc: z.number().positive().default(150),
   maxOpenPositions: z.number().int().positive().default(10),
   /**
+   * Concentration cap: never hold more than this many open positions on the
+   * same (oracle, strike, direction) tuple. Default 2 — one initial fire +
+   * one confirmation, then stop pyramiding. Forces the rest of the position
+   * budget to find different signals → more independent settlement events
+   * for statistical power.
+   */
+  maxPositionsPerSignal: z.number().int().positive().default(2),
+  /**
    * Skip signals where predictProb is in the deep-ITM/OTM tails. The protocol
    * also rejects asks > 99% or < 1%, so these waste gas on guaranteed
    * failures. Default is symmetric: skip if predictProb > 0.95 or < 0.05.
@@ -88,6 +96,7 @@ export function loadConfig(): SvxConfig {
     maxPositionPct: parseNum(process.env.MAX_POSITION_PCT, 0.05),
     dailyLossLimitDusdc: parseNum(process.env.DAILY_LOSS_LIMIT_DUSDC, 150),
     maxOpenPositions: parseNum(process.env.MAX_OPEN_POSITIONS, 10),
+    maxPositionsPerSignal: parseNum(process.env.MAX_POSITIONS_PER_SIGNAL, 2),
     minPredictProb: parseNum(process.env.MIN_PREDICT_PROB, 0.05),
     maxPredictProb: parseNum(process.env.MAX_PREDICT_PROB, 0.95),
     signalLogMinSpreadFrac: parseNum(process.env.SIGNAL_LOG_MIN_SPREAD_FRAC, 0.3),

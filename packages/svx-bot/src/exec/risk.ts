@@ -90,4 +90,34 @@ export class RiskGate {
 
     return { ok: true };
   }
+
+  /**
+   * Polymarket-leg risk gates. Separate from check() because the cost is in
+   * pUSD (not dUSDC) and the open-position count is per-leg.
+   *
+   * Daily-PnL gate is intentionally omitted for now — Polymarket positions
+   * settle via UMA hours after expiry, so we can't reliably compute realized
+   * PnL until poly settlement is wired. Per-trade + concurrent caps bound the
+   * worst-case exposure: maxPolyPositionUsdc * maxOpenPolyPositions.
+   */
+  checkPoly(input: { costUsdc: number; openPolyPositionCount: number }): RiskDecision {
+    const paused = this.isPaused();
+    if (paused.paused) return { ok: false, reason: paused.reason ?? 'paused' };
+
+    if (input.costUsdc > this.cfg.maxPolyPositionUsdc + 1e-6) {
+      return {
+        ok: false,
+        reason: `poly cost ${input.costUsdc.toFixed(2)} > cap ${this.cfg.maxPolyPositionUsdc}`,
+      };
+    }
+
+    if (input.openPolyPositionCount >= this.cfg.maxOpenPolyPositions) {
+      return {
+        ok: false,
+        reason: `${input.openPolyPositionCount} open poly positions ≥ cap ${this.cfg.maxOpenPolyPositions}`,
+      };
+    }
+
+    return { ok: true };
+  }
 }

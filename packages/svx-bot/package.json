@@ -16,11 +16,17 @@
     "force-mint": "tsx scripts/force-mint.ts",
     "redeem": "tsx scripts/redeem.ts",
     "inspect-position": "tsx scripts/inspect-position.ts",
-    "withdraw-dusdc": "tsx scripts/withdraw-dusdc.ts"
+    "withdraw-dusdc": "tsx scripts/withdraw-dusdc.ts",
+    "generate-poly-wallet": "tsx scripts/generate-poly-wallet.ts",
+    "setup-poly-wallet": "tsx scripts/setup-poly-wallet.ts",
+    "verify-poly-wallet": "tsx scripts/verify-poly-wallet.ts",
+    "wrap-usdce-to-pusd": "tsx scripts/wrap-usdce-to-pusd.ts",
+    "force-poly-trade": "tsx scripts/force-poly-trade.ts"
   },
   "dependencies": {
     "@mysten/bcs": "^1.1.0",
     "@mysten/sui": "^1.18.0",
+    "@polymarket/clob-client-v2": "^1.0.6",
     "@types/js-yaml": "^4.0.9",
     "axios": "^1.7.9",
     "axios-retry": "^4.5.0",
@@ -31,6 +37,7 @@
     "js-yaml": "^4.1.1",
     "p-retry": "^6.2.0",
     "svx-shared": "workspace:*",
+    "viem": "^2.21.0",
     "ws": "^8.18.0",
     "zod": "^3.23.8"
   },

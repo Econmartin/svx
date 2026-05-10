@@ -63,7 +63,19 @@ CREATE TABLE IF NOT EXISTS trades (
   settled INTEGER NOT NULL DEFAULT 0,
   payout_usdc REAL,
   pnl_usdc REAL,
-  redeem_tx_digest TEXT
+  redeem_tx_digest TEXT,
+  -- Polymarket execution leg (additive 2026-05-10) --
+  poly_network TEXT,
+  poly_token_id TEXT,
+  poly_condition_id TEXT,
+  poly_side TEXT,
+  poly_outcome TEXT,
+  poly_order_id TEXT,
+  poly_filled_shares REAL,
+  poly_fill_price REAL,
+  poly_cost_usdc REAL,
+  poly_tx_hash TEXT,
+  poly_status TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_trades_ts ON trades(ts_ms);
 CREATE INDEX IF NOT EXISTS ix_trades_oracle ON trades(oracle_id);
@@ -152,6 +164,18 @@ export class LedgerStore {
     ensureColumn('poly_ask_at_exec', 'REAL');
     ensureColumn('predict_iv_at_exec', 'REAL');
     ensureColumn('edge_at_exec', 'REAL');
+    // Polymarket execution leg
+    ensureColumn('poly_network', 'TEXT');
+    ensureColumn('poly_token_id', 'TEXT');
+    ensureColumn('poly_condition_id', 'TEXT');
+    ensureColumn('poly_side', 'TEXT');
+    ensureColumn('poly_outcome', 'TEXT');
+    ensureColumn('poly_order_id', 'TEXT');
+    ensureColumn('poly_filled_shares', 'REAL');
+    ensureColumn('poly_fill_price', 'REAL');
+    ensureColumn('poly_cost_usdc', 'REAL');
+    ensureColumn('poly_tx_hash', 'TEXT');
+    ensureColumn('poly_status', 'TEXT');
   }
 
   close(): void {
@@ -206,10 +230,14 @@ export class LedgerStore {
       .prepare(
         `INSERT INTO trades (id, signal_id, ts_ms, mode, oracle_id, underlying, expiry_ms, strike,
          direction, quantity_dusdc, cost_price, cost_usdc, tx_digest, settled, payout_usdc, pnl_usdc,
-         ms_to_expiry_at_exec, predict_prob_at_exec, poly_ask_at_exec, predict_iv_at_exec, edge_at_exec)
+         ms_to_expiry_at_exec, predict_prob_at_exec, poly_ask_at_exec, predict_iv_at_exec, edge_at_exec,
+         poly_network, poly_token_id, poly_condition_id, poly_side, poly_outcome,
+         poly_order_id, poly_filled_shares, poly_fill_price, poly_cost_usdc, poly_tx_hash, poly_status)
          VALUES (@id, @sigId, @ts, @mode, @oracleId, @underlying, @expiry, @strike,
          @dir, @qty, @cp, @cost, @txd, @settled, @payout, @pnl,
-         @msToE, @ppe, @pae, @pive, @edge)`,
+         @msToE, @ppe, @pae, @pive, @edge,
+         @polyNet, @polyTok, @polyCond, @polySide, @polyOut,
+         @polyOrd, @polyShr, @polyPx, @polyUsd, @polyTx, @polyStat)`,
       )
       .run({
         id,
@@ -233,6 +261,17 @@ export class LedgerStore {
         pae: t.polyAskAtExec ?? null,
         pive: t.predictIvAtExec ?? null,
         edge: t.edgeAtExec ?? null,
+        polyNet: t.polyNetwork ?? null,
+        polyTok: t.polyTokenId ?? null,
+        polyCond: t.polyConditionId ?? null,
+        polySide: t.polySide ?? null,
+        polyOut: t.polyOutcome ?? null,
+        polyOrd: t.polyOrderId ?? null,
+        polyShr: t.polyFilledShares ?? null,
+        polyPx: t.polyFillPrice ?? null,
+        polyUsd: t.polyCostUsdc ?? null,
+        polyTx: t.polyTxHash ?? null,
+        polyStat: t.polyStatus ?? null,
       });
     return id;
   }
@@ -422,6 +461,28 @@ export class LedgerStore {
     return r?.c ?? 0;
   }
 
+  /** Count of unsettled trades that have a Polymarket leg attached (filled). */
+  countOpenPolyPositions(): number {
+    const r = this.db
+      .prepare<[], { c: number }>(
+        `SELECT COUNT(*) AS c FROM trades
+         WHERE settled = 0 AND poly_status = 'filled'`,
+      )
+      .get();
+    return r?.c ?? 0;
+  }
+
+  /** Sum of pUSD spent on currently-open Poly positions. */
+  openPolyExposureUsdc(): number {
+    const r = this.db
+      .prepare<[], { s: number }>(
+        `SELECT COALESCE(SUM(poly_cost_usdc), 0) AS s FROM trades
+         WHERE settled = 0 AND poly_status = 'filled'`,
+      )
+      .get();
+    return r?.s ?? 0;
+  }
+
   /**
    * List trades that are settled, won (payout > 0), and not yet redeemed
    * on-chain. Auto-redeemer iterates this each loop iteration.
@@ -593,6 +654,17 @@ export class LedgerStore {
           predict_iv_at_exec: number | null;
           edge_at_exec: number | null;
           redeem_tx_digest: string | null;
+          poly_network: string | null;
+          poly_token_id: string | null;
+          poly_condition_id: string | null;
+          poly_side: string | null;
+          poly_outcome: string | null;
+          poly_order_id: string | null;
+          poly_filled_shares: number | null;
+          poly_fill_price: number | null;
+          poly_cost_usdc: number | null;
+          poly_tx_hash: string | null;
+          poly_status: string | null;
         }
       >(`SELECT * FROM trades ${suffix}`)
       .all(...params);
@@ -621,6 +693,17 @@ export class LedgerStore {
       predictIvAtExec: r.predict_iv_at_exec ?? undefined,
       edgeAtExec: r.edge_at_exec ?? undefined,
       redeemTxDigest: r.redeem_tx_digest ?? undefined,
+      polyNetwork: (r.poly_network as 'amoy' | 'polygon' | undefined) ?? undefined,
+      polyTokenId: r.poly_token_id ?? undefined,
+      polyConditionId: r.poly_condition_id ?? undefined,
+      polySide: (r.poly_side as 'buy' | 'sell' | undefined) ?? undefined,
+      polyOutcome: (r.poly_outcome as 'yes' | 'no' | undefined) ?? undefined,
+      polyOrderId: r.poly_order_id ?? undefined,
+      polyFilledShares: r.poly_filled_shares ?? undefined,
+      polyFillPrice: r.poly_fill_price ?? undefined,
+      polyCostUsdc: r.poly_cost_usdc ?? undefined,
+      polyTxHash: r.poly_tx_hash ?? undefined,
+      polyStatus: (r.poly_status as 'submitted' | 'filled' | 'failed' | 'partial' | undefined) ?? undefined,
     }));
   }
 }

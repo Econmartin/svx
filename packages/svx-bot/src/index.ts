@@ -42,6 +42,11 @@ import { buildMintTx, buildRedeemTx } from './exec/ptb.js';
 import { submitTx } from './exec/submit.js';
 import { loadOperatorKey } from './exec/keypair.js';
 import { readManagerDusdcBalance } from './exec/manager-balance.js';
+import {
+  PolymarketExecClient,
+  parsePolyFillResponse,
+  tryCreatePolymarketExecClient,
+} from './exec/polymarket-client.js';
 import { startApiServer } from './api/server.js';
 import { log } from './util/log.js';
 
@@ -61,9 +66,21 @@ interface BotState {
    *  main loop on each iteration so the dashboard can colour open positions
    *  ITM/OTM without making its own oracle calls. */
   lastBtcSpot?: { value: number; updatedAtMs: number };
+  /** Polymarket pUSD + gas balance, refreshed periodically when polyExec is
+   *  configured. Surfaced on /status so the dashboard can show poly bankroll. */
+  polyBalance?: {
+    address: `0x${string}`;
+    network: 'amoy' | 'polygon';
+    pUsd: number;
+    gasPol: number;
+    updatedAtMs: number;
+  };
+  /** Last time we refreshed the Polymarket balance from on-chain. */
+  lastPolyBalanceAtMs: number;
 }
 
 const MANAGER_BALANCE_REFRESH_MS = 30_000;
+const POLY_BALANCE_REFRESH_MS = 60_000;
 
 const PRUNE_INTERVAL_MS = 6 * 3600_000; // every 6 hours
 const RETENTION = {
@@ -96,6 +113,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     managerBalanceUsdc: 0,
     lastManagerBalanceAtMs: 0,
     lastPruneAtMs: 0,
+    lastPolyBalanceAtMs: 0,
   };
 
   // If we have an operator key + manager record, read the real wallet balance
@@ -170,6 +188,20 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     }
   }
 
+  // Optional Polymarket execution client. Returns null if any of the gating
+  // env vars are missing (POLY_EXECUTION_ENABLED + POLY_PRIVATE_KEY + L2 creds).
+  // Safe to leave null — the loop just skips the Polymarket leg in that case.
+  const polyExec = tryCreatePolymarketExecClient(cfg);
+  if (polyExec) {
+    log.info('svx.poly.exec_enabled', {
+      address: polyExec.address,
+      network: polyExec.endpoints.network,
+      clobHost: polyExec.endpoints.clobHost,
+      perTradeCapUsdc: cfg.maxPolyPositionUsdc,
+      maxOpenPositions: cfg.maxOpenPolyPositions,
+    });
+  }
+
   // Boot the API server for the dashboard. The server is read-only.
   // Skip the server in --once mode so the process can exit cleanly.
   let stopApi: (() => void) | undefined;
@@ -195,7 +227,16 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   while (true) {
     const t0 = Date.now();
     try {
-      await runOnce({ cfg, state, ledger, risk, predict, poly, live });
+      await runOnce({
+        cfg,
+        state,
+        ledger,
+        risk,
+        predict,
+        poly,
+        live,
+        polyExec: polyExec ?? undefined,
+      });
     } catch (e) {
       log.error('svx.loop.error', { err: errMsg(e), stack: errStack(e) });
     }
@@ -240,10 +281,11 @@ interface LoopDeps {
   predict: PredictClient;
   poly: PolymarketClient;
   live?: LiveContext;
+  polyExec?: PolymarketExecClient;
 }
 
 export async function runOnce(deps: LoopDeps): Promise<void> {
-  const { cfg, state, ledger, risk, predict, poly, live } = deps;
+  const { cfg, state, ledger, risk, predict, poly, live, polyExec } = deps;
 
   // 1. Pull active Predict oracles + Polymarket strike markets in parallel.
   const [oracles, polyMarkets] = await Promise.all([
@@ -292,6 +334,30 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
   }
   if (freshest) {
     state.lastBtcSpot = { value: freshest.spot, updatedAtMs: freshest.timestampMs };
+  }
+
+  // Refresh Polymarket pUSD + gas balance every POLY_BALANCE_REFRESH_MS.
+  // Cheap (two RPC reads) but we throttle to avoid hammering the public RPC.
+  if (
+    polyExec &&
+    Date.now() - state.lastPolyBalanceAtMs > POLY_BALANCE_REFRESH_MS
+  ) {
+    try {
+      const [pUsd, gas] = await Promise.all([
+        polyExec.getCollateralBalance(),
+        polyExec.getGasBalance(),
+      ]);
+      state.polyBalance = {
+        address: polyExec.address,
+        network: polyExec.endpoints.network,
+        pUsd: pUsd.pUsd,
+        gasPol: gas.eth,
+        updatedAtMs: Date.now(),
+      };
+      state.lastPolyBalanceAtMs = Date.now();
+    } catch (e) {
+      log.warn('svx.poly.balance_refresh_failed', { err: errMsg(e) });
+    }
   }
 
   for (const match of matches) {
@@ -426,6 +492,91 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       let txDigest: string | undefined;
       let mode: 'paper' | 'live' = 'paper';
 
+      // === Polymarket execution leg ===
+      // When configured, submit Polymarket FIRST (since it's the side that
+      // can fail to fill). If Poly fails, abort the whole trade — we don't
+      // want a half-hedge. If Poly succeeds, continue to the Predict leg.
+      //
+      // Side selection mirrors the spread rationale:
+      //   predictDirection='down' (spreadBuyOnPoly) → buy Yes on Poly
+      //   predictDirection='up'   (spreadSellOnPoly) → buy No  on Poly
+      //   (Buying No is mathematically equivalent to selling Yes for a binary
+      //    market and avoids needing to short / accumulate Yes shares first.)
+      let polyLeg:
+        | {
+            tokenId: string;
+            outcome: 'yes' | 'no';
+            entryPrice: number;
+            depth: number;
+            fillResult: ReturnType<typeof parsePolyFillResponse>;
+          }
+        | undefined;
+
+      if (polyExec && polySnap.yesTokenId && polySnap.noTokenId) {
+        const outcome: 'yes' | 'no' = predictDirection === 'down' ? 'yes' : 'no';
+        const polyTokenId = outcome === 'yes' ? polySnap.yesTokenId : polySnap.noTokenId;
+        const polyEntryPrice = outcome === 'yes' ? polySnap.yesAsk : polySnap.noAsk;
+        // No-side depth is optional; if the No book wasn't fetched we fall
+        // back to the Yes-side depth as a proxy (binary markets are usually
+        // symmetric in liquidity).
+        const polyDepth =
+          outcome === 'yes' ? polySnap.yesAskSize : polySnap.noAskSize ?? polySnap.yesAskSize;
+
+        const polyRisk = risk.checkPoly({
+          costUsdc: cfg.maxPolyPositionUsdc,
+          openPolyPositionCount: ledger.countOpenPolyPositions(),
+        });
+        if (!polyRisk.ok) {
+          log.info('svx.poly.risk_blocked', { reason: polyRisk.reason });
+          continue;
+        }
+
+        if (polyDepth < cfg.polyMinBookDepthShares) {
+          log.info('svx.poly.thin_book', {
+            outcome,
+            depth: polyDepth,
+            min: cfg.polyMinBookDepthShares,
+            entryPrice: polyEntryPrice,
+          });
+          continue;
+        }
+
+        try {
+          log.info('svx.poly.submit', {
+            outcome,
+            tokenId: polyTokenId.slice(0, 12) + '…',
+            usdcAmount: cfg.maxPolyPositionUsdc,
+            entryPrice: polyEntryPrice,
+          });
+          const resp = await polyExec.marketBuy({
+            tokenId: polyTokenId,
+            usdcAmount: cfg.maxPolyPositionUsdc,
+          });
+          const fill = parsePolyFillResponse(resp, cfg.maxPolyPositionUsdc);
+          if (fill.status === 'failed') {
+            log.warn('svx.poly.fill_failed', { resp: fill.raw });
+            continue;
+          }
+          log.info('svx.poly.filled', {
+            orderId: fill.orderId,
+            shares: fill.filledShares,
+            price: fill.fillPrice,
+            costUsdc: fill.costUsdc,
+            status: fill.status,
+          });
+          polyLeg = {
+            tokenId: polyTokenId,
+            outcome,
+            entryPrice: polyEntryPrice,
+            depth: polyDepth,
+            fillResult: fill,
+          };
+        } catch (e) {
+          log.warn('svx.poly.order_error', { err: errMsg(e), stack: errStack(e) });
+          continue;
+        }
+      }
+
       if (action === 'live_executed' && live) {
         const tx = buildMintTx({
           oracleId: oracleSnap.oracleId,
@@ -477,6 +628,18 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         polyAskAtExec: spread.polyYesAsk,
         predictIvAtExec: spread.predictIv,
         edgeAtExec: spread.decision?.edge ?? observedSpread,
+        // Polymarket leg — populated only when polyExec was active and filled.
+        polyNetwork: polyLeg ? polyExec!.endpoints.network : undefined,
+        polyTokenId: polyLeg?.tokenId,
+        polyConditionId: polyLeg ? polySnap.conditionId : undefined,
+        polySide: polyLeg ? 'buy' : undefined,
+        polyOutcome: polyLeg?.outcome,
+        polyOrderId: polyLeg?.fillResult.orderId,
+        polyFilledShares: polyLeg?.fillResult.filledShares,
+        polyFillPrice: polyLeg?.fillResult.fillPrice,
+        polyCostUsdc: polyLeg?.fillResult.costUsdc,
+        polyTxHash: polyLeg?.fillResult.txHash,
+        polyStatus: polyLeg?.fillResult.status,
       });
       if (mode === 'paper') {
         state.navUsdc -= signalCost;
@@ -621,8 +784,14 @@ async function snapshotPolymarket(
       yesAskSize: yes.ask.bestSize,
       noBid: no?.bid?.bestPrice ?? 1 - yes.ask.bestPrice,
       noAsk: no?.ask?.bestPrice ?? 1 - yes.bid.bestPrice,
+      noBidSize: no?.bid?.bestSize,
+      noAskSize: no?.ask?.bestSize,
       volume24hUsd: market.volume24hr,
       fetchedAtMs: yes.timestamp,
+      // Carry the CLOB token IDs through so the execution layer can submit
+      // orders without re-fetching the gamma metadata.
+      yesTokenId: market.yesTokenId,
+      noTokenId: market.noTokenId,
     };
   } catch (e) {
     log.warn('svx.poly.snapshot_failed', { conditionId: market.conditionId, err: errMsg(e) });

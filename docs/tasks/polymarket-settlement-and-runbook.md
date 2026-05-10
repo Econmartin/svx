@@ -1,5 +1,5 @@
 ---
-title: Polymarket settlement, PnL, runbook + doc refresh
+title: Polymarket settlement + Hyperliquid delta hedge
 status: open
 prerequisites:
   - PR #2 merged (Polymarket execution leg)
@@ -7,11 +7,14 @@ prerequisites:
   - Single-dashboard PR merged (collapses dashboard-mainnet)
 ---
 
-# Task — Polymarket settlement, PnL tracking, operator runbook + doc refresh
+# Task — Polymarket settlement + Hyperliquid delta hedge
 
 You are picking up this task in a fresh worker session. Treat this doc as the
 complete brief — read it end to end before writing code. Then read the files
 linked at the bottom.
+
+This is a TWO-PART brief. Part 1 is the prerequisite (must complete first).
+Part 2 builds on it. Both are required for hackathon submission.
 
 ## TL;DR
 
@@ -19,7 +22,7 @@ The Polymarket execution leg shipped in PR #2 / #3 / single-dashboard. The bot
 is **live on Polygon mainnet** with `MAX_POLY_POSITION_USDC=2`, ~$5 of pUSD in
 the wallet, and `POLY_EXECUTION_ENABLED=true`. Trades are firing.
 
-What's MISSING is the back end of the trade lifecycle:
+**Part 1** — close the trade lifecycle:
 
 1. **Settlement detection** — when a Polymarket market resolves via UMA
    (hours after expiry), we don't notice. Trade rows stay `settled=0` forever
@@ -35,8 +38,20 @@ What's MISSING is the back end of the trade lifecycle:
    call SVX a "1-leg directional bet" / list Polymarket execution as a v2
    stretch goal. It's neither anymore.
 
-This task closes the Polymarket trade loop and updates the docs to match
-reality.
+**Part 2** — Hyperliquid delta hedge:
+
+The hackathon brief explicitly lists Hyperliquid as the **stretch goal** for
+Idea Bank #7 (the vol-arb bot we built):
+> *"Stretch: delta-hedge the binary on Hyperliquid perps so the bot's PnL
+> is pure vol edge."*
+
+Hitting the stretch goal is a strong differentiator for placing well.
+Architecturally: SVX is currently *naked-binary* on the Polymarket leg —
+real $2 directional exposure to BTC per trade. With ~$2 caps that's
+tolerable, but it bottlenecks scaling. Add a Hyperliquid perp hedge sized
+to the binary's delta → variance drops ~10× → safe to put 5-10× more
+capital to work for the same risk budget. Also lets us truthfully claim
+"true cross-venue vol arb across three venues" in the demo.
 
 ## Context for the worker
 
@@ -56,6 +71,10 @@ reality.
   unknown), the mainnet bot can flip to PAPER_TRADING=false and the existing
   Polymarket-first execution path becomes the true 2-leg arb. Don't refactor
   for that case yet; just don't paint into a corner.
+
+================================================================================
+# Part 1 — Polymarket settlement, auto-redeem, runbook + doc refresh
+================================================================================
 
 ## What's already in place (don't redo)
 
@@ -297,17 +316,326 @@ stretch goal:
 3. **Settlement poll cadence** — 5 min is the proposal. UMA resolution
    takes hours; faster polling adds gamma API load with no benefit. Confirm.
 
+================================================================================
+# Part 2 — Hyperliquid delta hedge
+================================================================================
+
+## Why this matters (read before coding)
+
+The Polymarket execution that PR #2 shipped takes **naked binary positions**.
+When the bot buys 5 shares of "BTC > $82k Yes" at $0.30, it has $1.50 of
+directional exposure to BTC going up. Today that's bounded at $2 per trade
+(the per-trade cap), so it's tolerable. But:
+
+1. **Scaling is risk-bottlenecked.** The user wants to scale by reinvesting
+   profits, not by adding new capital. Every doubling of trade size doubles
+   directional variance. Without hedging, the daily-loss limit triggers way
+   sooner than the alpha would justify.
+2. **Hackathon framing.** The brief explicitly calls Hyperliquid hedging the
+   stretch goal for Idea #7. Right now SVX is "directional bet informed by
+   Predict-Polymarket disagreement." With the hedge it's "true cross-venue
+   vol arb with delta-neutral execution." Same code, way bigger story.
+3. **PnL stability.** Per-trade variance drops ~10×. The dashboard cumulative
+   PnL chart turns from a binary staircase into a smooth-ish line — visually
+   obvious value for judges.
+
+The hedge does NOT generate new alpha. It transforms the return profile:
+
+| Setup | Per-trade expected | Per-trade variance | Capital deployable per signal |
+|---|---|---|---|
+| Naked (today) | ~$0.25 (spread × shares) | ±$1.50 swing on outcome | Small (drawdown risk) |
+| Delta-hedged | ~$0.20 (spread minus hedge cost) | ±$0.10 (residual gamma) | 5-10× more |
+
+Per trade you make ~20% less. Per unit of capital × time, you make several
+times more, because lower variance unlocks larger position sizing without
+ruin risk.
+
+## What to build
+
+### 2.1 Funding setup (one-time, user does)
+
+1. Buy ~$10 USDC on Kraken.
+2. Withdraw on Arbitrum One network.
+3. Open https://app.hyperliquid.xyz/bridge behind Ireland VPN. Connect a
+   freshly-generated EVM wallet (run `generate-hl-wallet` first — see 2.2).
+4. Bridge the USDC into Hyperliquid.
+5. Sign once on https://app.hyperliquid.xyz to register the master account.
+6. Run `pnpm --filter svx-bot setup-hl-account` to derive the L1 API
+   credentials (Hyperliquid uses signature-derived API keys, similar to
+   Polymarket but no bridge required after the initial bridge).
+7. Add `MAINNET_HL_PRIVATE_KEY` + `MAINNET_HL_API_KEY` to Coolify.
+
+### 2.2 Code components
+
+```
+packages/svx-bot/src/
+  exec/
+    hyperliquid-keypair.ts     # mirrors polymarket-keypair.ts
+                               #   loadHlOperatorKey(cfg) → { account, walletClient, endpoints }
+    hyperliquid-client.ts      # wrap the Hyperliquid TypeScript SDK
+                               #   (verify which package is canonical as of build time —
+                               #   options include the official @hyperliquid one or
+                               #   community @nktkas/hyperliquid). Methods needed:
+                               #     getBalance() → USDC on HL
+                               #     openMarketPerp({asset, side, size}) → fillResult
+                               #     closeMarketPerp({asset, oppositeSide, size})
+                               #     getOpenPositions()
+                               #     getFundingRate(asset)  // for cost tracking
+  pricing/
+    binary-delta.ts            # ∂P/∂S where P = N(d2). All primitives already
+                               # exist in svi.ts + bs.ts; this is a thin wrapper.
+                               # See math note in 2.3.
+packages/svx-bot/scripts/
+  generate-hl-wallet.ts        # mirror of generate-poly-wallet
+  setup-hl-account.ts          # bootstrap API key after bridge funding
+  verify-hl-wallet.ts
+  force-hl-trade.ts            # bug-flush: open + close a tiny BTC perp
+```
+
+### 2.3 The math (binary delta)
+
+For a digital option `P = N(d2)` with `d2 = -((k + w/2) / √w)`:
+
+```
+∂P/∂S = ∂N(d2)/∂d2 × ∂d2/∂S
+      = φ(d2)     × (-1 / (S × √w))
+      = -φ(d2) / (S × √w)
+```
+
+where `φ` is the standard normal pdf. The MAGNITUDE is what we want for hedge
+sizing; the sign tells us which side of the perp to take:
+
+```
+hedgeBtcNotional = |delta| × shares      // BTC notional (not USD)
+hedgeUsdNotional = hedgeBtcNotional × spot
+hedgeSide        = polyOutcome === 'yes' ? 'short' : 'long'
+                   // YES → long BTC delta → short BTC perp to neutralize
+```
+
+Implementation: add `binaryDeltaWrtSpot(spot, strike, ivAnnual, ttmYears)` to
+`pricing/binary-delta.ts`, returning a number in [0, ~∞) (gamma blows up at
+strike for very short expiries — clamp to a reasonable max).
+
+### 2.4 Bot loop integration
+
+After successful Polymarket fill (in the existing block in `index.ts`):
+
+```ts
+let hlLeg: { orderId, size, openPrice, side } | undefined;
+
+if (hlExec && polyLeg.fillResult.status === 'filled') {
+  const delta = binaryDeltaWrtSpot(
+    spot, polySnap.strike, spread.predictIv, ttmYears
+  );
+  const hedgeBtc = polyLeg.fillResult.filledShares * delta;
+  const hedgeSide = polyLeg.outcome === 'yes' ? 'short' : 'long';
+  const hedgeUsd = hedgeBtc * spot;
+
+  // Risk gate
+  const hlRisk = risk.checkHl({
+    notionalUsdc: hedgeUsd,
+    openHlExposureUsdc: ledger.openHlExposureUsdc(),
+  });
+  if (!hlRisk.ok) {
+    log.warn('svx.hl.risk_blocked', { reason: hlRisk.reason });
+    // Critical decision: do we close the poly leg or accept naked?
+    // Default: accept naked, alert via log. Operator can adjust.
+    continue;
+  }
+
+  try {
+    const hlResult = await hlExec.openMarketPerp({
+      asset: 'BTC', side: hedgeSide, size: hedgeBtc
+    });
+    hlLeg = { orderId: hlResult.orderId, size: hedgeBtc,
+              openPrice: hlResult.fillPrice, side: hedgeSide };
+  } catch (e) {
+    log.error('svx.hl.hedge_failed', { err: errMsg(e) });
+    bot.pause('HL hedge failed mid-trade; manual unwind needed');
+    return; // Skip persisting trade row to surface the issue
+  }
+}
+
+// Persist on the trade row alongside poly fields
+ledger.insertTrade({
+  ...,
+  hlOrderId: hlLeg?.orderId,
+  hlSize: hlLeg?.size,
+  hlOpenPrice: hlLeg?.openPrice,
+  hlSide: hlLeg?.side,
+  hlStatus: hlLeg ? 'open' : (cfg.hlExecutionEnabled ? 'failed' : null),
+});
+```
+
+On settlement (in the new Part 1 settlement loop):
+```ts
+if (trade.hlOrderId && trade.hlStatus === 'open') {
+  const closeResult = await hlExec.closeMarketPerp({
+    asset: 'BTC',
+    oppositeSide: trade.hlSide === 'short' ? 'long' : 'short',
+    size: trade.hlSize,
+  });
+  trade.hlClosePrice = closeResult.fillPrice;
+  trade.hlClosedAtMs = Date.now();
+  trade.hlPnlUsdc =
+    (trade.hlSide === 'short' ? trade.hlOpenPrice - closeResult.fillPrice
+                              : closeResult.fillPrice - trade.hlOpenPrice)
+    * trade.hlSize;
+  trade.hlStatus = 'closed';
+}
+```
+
+Combined PnL = `poly_pnl_usdc + hl_pnl_usdc`. Surface this on the dashboard.
+
+### 2.5 Schema additions (additive migration)
+
+```sql
+ALTER TABLE trades ADD COLUMN hl_order_id TEXT;
+ALTER TABLE trades ADD COLUMN hl_size REAL;          -- BTC notional
+ALTER TABLE trades ADD COLUMN hl_open_price REAL;
+ALTER TABLE trades ADD COLUMN hl_close_price REAL;
+ALTER TABLE trades ADD COLUMN hl_side TEXT;          -- 'short' | 'long'
+ALTER TABLE trades ADD COLUMN hl_status TEXT;        -- 'open' | 'closed' | 'failed'
+ALTER TABLE trades ADD COLUMN hl_pnl_usdc REAL;
+ALTER TABLE trades ADD COLUMN hl_funding_paid_usdc REAL;
+ALTER TABLE trades ADD COLUMN hl_closed_at_ms INTEGER;
+```
+
+### 2.6 Risk gates
+
+Add to `config.ts`:
+- `hlExecutionEnabled` (default false — kill switch)
+- `maxHlOpenUsdc` (default $10 — total HL exposure cap)
+- `maxHlPerTradeUsdc` (default $2 — single-trade cap)
+- `dailyHlLossLimitUsdc` (default $5 — auto-pause threshold)
+
+Add `RiskGate.checkHl()`:
+```ts
+checkHl(input: { notionalUsdc: number, openHlExposureUsdc: number }) {
+  if (this.isPaused().paused) return { ok: false, reason: 'paused' };
+  if (input.notionalUsdc > this.cfg.maxHlPerTradeUsdc + 1e-6) return {...};
+  if (input.openHlExposureUsdc + input.notionalUsdc > this.cfg.maxHlOpenUsdc) return {...};
+  // Daily HL loss limit (uses Part 1's settlement loop to compute realized HL PnL)
+  const hlPnl24h = this.ledger.realizedHlPnlSince(Date.now() - 24*3600_000);
+  if (hlPnl24h <= -this.cfg.dailyHlLossLimitUsdc) {
+    this.pause(...);
+    return {...};
+  }
+  return { ok: true };
+}
+```
+
+### 2.7 Funding rate hygiene
+
+Hyperliquid charges hourly funding to perp holders. For our typical holding
+period (few hours to ~24h), funding is small but real:
+
+- 5-10% APR is normal for BTC perps
+- $2 hedge held 24h at 8% APR = $2 × 0.08 / 365 = $0.0004
+- Not material at current scale, but track it as `hl_funding_paid_usdc` on
+  the trade row for analytics
+
+Compute on settlement: `hlExec.getFundingPaid(orderId)` or query the HL
+account history endpoint.
+
+### 2.8 Dashboard updates (`/mainnet`)
+
+Add to the StatRow (after Part 1's pUSD PnL stat):
+- **HL exposure ($)** — current open hedge notional
+- **HL PnL (24h / all-time)** — separate from pUSD
+- **Combined PnL (24h / all-time)** — `poly_pnl + hl_pnl`
+
+Add a new section "Open Hyperliquid hedges" — per-trade row showing:
+- Linked Polymarket position (link via signal id)
+- Side (short/long) + size (BTC) + open price
+- Current mark price + unrealized PnL
+- Funding paid since open
+
+### 2.9 Failure modes worth designing for
+
+| Scenario | Designed response |
+|---|---|
+| HL exchange down at trade time | Circuit-break: don't open new poly trades when HL is unreachable. Log `svx.hl.unreachable`. Operator can flip a flag to allow naked poly trades anyway. |
+| HL fill fails after poly fills | 3 retries with exponential backoff. If all fail: bot.pause + alert. Manual unwind needed. |
+| HL position liquidated | Use 1× leverage (no leverage) by default. Liquidation should be functionally impossible at 1×. |
+| HL closed but Poly didn't | Should never happen if Part 1 settlement loop is correct, but: keep `hl_status` separate from `poly_status` so we can detect drift. |
+| User runs out of HL margin | Risk gate refuses new HL legs; log + alert. Bot continues opening naked poly until operator tops up. |
+
+## Part 2 acceptance criteria
+
+1. **Setup script**: `setup-hl-account.ts` creates the HL API credentials and
+   persists to `data/hl-operator.json`. Refuses without `HL_PRIVATE_KEY`.
+2. **Force-trade**: `force-hl-trade.ts` opens + closes a $1 BTC perp with
+   `--dry-run` default and `--confirm` to submit.
+3. **Bot wiring**: when `MAINNET_HL_EXECUTION_ENABLED=true`, every
+   successful Polymarket fill triggers a delta-sized HL hedge within 5s.
+   Both legs recorded on the same trade row.
+4. **Settlement**: HL perp closes within 5min of Polymarket settlement
+   (Part 1's loop, extended). `hl_pnl_usdc` populated.
+5. **Risk gates**: `MAX_HL_PER_TRADE_USDC`, `MAX_HL_OPEN_USDC`,
+   `DAILY_HL_LOSS_LIMIT_USDC` all enforced.
+6. **Dashboard**: `/mainnet` shows HL exposure stat, HL PnL stat, combined
+   PnL stat, and open HL hedges section.
+7. **Variance reduction demonstrable**: after ~10 closed hedged trades,
+   per-trade PnL std-dev should be visibly smaller than per-trade PnL of
+   the next-best 10 unhedged trades. Document this in the demo script.
+8. **5+ new tests** for binary delta math, HL order construction, combined
+   PnL computation. Existing 48+5 (from Part 1) stay green.
+9. **Local stack still boots**: `docker compose up` clean (no new services
+   needed — HL goes inside `bot-mainnet`).
+
+## Part 2 — what NOT to do
+
+- Do **not** add a separate HL bot service. HL execution belongs inside
+  `bot-mainnet` so the trade lifecycle stays in one place.
+- Do **not** use leverage > 1× by default. Add it as a config knob with
+  big warning comments, but default to 1×.
+- Do **not** dynamic-rebalance the hedge intra-trade in v1. Static hedge at
+  trade open is good enough for sub-day expiries. Dynamic hedging is a
+  follow-up task.
+- Do **not** ship Part 2 before Part 1 is complete. Without settlement
+  detection, you can't measure whether the hedge actually reduced variance,
+  and you can't trigger the daily loss limit.
+- Do **not** post HL trade alerts to chat platforms without explicit user
+  authorization (consistent with the original brief's no-Slack/X rule).
+
+## Part 2 — what to ask the user before starting
+
+1. **Is the HL account already funded?** If not, walk through the bridge
+   step (Kraken → Arbitrum → HL). $10 USDC on HL is enough for many hedges
+   at current scale.
+2. **HL leverage policy** — confirm default 1×. (If they want 2× they can
+   bump it explicitly later, but never default to leveraged.)
+3. **Kill-switch behavior** — when HL is unreachable, should the bot:
+   (a) keep opening naked Polymarket positions (current behavior pre-Part-2)
+   (b) refuse all new poly trades (recommended once Part 2 is live)
+   (c) configurable via `HL_REQUIRED_FOR_POLY` env var
+   Confirm the default before shipping.
+4. **HL daily loss limit** — confirm `DAILY_HL_LOSS_LIMIT_USDC=5` is
+   reasonable given current bankroll.
+
+================================================================================
+
 ## Future work (out of scope here)
 
-- Cross-venue inventory rebalancing (when one side keeps winning).
-- Hyperliquid delta hedge for residual binary exposure.
-- Multi-asset (ETH, SOL).
-- True 2-leg execution mode for when Predict ships on Sui mainnet —
+- **Multi-asset support** — extend the matching layer (and HL hedge) to
+  ETH and SOL once Predict adds those underlyings. Math is unchanged.
+- **Dynamic hedge rebalancing** — for longer expiries, delta drift becomes
+  meaningful. Add a periodic loop that adjusts open HL positions when delta
+  has drifted >X%.
+- **Cross-venue inventory rebalancing** — when one side keeps winning, the
+  other gets imbalanced. Periodic sweep to rebalance.
+- **True 2-leg execution mode** for when Predict ships on Sui mainnet —
   the existing `if (action === 'live_executed' && live)` block already
-  handles the Predict leg; just need a sanity test that both fire on the
-  same signal once both networks are live.
-- Telegram/email alerting for kill-switch events + daily-limit triggers
+  handles the Predict leg; needs notional-matching with the Poly leg. With
+  the HL hedge in place, mismatched legs no longer cause directional risk.
+- **Telegram/email alerting** for kill-switch events + daily-limit triggers
   (the brief explicitly forbids posting to chat platforms without user
   authorization, so this needs a yes from the user first).
 
-Good luck.
+Good luck. The user's framing for the demo, post-Part-2:
+
+> "SVX captures pricing disagreements between Predict and Polymarket and
+> hedges the residual on Hyperliquid. Three venues, one bot, pure-vol PnL.
+> The strategy is delta-neutral by construction — we don't care which way
+> BTC moves, we only care whether the spread we observed was real."

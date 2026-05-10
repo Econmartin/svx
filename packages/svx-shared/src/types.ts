@@ -125,6 +125,19 @@ export interface TradeRecord {
   settled: boolean;
   payoutUsdc?: number;
   pnlUsdc?: number;
+  /** Underlying spot at settlement. Null until settled. */
+  settlementPrice?: number;
+  /** When settlement was detected by the bot (ms). */
+  settledAtMs?: number;
+  /** Captured at execution time — used by the analytics/calibration page. */
+  msToExpiryAtExec?: number;
+  predictProbAtExec?: number;
+  polyAskAtExec?: number;
+  predictIvAtExec?: number;
+  /** Spread (probability points) the signal claimed at execution. */
+  edgeAtExec?: number;
+  /** Tx digest of the on-chain redeem call (live mode only, after settle). */
+  redeemTxDigest?: string;
 }
 
 export interface RiskDecision {

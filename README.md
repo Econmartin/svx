@@ -2,7 +2,9 @@
 
 **A fully-automated cross-venue volatility-arbitrage bot for [DeepBook Predict](https://docs.sui.io/onchain-finance/deepbook-predict/).**
 
-SVX prices every BTC binary on Predict's continuous SVI surface, compares to Polymarket's discrete-strike order books, and executes the spread when it exceeds threshold. Built for the Sui Overflow 2026 DeepBook Predict track.
+SVX prices every BTC binary on Predict's continuous SVI surface, compares to Polymarket's discrete-strike order books, and executes the side that's mispriced. Built for the Sui Overflow 2026 DeepBook Predict track.
+
+Execution is live on Polymarket (Polygon mainnet) and ready to flip on Predict the moment Predict ships on Sui mainnet. The bot detects UMA settlement, auto-redeems winning shares back to pUSD, and tracks realized PnL end-to-end.
 
 ## Why this project
 
@@ -10,7 +12,8 @@ The DeepBook Predict problem statement explicitly names cross-venue vol-arb betw
 
 - **Single-operator, no users, no pooled funds.** It trades its own balance. No collective investment scheme, no tokenized shares, no securities-law exposure.
 - **Math-grade pricing.** Raw SVI evaluator + Black-Scholes binary pricing + Newton/bisection IV inversion, validated against Python `math.erf`-based reference vectors.
-- **Mainnet-day-one ready.** Address swap is a single config change in `svx-shared/addresses.ts`; runbook covers capital ramp, RPC reliability, MEV considerations, and rollback.
+- **Live on mainnet (Polymarket leg).** Trades on the Polygon mainnet Polymarket CLOB through the operator's own wallet, with auto-redeem of winning shares once UMA resolves. Predict leg stays paper until Sui mainnet ships — that's a single config change.
+- **Delta-neutral by construction (Hyperliquid hedge).** Every Polymarket fill opens a delta-sized BTC perp hedge on Hyperliquid. The hedge closes on the same poll loop that detects settlement. Three venues, one bot, pure-vol PnL.
 
 ## Architecture
 
@@ -129,8 +132,9 @@ docs/
 ## Track-required notes
 
 - **Predict integration.** Composes with `predict::create_manager`, `predict::mint`, `predict::redeem`, `predict::redeem_permissionless` on the testnet `predict-testnet-4-16` deployment. Package + object IDs pinned in [packages/svx-shared/src/addresses.ts](packages/svx-shared/src/addresses.ts).
+- **Polymarket integration.** Live on Polygon mainnet — submits Yes/No outcome buys via the [Polymarket CLOB v2 SDK](https://github.com/Polymarket/clob-client), polls gamma for UMA resolution, redeems winning shares via the NegRiskAdapter / ConditionalTokens contracts. Wallet operations are documented in [docs/mainnet-runbook.md](docs/mainnet-runbook.md).
 - **Submission category.** Bot/keeper. Not a vault, not a consumer app, not a tokenized share product.
-- **Mainnet-day-one claim.** The bot has been run continuously in paper-trading mode against live testnet data. Mainnet swap is one config change documented in [docs/mainnet-runbook.md](docs/mainnet-runbook.md).
+- **Mainnet-day-one claim.** Polymarket leg is mainnet today. The Sui leg flips with a single config change documented in [docs/mainnet-runbook.md](docs/mainnet-runbook.md) once Predict ships on Sui mainnet.
 
 ## License
 

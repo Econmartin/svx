@@ -52,6 +52,14 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     // ledger is empty.
     const realizedAllTime = deps.ledger.realizedPnlSince(0);
     const realized24h = deps.ledger.realizedPnlSince(since24h);
+    // Polymarket-leg PnL — separate stream because the cost asset is pUSD,
+    // not dUSDC. Populated by the settlement-poll loop as UMA resolves.
+    const realizedPolyAllTime = deps.ledger.realizedPolyPnlSince(0);
+    const realizedPoly24h = deps.ledger.realizedPolyPnlSince(since24h);
+    // Hyperliquid hedge leg — net of the perp position PnL on each closed trade.
+    const realizedHlAllTime = deps.ledger.realizedHlPnlSince(0);
+    const realizedHl24h = deps.ledger.realizedHlPnlSince(since24h);
+    const openHlExposureUsdc = deps.ledger.openHlExposureUsdc();
     const pause = deps.ledger.getPause();
     res.json({
       startedAtMs: deps.state.startedAtMs,
@@ -86,7 +94,34 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       polyPusdBalance: deps.state.polyBalance?.pUsd ?? null,
       polyGasPol: deps.state.polyBalance?.gasPol ?? null,
       polyBalanceAtMs: deps.state.polyBalance?.updatedAtMs ?? null,
+      // Polymarket realized PnL (pUSD), separate from dUSDC. Populated as
+      // markets resolve on UMA. Daily-loss limit fires when 24h ≤ -dailyPolyLossLimitUsdc.
+      realizedPolyPnlUsdc: realizedPolyAllTime,
+      realizedPolyPnl24hUsdc: realizedPoly24h,
+      dailyPolyLossLimitUsdc: deps.cfg.dailyPolyLossLimitUsdc,
+      // Hyperliquid hedge state.
+      hlExecutionEnabled: deps.cfg.hlExecutionEnabled,
+      hlNetwork: deps.cfg.hlNetwork,
+      openHlExposureUsdc,
+      realizedHlPnlUsdc: realizedHlAllTime,
+      realizedHlPnl24hUsdc: realizedHl24h,
+      dailyHlLossLimitUsdc: deps.cfg.dailyHlLossLimitUsdc,
+      // Combined cross-venue PnL — what the demo headline should reference.
+      // Poly PnL is pUSD, HL PnL is USDC; both stable-pegged → safe to add.
+      realizedCombinedPnlUsdc: realizedPolyAllTime + realizedHlAllTime,
+      realizedCombinedPnl24hUsdc: realizedPoly24h + realizedHl24h,
     });
+  });
+
+  /** Open Hyperliquid hedges — for the dashboard's HL section. */
+  app.get('/positions/hl-open', (_req, res) => {
+    res.json(deps.ledger.openHlHedges());
+  });
+
+  /** Closed Polymarket positions — both winners (redeemed) and losers. */
+  app.get('/positions/closed-poly', (req, res) => {
+    const limit = clampInt(req.query.limit, 1, 5000, 500);
+    res.json(deps.ledger.closedPolyTrades(limit));
   });
 
   app.get('/signals', (req, res) => {

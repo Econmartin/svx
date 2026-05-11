@@ -47,6 +47,11 @@ import {
   parsePolyFillResponse,
   tryCreatePolymarketExecClient,
 } from './exec/polymarket-client.js';
+import {
+  HyperliquidExecClient,
+  tryCreateHyperliquidExecClient,
+} from './exec/hyperliquid-client.js';
+import { hedgeSizeForPolyFill } from './pricing/binary-delta.js';
 import { startApiServer } from './api/server.js';
 import { log } from './util/log.js';
 
@@ -77,10 +82,14 @@ interface BotState {
   };
   /** Last time we refreshed the Polymarket balance from on-chain. */
   lastPolyBalanceAtMs: number;
+  /** Last time we polled gamma for Polymarket settlement / ran auto-redeem.
+   *  UMA resolves markets hours after expiry, so 5-min cadence is plenty. */
+  lastPolySettlementCheckMs: number;
 }
 
 const MANAGER_BALANCE_REFRESH_MS = 30_000;
 const POLY_BALANCE_REFRESH_MS = 60_000;
+const POLY_SETTLEMENT_CHECK_INTERVAL_MS = 5 * 60_000; // every 5 minutes — UMA resolution takes hours, no benefit polling faster
 
 const PRUNE_INTERVAL_MS = 6 * 3600_000; // every 6 hours
 const RETENTION = {
@@ -114,6 +123,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastManagerBalanceAtMs: 0,
     lastPruneAtMs: 0,
     lastPolyBalanceAtMs: 0,
+    lastPolySettlementCheckMs: 0,
   };
 
   // If we have an operator key + manager record, read the real wallet balance
@@ -193,6 +203,16 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   // submission downstream; balance/orderbook reads always work so the
   // dashboard can surface the wallet state ahead of going live.
   const polyExec = tryCreatePolymarketExecClient(cfg);
+  const hlExec = tryCreateHyperliquidExecClient();
+  if (hlExec) {
+    log.info(cfg.hlExecutionEnabled ? 'svx.hl.exec_enabled' : 'svx.hl.read_only', {
+      address: hlExec.address,
+      network: hlExec.endpoints.network,
+      hedgeAsset: cfg.hlHedgeAsset,
+      maxHlPerTradeUsdc: cfg.maxHlPerTradeUsdc,
+      maxHlOpenUsdc: cfg.maxHlOpenUsdc,
+    });
+  }
   if (polyExec) {
     log.info(cfg.polyExecutionEnabled ? 'svx.poly.exec_enabled' : 'svx.poly.read_only', {
       address: polyExec.address,
@@ -238,6 +258,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
         poly,
         live,
         polyExec: polyExec ?? undefined,
+        hlExec: hlExec ?? undefined,
       });
     } catch (e) {
       log.error('svx.loop.error', { err: errMsg(e), stack: errStack(e) });
@@ -284,10 +305,11 @@ interface LoopDeps {
   poly: PolymarketClient;
   live?: LiveContext;
   polyExec?: PolymarketExecClient;
+  hlExec?: HyperliquidExecClient;
 }
 
 export async function runOnce(deps: LoopDeps): Promise<void> {
-  const { cfg, state, ledger, risk, predict, poly, live, polyExec } = deps;
+  const { cfg, state, ledger, risk, predict, poly, live, polyExec, hlExec } = deps;
 
   // 1. Pull active Predict oracles + Polymarket strike markets in parallel.
   const [oracles, polyMarkets] = await Promise.all([
@@ -303,6 +325,23 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
   // 2. Reconcile settlements first — pull a fresh oracle list and settle any
   // newly-settled oracles in the local ledger.
   await reconcileSettlements(predict, ledger, live);
+
+  // 2b. Reconcile Polymarket settlements — UMA resolves markets hours after
+  // expiry, so we only poll every POLY_SETTLEMENT_CHECK_INTERVAL_MS.
+  // Detect resolved markets, mark trades settled w/ payout+PnL, and submit
+  // CTF redeem txs for winning positions. Runs in BOTH paper-Predict /
+  // live-Poly mode (current state) and full-live mode (future).
+  if (
+    polyExec &&
+    Date.now() - state.lastPolySettlementCheckMs > POLY_SETTLEMENT_CHECK_INTERVAL_MS
+  ) {
+    try {
+      await reconcilePolySettlements(poly, polyExec, ledger, hlExec);
+    } catch (e) {
+      log.warn('svx.poly.settlement_loop_error', { err: errMsg(e) });
+    }
+    state.lastPolySettlementCheckMs = Date.now();
+  }
 
   // 3. Match by strike grid only — the expiry filter runs in step 4 and is
   // recorded in the signal log so we can see the full consideration set.
@@ -581,6 +620,88 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         }
       }
 
+      // === Hyperliquid delta hedge (Part 2) ===
+      // After a successful Polymarket fill, open a delta-sized BTC perp
+      // hedge on Hyperliquid. The hedge size is derived from binary Δ
+      // evaluated at the snapshot's spot, strike, IV, and TTM. The side is
+      // OPPOSITE of the directional exposure introduced by the Poly buy.
+      let hlLeg:
+        | {
+            asset: string;
+            orderId: string;
+            size: number;
+            side: 'long' | 'short';
+            openPrice: number;
+          }
+        | undefined;
+      if (cfg.hlExecutionEnabled && hlExec && polyLeg) {
+        const ttmYears = Math.max(
+          1e-6,
+          (oracleSnap.expiryMs - Date.now()) / (365.25 * 24 * 3600 * 1000),
+        );
+        const hedge = hedgeSizeForPolyFill({
+          spot: oracleSnap.spot,
+          strike: polySnap.strike,
+          ivAnnual: spread.predictIv,
+          ttmYears,
+          shares: polyLeg.fillResult.filledShares ?? 0,
+          polyOutcome: polyLeg.outcome,
+        });
+        const hlRisk = risk.checkHl({
+          notionalUsdc: hedge.usdNotional,
+          openHlExposureUsdc: ledger.openHlExposureUsdc(),
+        });
+        if (!hlRisk.ok) {
+          log.warn('svx.hl.risk_blocked', {
+            reason: hlRisk.reason,
+            usdNotional: hedge.usdNotional,
+            btcSize: hedge.btcSize,
+          });
+          if (cfg.hlRequiredForPoly) {
+            // Strict mode: skip the trade entirely. Poly leg is already
+            // submitted — we accept the directional exposure and log it.
+            log.error('svx.hl.skipped_naked_poly', {
+              reason: 'risk_blocked, hlRequiredForPoly=true',
+              polyOrderId: polyLeg.fillResult.orderId,
+            });
+          }
+        } else if (hedge.btcSize > 0) {
+          try {
+            const fill = await hlExec.openMarketPerp({
+              asset: cfg.hlHedgeAsset,
+              side: hedge.hedgeSide,
+              size: hedge.btcSize,
+            });
+            if (fill.status === 'filled' && fill.orderId && fill.fillPrice > 0) {
+              hlLeg = {
+                asset: cfg.hlHedgeAsset,
+                orderId: fill.orderId,
+                size: fill.filledSize,
+                side: hedge.hedgeSide,
+                openPrice: fill.fillPrice,
+              };
+              log.info('svx.hl.opened', {
+                asset: cfg.hlHedgeAsset,
+                side: hedge.hedgeSide,
+                size: fill.filledSize,
+                price: fill.fillPrice,
+                orderId: fill.orderId,
+              });
+            } else {
+              log.warn('svx.hl.open_partial_or_rejected', {
+                status: fill.status,
+                filledSize: fill.filledSize,
+              });
+            }
+          } catch (e) {
+            log.error('svx.hl.open_failed', { err: errMsg(e), stack: errStack(e) });
+            // Don't pause — naked poly is the original state. Operator
+            // sees the warning + can flip hlRequiredForPoly if they want
+            // strict behavior.
+          }
+        }
+      }
+
       if (action === 'live_executed' && live) {
         const tx = buildMintTx({
           oracleId: oracleSnap.oracleId,
@@ -611,7 +732,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         state.navUsdc = await readManagerBalance(live);
       }
 
-      ledger.insertTrade({
+      const tradeId = ledger.insertTrade({
         signalId: sigId,
         timestampMs: signal.timestampMs,
         mode,
@@ -645,6 +766,11 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         polyTxHash: polyLeg?.fillResult.txHash,
         polyStatus: polyLeg?.fillResult.status,
       });
+      // Persist the HL leg onto the same trade row. Separate UPDATE so the
+      // insertTrade signature stays compatible with the existing column set.
+      if (hlLeg) {
+        ledger.recordHlLeg(tradeId, { ...hlLeg, status: 'open' });
+      }
       if (mode === 'paper') {
         state.navUsdc -= signalCost;
       }
@@ -703,6 +829,144 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       ledger.vacuum();
     }
     state.lastPruneAtMs = Date.now();
+  }
+}
+
+/**
+ * Reconcile Polymarket positions against UMA resolutions on gamma.
+ *
+ *   1. Pull unsettled poly trades; group by conditionId.
+ *   2. For each unique condition, query gamma for `closed: true` + winning
+ *      outcome.
+ *   3. For each resolved market: compute payout (= shares * 1 if won, else 0)
+ *      and PnL (= payout - poly_cost_usdc); mark settled.
+ *   4. For winning trades not yet redeemed: submit CTF redeemPositions tx
+ *      (NegRiskAdapter for multi-strike markets, standard CTF otherwise).
+ *      Best-effort — if a redeem reverts, we log + persist 'failed' so the
+ *      operator can manually clear it.
+ */
+export async function reconcilePolySettlements(
+  poly: PolymarketClient,
+  polyExec: PolymarketExecClient,
+  ledger: LedgerStore,
+  hlExec?: HyperliquidExecClient,
+): Promise<void> {
+  const unsettled = ledger.unsettledPolyTrades();
+  if (unsettled.length === 0) return;
+
+  // Group by conditionId so we hit gamma at most once per market.
+  const byCondition = new Map<string, typeof unsettled>();
+  for (const t of unsettled) {
+    if (!t.polyConditionId) continue;
+    const list = byCondition.get(t.polyConditionId) ?? [];
+    list.push(t);
+    byCondition.set(t.polyConditionId, list);
+  }
+
+  for (const [conditionId, trades] of byCondition) {
+    const resolution = await poly.getMarketResolution(conditionId);
+    if (!resolution || !resolution.closed || resolution.winningOutcome == null) {
+      log.debug('svx.poly.unresolved', { conditionId: conditionId.slice(0, 10), count: trades.length });
+      continue;
+    }
+
+    const settledAt = resolution.resolvedAtMs ?? Date.now();
+    for (const trade of trades) {
+      if (trade.polyFilledShares == null || trade.polyCostUsdc == null || !trade.polyOutcome) {
+        log.warn('svx.poly.settle.skip_malformed', { tradeId: trade.id });
+        continue;
+      }
+      const won = trade.polyOutcome === resolution.winningOutcome;
+      const payout = won ? trade.polyFilledShares : 0;
+      const pnl = payout - trade.polyCostUsdc;
+      ledger.markPolySettled(trade.id, resolution.winningOutcome, payout, pnl, settledAt);
+      log.info('svx.poly.settled', {
+        tradeId: trade.id,
+        conditionId: conditionId.slice(0, 10),
+        winningOutcome: resolution.winningOutcome,
+        ourOutcome: trade.polyOutcome,
+        won,
+        payoutUsdc: payout,
+        pnlUsdc: pnl.toFixed(4),
+      });
+
+      // Close the matching HL hedge on the same trade row, if present. We do
+      // this synchronously here so the HL PnL gate updates within the same
+      // settlement cycle.
+      if (
+        hlExec &&
+        trade.hlStatus === 'open' &&
+        trade.hlSize != null &&
+        trade.hlSide &&
+        trade.hlOpenPrice != null
+      ) {
+        try {
+          const closeFill = await hlExec.closeMarketPerp({
+            asset: trade.hlAsset ?? 'BTC',
+            originalSide: trade.hlSide,
+            size: trade.hlSize,
+          });
+          if (closeFill.status === 'rejected' || closeFill.fillPrice <= 0) {
+            log.warn('svx.hl.close_rejected', { tradeId: trade.id, raw: closeFill.raw });
+          } else {
+            const closePx = closeFill.fillPrice;
+            const hlPnl =
+              trade.hlSide === 'short'
+                ? (trade.hlOpenPrice - closePx) * trade.hlSize
+                : (closePx - trade.hlOpenPrice) * trade.hlSize;
+            // Funding paid is not yet wired — leave as 0 for v1 (sub-day
+            // expiries make it negligible). Track via a follow-up if it
+            // becomes material at scale.
+            ledger.closeHlLeg(trade.id, {
+              closePrice: closePx,
+              pnlUsdc: hlPnl,
+              fundingPaidUsdc: 0,
+              closedAtMs: Date.now(),
+            });
+            log.info('svx.hl.closed', {
+              tradeId: trade.id,
+              side: trade.hlSide,
+              size: trade.hlSize,
+              openPx: trade.hlOpenPrice,
+              closePx,
+              pnlUsdc: hlPnl.toFixed(4),
+            });
+          }
+        } catch (e) {
+          log.error('svx.hl.close_failed', { tradeId: trade.id, err: errMsg(e) });
+        }
+      }
+    }
+
+    // Redeem winning shares. Group all winners on this market into a single
+    // tx (one redeem covers the operator's full balance on the conditionId).
+    const winners = trades.filter((t) => t.polyOutcome === resolution.winningOutcome);
+    if (winners.length === 0) continue;
+    const totalShares = winners.reduce((s, t) => s + (t.polyFilledShares ?? 0), 0);
+    if (totalShares <= 0) continue;
+    try {
+      const txHash = await polyExec.redeemPolyWinnings({
+        conditionId,
+        negRisk: resolution.negRisk,
+        winningOutcome: resolution.winningOutcome,
+        shares: totalShares,
+      });
+      for (const w of winners) ledger.markPolyRedeemed(w.id, txHash, 'success');
+      log.info('svx.poly.redeem.success', {
+        conditionId: conditionId.slice(0, 10),
+        tx: txHash,
+        winnerCount: winners.length,
+        totalShares,
+      });
+    } catch (e) {
+      const err = errMsg(e);
+      for (const w of winners) ledger.markPolyRedeemed(w.id, null, 'failed');
+      log.warn('svx.poly.redeem.failed', {
+        conditionId: conditionId.slice(0, 10),
+        winnerCount: winners.length,
+        err,
+      });
+    }
   }
 }
 

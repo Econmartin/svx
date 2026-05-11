@@ -37,6 +37,13 @@ interface GammaMarket {
   liquidity?: string | number;
   active?: boolean;
   closed?: boolean;
+  /** Gamma sets this once UMA has resolved the market. */
+  closedTime?: string | null;
+  /** True for NegRisk multi-outcome events (our BTC strike markets are
+   *  typically NegRisk). Drives which adapter we call to redeem. */
+  negRisk?: boolean;
+  /** Underlying spot at resolution, when gamma surfaces it. */
+  resolvedPrice?: number | null;
 }
 
 export interface PolyStrikeMarket {
@@ -62,6 +69,30 @@ export interface PolyOrderBookSide {
   bestPrice: number;
   /** Total size at best price (in shares of the outcome token). */
   bestSize: number;
+}
+
+/**
+ * Resolution snapshot for a Polymarket market. Returned by
+ * `PolymarketClient.getMarketResolution(conditionId)` once UMA has resolved
+ * the market.
+ *
+ * `winningOutcome` matches the conventional Yes/No labeling — Yes = "Bitcoin
+ * above $X at expiry" for our markets. `null` until the market closes.
+ *
+ * `negRisk` is true for Polymarket's NegRisk markets (typical for multi-strike
+ * BTC events): redemption goes through `NegRiskAdapter.redeemPositions`
+ * instead of the standard CTF flow. Default false when gamma omits the field.
+ */
+export interface PolyMarketResolution {
+  conditionId: string;
+  closed: boolean;
+  winningOutcome: 'yes' | 'no' | null;
+  /** When gamma reports the market as closed (ms epoch). */
+  resolvedAtMs?: number;
+  /** Underlying spot at resolution, if gamma exposes it. */
+  resolvedPrice?: number;
+  /** True for NegRisk multi-outcome events (our BTC strike markets). */
+  negRisk: boolean;
 }
 
 export interface PolyOrderBook {
@@ -148,6 +179,26 @@ export class PolymarketClient {
     return out;
   }
 
+  /**
+   * Fetch resolution status for a single market by condition ID. UMA resolves
+   * Polymarket markets hours after expiry; gamma's `closed: true` is the
+   * signal we wait on. Returns null on transient fetch error (caller retries
+   * next loop iteration) or when no market matches the conditionId.
+   */
+  async getMarketResolution(conditionId: string): Promise<PolyMarketResolution | null> {
+    try {
+      const { data } = await this.gamma.get<GammaMarket | GammaMarket[]>('/markets', {
+        params: { condition_ids: conditionId, limit: 1 },
+      });
+      const market = Array.isArray(data) ? data[0] : data;
+      if (!market) return null;
+      return parseMarketResolution(market);
+    } catch (e) {
+      log.warn('polymarket.getMarketResolution failed', { conditionId, err: errMsg(e) });
+      return null;
+    }
+  }
+
   /** Fetch a single CLOB order book for one outcome token. */
   async orderBook(conditionId: string, tokenId: string): Promise<PolyOrderBook> {
     const [bookRes, midRes] = await Promise.all([
@@ -226,6 +277,51 @@ function parseGammaMarket(m: GammaMarket): PolyStrikeMarket | null {
     noMid: outcomePrices[noIdx],
     volume24hr: Number(m.volume24hr ?? 0),
     liquidity: Number(m.liquidity ?? 0),
+  };
+}
+
+/**
+ * Convert a raw gamma market response into a normalized resolution snapshot.
+ * Exported for tests — production code paths call it through
+ * `PolymarketClient.getMarketResolution`.
+ *
+ * Outcome detection: gamma's `outcomePrices` is a JSON array parallel to
+ * `outcomes` ("['Yes','No']"). Once UMA resolves, exactly one entry becomes
+ * "1" / "1.0" and the other "0" / "0.0". We pick whichever is closer to 1.
+ *
+ * `negRisk` defaults to false when the field is absent — the gamma schema
+ * sometimes omits it for older markets. Safe because the standard CTF
+ * redeem path handles both cases; the NegRisk path requires the flag.
+ */
+export function parseMarketResolution(market: GammaMarket): PolyMarketResolution {
+  const closed = market.closed === true;
+  let winningOutcome: 'yes' | 'no' | null = null;
+  try {
+    const outcomes: string[] = JSON.parse(market.outcomes).map((s: string) => s.toLowerCase());
+    const prices: number[] = JSON.parse(market.outcomePrices).map(Number);
+    if (closed && outcomes.length === prices.length && outcomes.length >= 2) {
+      const yesIdx = outcomes.findIndex((o) => o === 'yes');
+      const noIdx = outcomes.findIndex((o) => o === 'no');
+      if (yesIdx >= 0 && noIdx >= 0) {
+        const yesP = prices[yesIdx] ?? 0;
+        const noP = prices[noIdx] ?? 0;
+        if (yesP >= 0.9 && noP <= 0.1) winningOutcome = 'yes';
+        else if (noP >= 0.9 && yesP <= 0.1) winningOutcome = 'no';
+        // else: gamma may show fractional probabilities during the
+        // dispute window — treat as not-yet-resolved.
+      }
+    }
+  } catch {
+    /* malformed outcomes/prices — treat as unresolved */
+  }
+  const resolvedAtMs = market.closedTime ? Date.parse(market.closedTime) : undefined;
+  return {
+    conditionId: market.conditionId,
+    closed: closed && winningOutcome !== null,
+    winningOutcome,
+    resolvedAtMs: isFinite(resolvedAtMs ?? NaN) ? resolvedAtMs : undefined,
+    resolvedPrice: market.resolvedPrice ?? undefined,
+    negRisk: market.negRisk === true,
   };
 }
 

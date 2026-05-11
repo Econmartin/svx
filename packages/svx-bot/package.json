@@ -21,11 +21,16 @@
     "setup-poly-wallet": "tsx scripts/setup-poly-wallet.ts",
     "verify-poly-wallet": "tsx scripts/verify-poly-wallet.ts",
     "wrap-usdce-to-pusd": "tsx scripts/wrap-usdce-to-pusd.ts",
-    "force-poly-trade": "tsx scripts/force-poly-trade.ts"
+    "force-poly-trade": "tsx scripts/force-poly-trade.ts",
+    "generate-hl-wallet": "tsx scripts/generate-hl-wallet.ts",
+    "setup-hl-account": "tsx scripts/setup-hl-account.ts",
+    "verify-hl-wallet": "tsx scripts/verify-hl-wallet.ts",
+    "force-hl-trade": "tsx scripts/force-hl-trade.ts"
   },
   "dependencies": {
     "@mysten/bcs": "^1.1.0",
     "@mysten/sui": "^1.18.0",
+    "@nktkas/hyperliquid": "^0.32.2",
     "@polymarket/clob-client-v2": "^1.0.6",
     "@types/js-yaml": "^4.0.9",
     "axios": "^1.7.9",

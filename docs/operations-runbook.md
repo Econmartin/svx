@@ -3,6 +3,11 @@
 How to run, pause, debug, and recover. Aimed at someone who has never seen
 the bot before.
 
+For operations specific to the **live Polymarket-mainnet bot** (top-up pUSD
+from Kraken, kill-switch, log triage, stuck redeems), see
+[mainnet-runbook.md](mainnet-runbook.md) Part 1. This file covers the
+local/dev paper-trading flow and the Sui-side primitives.
+
 ## Starting the bot
 
 ### Paper mode (safe default)

@@ -73,7 +73,16 @@ const Schema = z.object({
   maxSviStalenessSec: z.number().positive().default(300),
   polyMaxBidaskVolPts: z.number().positive().default(0.05),
   polyMinVolume24hUsd: z.number().nonnegative().default(1000),
-  expiryToleranceSec: z.number().nonnegative().default(3600),
+  /**
+   * Maximum |Predict-expiry − Polymarket-expiry| we'll consider. Pre-2026-05-11
+   * this was 3600s (1h) and served as the primary expiry-match gate. Now that
+   * `signal/spread.ts` reprices Predict's binary at the Polymarket expiry
+   * (flat-vol-across-expiries), this is just a sanity cap to avoid
+   * extrapolating a 15-min oracle's IV to a 30-day binary — 14 days is
+   * generous enough to cover daily + weekly Polymarket markets without
+   * silly extrapolation.
+   */
+  expiryToleranceSec: z.number().nonnegative().default(14 * 24 * 3600),
   circuitBreakerLosses: z.number().int().positive().default(5),
   polymarketGammaBase: z.string().url().default('https://gamma-api.polymarket.com'),
   polymarketClobBase: z.string().url().default('https://clob.polymarket.com'),
@@ -159,7 +168,7 @@ export function loadConfig(): SvxConfig {
     maxSviStalenessSec: parseNum(process.env.MAX_SVI_STALENESS_SEC, 300),
     polyMaxBidaskVolPts: parseNum(process.env.POLY_MAX_BIDASK_VOL_PTS, 0.05),
     polyMinVolume24hUsd: parseNum(process.env.POLY_MIN_24H_VOLUME_USD, 1000),
-    expiryToleranceSec: parseNum(process.env.EXPIRY_TOLERANCE_SEC, 3600),
+    expiryToleranceSec: parseNum(process.env.EXPIRY_TOLERANCE_SEC, 14 * 24 * 3600),
     circuitBreakerLosses: parseNum(process.env.CIRCUIT_BREAKER_LOSSES, 5),
     polymarketGammaBase: process.env.POLYMARKET_API_BASE ?? 'https://gamma-api.polymarket.com',
     polymarketClobBase: process.env.POLYMARKET_CLOB_BASE ?? 'https://clob.polymarket.com',

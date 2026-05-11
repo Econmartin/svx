@@ -27,6 +27,9 @@ export function applyFilters(input: FilterInput): FilterReason | null {
   if (p.yesAsk - p.yesBid > cfg.polyMaxBidaskVolPts) return 'poly_wide_spread';
   if (p.volume24hUsd < cfg.polyMinVolume24hUsd) return 'poly_low_volume';
 
+  // Expiry sanity cap (NOT the primary match gate — spread.ts reprices the
+  // SVI surface at the Polymarket expiry). Default 14d is generous; this just
+  // refuses to extrapolate a 15-min oracle's IV to a year-out binary.
   if (Math.abs(expiryDeltaMs) > cfg.expiryToleranceSec * 1000) return 'expiry_mismatch';
 
   // Settled oracle = no live trade.

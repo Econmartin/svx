@@ -25,6 +25,7 @@ import {
 import { usePolling } from '@/lib/usePolling';
 import { StatRow } from '@/components/StatRow';
 import { StatusBadge } from '@/components/StatusBadge';
+import { HealthPanel } from '@/components/HealthPanel';
 
 export default function MainnetOverviewPage() {
   const fetchStatus = useCallback(() => apiMainnet.status(), []);
@@ -79,6 +80,8 @@ export default function MainnetOverviewPage() {
           Could not reach the mainnet bot API: {statusError}.
         </div>
       )}
+
+      <HealthPanel status={status} />
 
       <StatRow
         stats={[

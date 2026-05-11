@@ -31,6 +31,19 @@ interface ApiDeps {
       gasPol: number;
       updatedAtMs: number;
     };
+    /** Hyperliquid perp margin balance — populated by the HL_BALANCE_REFRESH
+     *  loop when hlExec is configured. Drives the dashboard health panel. */
+    hlBalance?: {
+      address: `0x${string}`;
+      network: 'mainnet' | 'testnet';
+      accountValueUsdc: number;
+      withdrawableUsdc: number;
+      updatedAtMs: number;
+    };
+    /** When the bot last ATTEMPTED a Polymarket order (success or fail). */
+    lastPolyAttemptAtMs?: number;
+    /** When the bot last ATTEMPTED an HL hedge (success or fail). */
+    lastHlAttemptAtMs?: number;
   };
   predict: PredictClient;
   addresses: PredictAddresses;
@@ -102,10 +115,29 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       // Hyperliquid hedge state.
       hlExecutionEnabled: deps.cfg.hlExecutionEnabled,
       hlNetwork: deps.cfg.hlNetwork,
+      hlHedgeAsset: deps.cfg.hlHedgeAsset,
+      hlAddress: deps.state.hlBalance?.address ?? null,
+      hlAccountValueUsdc: deps.state.hlBalance?.accountValueUsdc ?? null,
+      hlWithdrawableUsdc: deps.state.hlBalance?.withdrawableUsdc ?? null,
+      hlBalanceAtMs: deps.state.hlBalance?.updatedAtMs ?? null,
+      maxHlPerTradeUsdc: deps.cfg.maxHlPerTradeUsdc,
+      maxHlOpenUsdc: deps.cfg.maxHlOpenUsdc,
+      hlRequiredForPoly: deps.cfg.hlRequiredForPoly,
       openHlExposureUsdc,
       realizedHlPnlUsdc: realizedHlAllTime,
       realizedHlPnl24hUsdc: realizedHl24h,
       dailyHlLossLimitUsdc: deps.cfg.dailyHlLossLimitUsdc,
+      // Last attempt timestamps — null if bot has never tried this leg since
+      // boot. Lets the health panel distinguish "configured but no chance
+      // yet" vs "tried recently".
+      lastPolyAttemptAtMs: deps.state.lastPolyAttemptAtMs ?? null,
+      lastHlAttemptAtMs: deps.state.lastHlAttemptAtMs ?? null,
+      // Risk thresholds + recent activity gates (for the dashboard's
+      // "filter reasons" section, future use).
+      maxPolyPositionUsdc: deps.cfg.maxPolyPositionUsdc,
+      maxOpenPolyPositions: deps.cfg.maxOpenPolyPositions,
+      polyMinBookDepthShares: deps.cfg.polyMinBookDepthShares,
+      spreadThreshold: deps.cfg.spreadThreshold,
       // Combined cross-venue PnL — what the demo headline should reference.
       // Poly PnL is pUSD, HL PnL is USDC; both stable-pegged → safe to add.
       realizedCombinedPnlUsdc: realizedPolyAllTime + realizedHlAllTime,

@@ -178,11 +178,18 @@ Polymarket fill block.
 ## Cross-venue practical limits
 
 DeepBook Predict's testnet runs **rolling 15-minute BTC oracles**. Polymarket's
-BTC binary markets typically expire **end-of-day** or **end-of-week**. With
-the default ±1h matching tolerance, signal opportunities therefore cluster
-around Polymarket's expiry hour (e.g. 16:00 UTC daily for the "Bitcoin above
-___ on <date>?" series).
+BTC binary markets span intraday, end-of-day, and end-of-week expiries. The
+two venues don't share expiries — Predict's 15-min binary at the same strike
+as a Polymarket end-of-day binary is pricing a different probability.
 
-This is a feature of the venue mismatch, not a bug in the bot. As Predict
-extends to longer-dated oracles or Polymarket adds intra-day markets, the
-signal universe expands automatically — no code changes needed.
+**Cross-expiry repricing (2026-05-11):** the spread computation extracts
+Predict's annualized IV from the SVI surface at the matched strike
+(`σ = √(w(k) / T_oracle)`) and reprices the binary at the Polymarket expiry
+(`w_poly = σ² · T_poly`, `predictUp = N(d2)`). This is a flat-vol-across-
+expiries approximation — standard for short-dated and reasonably accurate
+when the term structure of vol is stable.
+
+After this fix, signal opportunities expand far beyond the ±1h overlap
+window. The `expiryToleranceSec` config (default 14 days) is now a sanity
+cap on extrapolation rather than the primary gate. Polymarket's intraday
+markets (added in the same change) further widen the trading window.

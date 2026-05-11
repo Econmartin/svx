@@ -165,13 +165,25 @@ export class PolymarketClient {
     }
 
     const out: PolyStrikeMarket[] = [];
+    const seen = new Set<string>();
     for (const ev of events) {
       const t = (ev.title ?? '').toLowerCase();
-      if (!(t.includes('bitcoin above') || t.includes('btc above'))) continue;
+      // Loose filter at event level — any BTC-related event is in. The
+      // strict per-market regex below rejects events whose questions don't
+      // parse a strike (e.g. "Will BTC top ETH this month"). This change
+      // (May 2026) lets us pick up Polymarket's intraday BTC strike markets
+      // ("Bitcoin above $X by 4pm ET today") which were previously excluded
+      // by the "bitcoin above" title check.
+      if (!t.includes('bitcoin') && !t.includes('btc')) continue;
       for (const m of ev.markets ?? []) {
         if (m.closed === true || m.active === false) continue;
         const parsed = parseGammaMarket(m);
-        if (parsed) out.push(parsed);
+        if (!parsed) continue;
+        // Dedup — the same conditionId can appear under multiple events
+        // when Polymarket cross-lists or groups markets.
+        if (seen.has(parsed.conditionId)) continue;
+        seen.add(parsed.conditionId);
+        out.push(parsed);
       }
     }
     this.eventsCache = { fetchedAtMs: now, data: out };

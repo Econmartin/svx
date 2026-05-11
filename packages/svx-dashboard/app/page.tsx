@@ -1,304 +1,399 @@
 'use client';
 
 import { useCallback } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { api, formatPct, formatUsdc, formatRelative, type TradeRecord } from '@/lib/api';
+import { useApiClient, useNetwork } from '@/lib/network-context';
+import { formatPct, formatUsdc, formatRelative, type TradeRecord } from '@/lib/api';
 import { usePolling } from '@/lib/usePolling';
 import { StatRow } from '@/components/StatRow';
 import { StatusBadge } from '@/components/StatusBadge';
+import { HealthPanel } from '@/components/HealthPanel';
+import { PnlChart } from '@/components/PnlChart';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { ExternalLink } from 'lucide-react';
 
 export default function OverviewPage() {
-  const fetchStatus = useCallback(() => api.status(), []);
-  const fetchClosed = useCallback(() => api.positionsClosed(500), []);
-  const fetchSignals = useCallback(() => api.signals(20), []);
-  const fetchOpen = useCallback(() => api.positionsOpen(), []);
+  const client = useApiClient();
+  const { network } = useNetwork();
+  const isMainnet = network === 'mainnet';
+
+  const fetchStatus = useCallback(() => client.status(), [client]);
+  const fetchClosed = useCallback(() => client.positionsClosed(500), [client]);
+  const fetchClosedPoly = useCallback(
+    () => (isMainnet ? client.positionsClosedPoly(500) : Promise.resolve([])),
+    [client, isMainnet],
+  );
+  const fetchSignals = useCallback(() => client.signals(15), [client]);
+  const fetchOpen = useCallback(() => client.positionsOpen(), [client]);
 
   const { data: status, error: statusError } = usePolling(fetchStatus, 10_000);
   const { data: closed } = usePolling(fetchClosed, 30_000);
+  const { data: closedPoly } = usePolling(fetchClosedPoly, 30_000);
   const { data: recentSignals } = usePolling(fetchSignals, 5_000);
   const { data: open } = usePolling(fetchOpen, 10_000);
 
-  // Build a cumulative PnL series from closed trades.
-  let cumPnl = 0;
-  const pnlSeries =
-    (closed ?? [])
-      .slice()
-      .sort((a, b) => a.timestampMs - b.timestampMs)
-      .map((t) => {
-        cumPnl += t.pnlUsdc ?? 0;
-        return { ts: t.timestampMs, pnl: cumPnl };
-      }) ?? [];
+  // Pick the right "closed" stream depending on view:
+  // - Mainnet: closed Poly trades (mainnet bot is paper-Predict, no Sui PnL)
+  // - Testnet: settled Sui trades
+  const closedForChart = isMainnet ? closedPoly ?? [] : closed ?? [];
 
-  const wins = (closed ?? []).filter((t) => (t.pnlUsdc ?? 0) > 0).length;
-  const winRate = closed && closed.length > 0 ? wins / closed.length : 0;
+  const wins = closedForChart.filter((t) => combinedPnl(t, isMainnet) > 0).length;
+  const winRate = closedForChart.length > 0 ? wins / closedForChart.length : 0;
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-wrap items-start gap-4 justify-between">
         <div>
           <h1 className="text-2xl font-semibold flex items-center gap-3">
             SVX Overview
-            {status?.instanceLabel && (
-              <span
-                className={`text-xs uppercase tracking-wider px-2 py-0.5 rounded font-mono ${
-                  status.instanceLabel === 'mainnet'
-                    ? 'bg-loss/20 text-loss border border-loss/40'
-                    : 'bg-accent/20 text-accent border border-accent/40'
-                }`}
-              >
-                {status.instanceLabel}
-              </span>
-            )}
+            <Badge variant={isMainnet ? 'mainnet' : 'testnet'} className="text-[10px]">
+              {isMainnet ? 'mainnet · real money' : 'testnet'}
+            </Badge>
           </h1>
           <p className="text-muted text-sm mt-1">
-            Cross-venue volatility arbitrage between DeepBook Predict and Polymarket BTC binaries.
+            {isMainnet
+              ? 'Polymarket execution on Polygon with delta-hedged Hyperliquid perp legs. Predict signals priced from testnet SVI surface.'
+              : 'Cross-venue vol-arb on DeepBook Predict testnet, paired with paper Polymarket signals.'}
           </p>
         </div>
         {status && (
           <StatusBadge
             paused={status.paused}
             reason={status.pauseReason}
-            live={status.liveTradingEnabled}
+            live={
+              isMainnet
+                ? !!status.polyExecutionEnabled
+                : !!status.liveTradingEnabled
+            }
           />
         )}
       </header>
 
       {statusError && (
-        <div className="rounded border border-loss/40 bg-loss/10 px-4 py-3 text-sm text-loss">
-          Could not reach SVX API: {statusError}. Make sure the bot is running with{' '}
-          <code className="font-mono">pnpm svx start</code>.
-        </div>
+        <Card>
+          <CardContent className="p-4 border border-loss/40 bg-loss/10 rounded-lg text-loss text-sm">
+            Could not reach the bot API: {statusError}.
+          </CardContent>
+        </Card>
       )}
 
-      <StatRow
-        stats={[
-          {
-            label: 'BTC spot',
-            value: status?.spotBtc != null ? `$${formatUsdc(status.spotBtc, 0)}` : '—',
-            hint: status?.spotBtcAtMs ? formatRelative(status.spotBtcAtMs) : 'no oracle yet',
-          },
-          {
-            label: 'Total bankroll',
-            value: formatUsdc(status?.totalBalanceUsdc ?? status?.navUsdc),
-            hint: 'wallet + manager',
-          },
-          {
-            label: 'Wallet',
-            value: formatUsdc(status?.navUsdc),
-            hint: status?.liveTradingEnabled ? 'live' : 'paper',
-          },
-          {
-            label: 'In manager',
-            value: formatUsdc(status?.managerBalanceUsdc ?? 0),
-            hint: status?.managerBalanceAtMs
-              ? `synced ${formatRelative(status.managerBalanceAtMs)}`
-              : 'awaiting first sync',
-          },
-          {
-            label: 'PnL (all time)',
-            value: formatUsdc(status?.realizedPnlUsdc),
-            hint: status ? `${closed?.length ?? 0} closed trades` : '',
-          },
-          {
-            label: 'PnL (24h)',
-            value: formatUsdc(status?.realizedPnl24hUsdc ?? 0),
-            hint: closed && closed.length > 0 ? `win rate ${formatPct(winRate, 0)} (${wins}/${closed.length})` : '',
-          },
-          {
-            label: 'Signals 24h',
-            value: status?.signalsLast24h ?? '—',
-            hint: `${status?.tradesLast24h ?? 0} executed`,
-          },
-          // Show the pUSD stat whenever a Poly wallet is configured (independent
-          // of POLY_EXECUTION_ENABLED) so the operator can see "I have $X pUSD
-          // ready to fire" before flipping the execution switch. The exec
-          // gate is reflected in the hint instead.
-          ...(status?.polyAddress
-            ? [
-                {
-                  label: `pUSD (${status.polyNetwork ?? 'poly'})`,
-                  value: formatUsdc(status.polyPusdBalance ?? 0),
-                  hint: status.polyExecutionEnabled
-                    ? status.polyBalanceAtMs
-                      ? `live · synced ${formatRelative(status.polyBalanceAtMs)}`
-                      : 'live · awaiting sync'
-                    : status.polyBalanceAtMs
-                      ? `read-only · ${formatRelative(status.polyBalanceAtMs)}`
-                      : 'read-only · awaiting sync',
-                },
-              ]
-            : []),
-        ]}
-      />
+      <HealthPanel status={status} showAllLegs={isMainnet} />
 
-      <section className="rounded border border-border bg-surface p-4">
-        <h2 className="text-sm uppercase tracking-wider text-muted mb-3">
-          Open positions{open?.length ? ` (${open.length})` : ''}
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="font-mono w-full">
-            <thead>
-              <tr>
-                <th>Opened</th>
-                <th>Strike</th>
-                <th>Side</th>
-                <th>Stake</th>
-                <th>Entry</th>
-                <th>Spot</th>
-                <th>Distance</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {open?.map((t) => {
-                const m = moneyness(t, status?.spotBtc ?? null);
-                return (
-                  <tr key={t.id} className={m.cls}>
-                    <td className="text-muted">{new Date(t.timestampMs).toLocaleTimeString()}</td>
-                    <td>${t.strike.toFixed(0)}</td>
-                    <td>{t.direction}</td>
-                    <td>{formatUsdc(t.costUsdc)}</td>
-                    <td>{formatPct(t.costPrice)}</td>
-                    <td>{m.spotLabel}</td>
-                    <td>{m.distLabel}</td>
-                    <td className="text-xs">{m.statusLabel}</td>
-                  </tr>
-                );
-              })}
-              {!open?.length && (
-                <tr>
-                  <td colSpan={8} className="text-center text-muted py-4">
-                    No open positions.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <OverviewStats status={status} isMainnet={isMainnet} closedCount={closedForChart.length} winRate={winRate} wins={wins} />
 
-      <section className="rounded border border-border bg-surface p-4">
-        <h2 className="text-sm uppercase tracking-wider text-muted mb-3">Cumulative realized PnL</h2>
-        <div className="h-64">
-          {pnlSeries.length >= 1 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={pnlSeries} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1c2230" />
-                <XAxis
-                  dataKey="ts"
-                  type="number"
-                  domain={['auto', 'auto']}
-                  tickFormatter={(v) => new Date(v).toLocaleTimeString()}
-                  tick={{ fontSize: 11, fill: '#8c93a3' }}
-                  scale="time"
-                />
-                <YAxis
-                  tick={{ fontSize: 11, fill: '#8c93a3' }}
-                  domain={['auto', 'auto']}
-                  tickFormatter={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`}
-                />
-                <Tooltip
-                  labelFormatter={(v) => new Date(Number(v)).toLocaleString()}
-                  contentStyle={{ background: '#11141b', border: '1px solid #1c2230' }}
-                  formatter={(v: number) => [`${v >= 0 ? '+' : ''}$${v.toFixed(4)}`, 'Cum PnL']}
-                />
-                <ReferenceLine y={0} stroke="#444c5c" strokeDasharray="2 2" />
-                <Line
-                  type="monotone"
-                  dataKey="pnl"
-                  stroke={cumPnl >= 0 ? '#10b981' : '#ef4444'}
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                  activeDot={{ r: 5 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-full flex items-center justify-center text-muted text-sm">
-              No closed trades yet — chart populates after first settlement.
-            </div>
-          )}
-        </div>
-      </section>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle>Cumulative realized PnL</CardTitle>
+            <p className="text-xs text-muted mt-0.5">
+              {isMainnet
+                ? 'Combined (Polymarket + Hyperliquid hedge) = pure-vol PnL.'
+                : 'Sui-side dUSDC realized PnL on Predict.'}
+            </p>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <PnlChart closed={closedForChart} showLegs={isMainnet} />
+        </CardContent>
+      </Card>
 
-      <section className="rounded border border-border bg-surface p-4">
-        <h2 className="text-sm uppercase tracking-wider text-muted mb-3">Last 20 signals</h2>
-        <div className="overflow-x-auto">
-          <table className="font-mono">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Strike</th>
-                <th>Predict↑</th>
-                <th>Poly Yes</th>
-                <th>Spread</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentSignals?.map((s) => (
-                <tr key={s.id} className={rowClass(s.action)}>
-                  <td className="text-muted">{new Date(s.timestampMs).toLocaleTimeString()}</td>
-                  <td>${s.strike.toFixed(0)}</td>
-                  <td>{formatPct(s.predictProb)}</td>
-                  <td>{formatPct(s.polyProb)}</td>
-                  <td>{formatPct(s.spread)}</td>
-                  <td className="text-xs">{s.action}{s.filterReason ? ` (${s.filterReason})` : ''}</td>
-                </tr>
-              ))}
-              {!recentSignals?.length && (
-                <tr>
-                  <td colSpan={6} className="text-center text-muted py-4">
-                    No signals yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Open positions{open?.length ? ` (${open.length})` : ''}</span>
+              {open?.length ? (
+                <span className="text-xs text-muted normal-case">live snapshot</span>
+              ) : null}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <OpenPositionsTable
+              open={open ?? []}
+              spot={status?.spotBtc ?? null}
+              isMainnet={isMainnet}
+            />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Last 15 signals</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <RecentSignals signals={recentSignals ?? []} />
+          </CardContent>
+        </Card>
+      </div>
 
-      <footer className="text-xs text-muted font-mono">
-        Predict package:{' '}
+      <footer className="text-xs text-muted font-mono flex items-center gap-2">
+        <span>Predict package:</span>
         <a
-          className="underline hover:text-accent"
+          className="underline hover:text-accent inline-flex items-center gap-1"
           href={`https://suiscan.xyz/testnet/object/${status?.predictPackageId ?? ''}`}
           target="_blank"
           rel="noreferrer"
         >
           {status?.predictPackageId?.slice(0, 16) ?? '—'}…
+          <ExternalLink className="h-3 w-3" />
         </a>
       </footer>
     </div>
   );
 }
 
-function rowClass(action: string): string {
-  if (action === 'paper_executed' || action === 'live_executed') return 'text-win';
-  if (action === 'filtered') return 'text-muted';
-  return '';
+function combinedPnl(t: TradeRecord, isMainnet: boolean): number {
+  if (isMainnet) {
+    return (t.polyPnlUsdc ?? 0) + (t.hlPnlUsdc ?? 0);
+  }
+  return t.pnlUsdc ?? 0;
+}
+
+function OverviewStats({
+  status,
+  isMainnet,
+  closedCount,
+  winRate,
+  wins,
+}: {
+  status: import('@/lib/api').BotStatus | null;
+  isMainnet: boolean;
+  closedCount: number;
+  winRate: number;
+  wins: number;
+}) {
+  if (isMainnet) {
+    const polyAll = status?.realizedPolyPnlUsdc ?? 0;
+    const hlAll = status?.realizedHlPnlUsdc ?? 0;
+    const combinedAll = status?.realizedCombinedPnlUsdc ?? polyAll + hlAll;
+    const combined24h = status?.realizedCombinedPnl24hUsdc ?? 0;
+    return (
+      <StatRow
+        cols={5}
+        stats={[
+          {
+            label: 'BTC spot',
+            value: status?.spotBtc != null ? `$${formatUsdc(status.spotBtc, 0)}` : '—',
+            hint: status?.spotBtcAtMs ? formatRelative(status.spotBtcAtMs) : 'awaiting oracle',
+          },
+          {
+            label: 'Combined PnL (all)',
+            value: formatUsdc(combinedAll),
+            tone: combinedAll >= 0 ? 'win' : 'loss',
+            hint: `${closedCount} closed · win ${formatPct(winRate, 0)} (${wins}/${closedCount})`,
+          },
+          {
+            label: 'PnL 24h',
+            value: formatUsdc(combined24h),
+            tone: combined24h >= 0 ? 'win' : 'loss',
+            hint: `limit −${formatUsdc(status?.dailyPolyLossLimitUsdc ?? 0)}`,
+          },
+          {
+            label: 'Poly PnL',
+            value: formatUsdc(polyAll),
+            tone: polyAll >= 0 ? 'win' : 'loss',
+            hint: `${formatUsdc(status?.polyPusdBalance ?? 0)} pUSD wallet`,
+          },
+          {
+            label: 'HL exposure',
+            value: status?.hlExecutionEnabled
+              ? formatUsdc(status.openHlExposureUsdc ?? 0)
+              : '—',
+            hint: status?.hlExecutionEnabled
+              ? `${formatUsdc(status.hlAccountValueUsdc ?? 0)} margin`
+              : 'hedging off',
+          },
+        ]}
+      />
+    );
+  }
+  const realized = status?.realizedPnlUsdc ?? 0;
+  const realized24h = status?.realizedPnl24hUsdc ?? 0;
+  return (
+    <StatRow
+      cols={5}
+      stats={[
+        {
+          label: 'BTC spot',
+          value: status?.spotBtc != null ? `$${formatUsdc(status.spotBtc, 0)}` : '—',
+          hint: status?.spotBtcAtMs ? formatRelative(status.spotBtcAtMs) : 'awaiting oracle',
+        },
+        {
+          label: 'PnL (all)',
+          value: formatUsdc(realized),
+          tone: realized >= 0 ? 'win' : 'loss',
+          hint: `${closedCount} closed · win ${formatPct(winRate, 0)} (${wins}/${closedCount})`,
+        },
+        {
+          label: 'PnL 24h',
+          value: formatUsdc(realized24h),
+          tone: realized24h >= 0 ? 'win' : 'loss',
+          hint: `limit −${formatUsdc(0)}`,
+        },
+        {
+          label: 'Bankroll',
+          value: formatUsdc(status?.totalBalanceUsdc ?? status?.navUsdc),
+          hint: 'wallet + manager',
+        },
+        {
+          label: 'Signals 24h',
+          value: status?.signalsLast24h ?? '—',
+          hint: `${status?.tradesLast24h ?? 0} executed`,
+        },
+      ]}
+    />
+  );
+}
+
+function OpenPositionsTable({
+  open,
+  spot,
+  isMainnet,
+}: {
+  open: TradeRecord[];
+  spot: number | null;
+  isMainnet: boolean;
+}) {
+  // Mainnet view: filter to trades with a Poly leg attached.
+  const rows = isMainnet ? open.filter((t) => !!t.polyStatus) : open;
+  if (rows.length === 0) {
+    return <div className="text-muted text-sm py-6 text-center">No open positions.</div>;
+  }
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Opened</TableHead>
+          <TableHead>Strike</TableHead>
+          {isMainnet ? <TableHead>Outcome</TableHead> : <TableHead>Side</TableHead>}
+          <TableHead>{isMainnet ? 'Shares' : 'Stake'}</TableHead>
+          {isMainnet ? <TableHead>Fill</TableHead> : <TableHead>Entry</TableHead>}
+          {isMainnet && <TableHead>Hedge</TableHead>}
+          <TableHead>{isMainnet ? 'Status' : 'Spot'}</TableHead>
+          <TableHead>{isMainnet ? '' : 'Status'}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((t) => {
+          if (isMainnet) {
+            return (
+              <TableRow key={t.id}>
+                <TableCell className="text-muted text-xs">
+                  {new Date(t.timestampMs).toLocaleTimeString()}
+                </TableCell>
+                <TableCell>${t.strike.toFixed(0)}</TableCell>
+                <TableCell>{t.polyOutcome?.toUpperCase() ?? '—'}</TableCell>
+                <TableCell>{t.polyFilledShares?.toFixed(2) ?? '—'}</TableCell>
+                <TableCell>
+                  {t.polyFillPrice != null ? formatPct(t.polyFillPrice, 2) : '—'}
+                </TableCell>
+                <TableCell>
+                  {t.hlStatus === 'open' && t.hlSize != null ? (
+                    <span className="text-warn text-xs">
+                      {t.hlSide?.toUpperCase()} {t.hlSize.toFixed(5)}
+                    </span>
+                  ) : (
+                    <span className="text-muted text-xs">none</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-xs">{t.polyStatus}</TableCell>
+                <TableCell />
+              </TableRow>
+            );
+          }
+          const m = moneyness(t, spot);
+          return (
+            <TableRow key={t.id} className={m.cls}>
+              <TableCell className="text-muted text-xs">
+                {new Date(t.timestampMs).toLocaleTimeString()}
+              </TableCell>
+              <TableCell>${t.strike.toFixed(0)}</TableCell>
+              <TableCell>{t.direction}</TableCell>
+              <TableCell>{formatUsdc(t.costUsdc)}</TableCell>
+              <TableCell>{formatPct(t.costPrice)}</TableCell>
+              <TableCell>{m.spotLabel}</TableCell>
+              <TableCell className="text-xs">{m.statusLabel}</TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}
+
+function RecentSignals({ signals }: { signals: import('@/lib/api').SignalRecord[] }) {
+  if (signals.length === 0) {
+    return <div className="text-muted text-sm py-6 text-center">No signals yet.</div>;
+  }
+  return (
+    <div className="space-y-1.5">
+      {signals.map((s) => (
+        <div
+          key={s.id}
+          className="flex items-center gap-2 text-xs px-2 py-1.5 rounded hover:bg-surface-elevated transition-colors"
+        >
+          <span className="text-muted tabular-nums whitespace-nowrap">
+            {new Date(s.timestampMs).toLocaleTimeString()}
+          </span>
+          <span className="font-mono">${s.strike.toFixed(0)}</span>
+          <span className="text-muted">·</span>
+          <span className="font-mono tabular-nums">
+            P {formatPct(s.predictProb, 1)}
+          </span>
+          <span className="text-muted">/</span>
+          <span className="font-mono tabular-nums">
+            Y {formatPct(s.polyProb, 1)}
+          </span>
+          <span
+            className={`ml-auto font-mono tabular-nums ${
+              Math.abs(s.spread) > 0.03 ? 'text-win' : 'text-muted'
+            }`}
+          >
+            {s.spread >= 0 ? '+' : ''}
+            {formatPct(s.spread, 2)}
+          </span>
+          <SignalActionBadge action={s.action} reason={s.filterReason} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SignalActionBadge({ action, reason }: { action: string; reason?: string }) {
+  if (action === 'paper_executed' || action === 'live_executed') {
+    return <Badge variant="live">exec</Badge>;
+  }
+  if (action === 'sub_threshold') {
+    return <Badge variant="outline">sub</Badge>;
+  }
+  return (
+    <Badge variant="default" title={reason}>
+      {reason ?? 'filt'}
+    </Badge>
+  );
 }
 
 interface Moneyness {
   cls: string;
   spotLabel: string;
-  distLabel: string;
   statusLabel: string;
 }
 
 function moneyness(t: TradeRecord, spot: number | null): Moneyness {
   if (spot == null) {
-    return { cls: 'text-muted', spotLabel: '—', distLabel: '—', statusLabel: 'no spot' };
+    return { cls: '', spotLabel: '—', statusLabel: 'no spot' };
   }
-  // direction='up' wins if spot > strike at expiry; 'down' wins if spot <= strike.
   const isWinning = t.direction === 'up' ? spot > t.strike : spot <= t.strike;
-  const distAbs = spot - t.strike;
-  const distPct = distAbs / t.strike;
-  const distSign = distAbs >= 0 ? '+' : '';
   return {
     cls: isWinning ? 'text-win' : 'text-loss',
     spotLabel: `$${spot.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-    distLabel: `${distSign}${distAbs.toFixed(0)} (${distSign}${(distPct * 100).toFixed(2)}%)`,
     statusLabel: isWinning ? 'ITM' : 'OTM',
   };
 }

@@ -1,14 +1,12 @@
 'use client';
 
 /**
- * HealthPanel — per-leg readiness indicator for /mainnet.
+ * HealthPanel — per-leg readiness indicator for the overview page.
  *
  * Three legs to surface (Predict signals, Polymarket, Hyperliquid). Each
- * resolves to one of:
- *   - ok    (green): configured, funded, execution-enabled
- *   - warn  (amber): configured but missing something (no balance, exec off,
- *                    or no recent activity)
- *   - err   (red):   missing config / unreachable
+ * resolves to ok (green) / warn (amber) / err (red). On testnet the
+ * Polymarket/Hyperliquid cards are hidden (those venues aren't part of
+ * the testnet bot's universe).
  *
  * Lets the operator see at a glance "all three legs are ready to fire" before
  * the first trade has fired naturally — answers the common confusion of
@@ -17,6 +15,9 @@
 
 import type { BotStatus } from '@/lib/api';
 import { formatRelative, formatUsdc } from '@/lib/api';
+import { cn } from '@/lib/cn';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { CheckCircle2, AlertTriangle, XCircle, Activity } from 'lucide-react';
 
 type Level = 'ok' | 'warn' | 'err';
 
@@ -25,20 +26,18 @@ interface Row {
   level: Level;
   primary: string;
   hint?: string;
-  /** Optional second line — e.g. address (truncated), useful for verification. */
   detail?: string;
 }
 
-const COLORS: Record<Level, string> = {
-  ok: 'border-win/40 bg-win/5 text-win',
-  warn: 'border-yellow-500/40 bg-yellow-500/5 text-yellow-400',
-  err: 'border-loss/40 bg-loss/5 text-loss',
-};
-
-const DOT: Record<Level, string> = {
-  ok: 'bg-win',
-  warn: 'bg-yellow-400',
-  err: 'bg-loss',
+const TONE: Record<Level, { border: string; bg: string; text: string; icon: typeof Activity }> = {
+  ok: { border: 'border-win/40', bg: 'bg-win/5', text: 'text-win', icon: CheckCircle2 },
+  warn: {
+    border: 'border-warn/40',
+    bg: 'bg-warn/5',
+    text: 'text-warn',
+    icon: AlertTriangle,
+  },
+  err: { border: 'border-loss/40', bg: 'bg-loss/5', text: 'text-loss', icon: XCircle },
 };
 
 function predictRow(status: BotStatus): Row {
@@ -47,7 +46,7 @@ function predictRow(status: BotStatus): Row {
       label: 'Predict signals',
       level: 'err',
       primary: 'no oracle data',
-      hint: 'check predict-server.testnet.mystenlabs.com reachable',
+      hint: 'predict-server unreachable',
     };
   }
   const ageSec = status.spotBtcAtMs ? (Date.now() - status.spotBtcAtMs) / 1000 : Infinity;
@@ -73,7 +72,7 @@ function polyRow(status: BotStatus): Row {
       label: 'Polymarket',
       level: 'err',
       primary: 'wallet not configured',
-      hint: 'set MAINNET_POLY_PRIVATE_KEY in Coolify',
+      hint: 'set MAINNET_POLY_PRIVATE_KEY',
     };
   }
   const pUsd = status.polyPusdBalance ?? 0;
@@ -101,7 +100,7 @@ function polyRow(status: BotStatus): Row {
       label: 'Polymarket',
       level: 'warn',
       primary: `${formatUsdc(pUsd)} pUSD ready · exec OFF`,
-      hint: 'set MAINNET_POLY_EXECUTION_ENABLED=true to fire',
+      hint: 'set MAINNET_POLY_EXECUTION_ENABLED=true',
       detail: shortAddr(status.polyAddress),
     };
   }
@@ -110,8 +109,8 @@ function polyRow(status: BotStatus): Row {
     level: 'ok',
     primary: `${formatUsdc(pUsd)} pUSD · live`,
     hint: status.lastPolyAttemptAtMs
-      ? `last fill attempt ${formatRelative(status.lastPolyAttemptAtMs)}`
-      : 'no fills attempted since boot',
+      ? `last fill ${formatRelative(status.lastPolyAttemptAtMs)}`
+      : 'awaiting first fill',
     detail: shortAddr(status.polyAddress),
   };
 }
@@ -119,39 +118,39 @@ function polyRow(status: BotStatus): Row {
 function hlRow(status: BotStatus): Row {
   if (!status.hlAddress) {
     return {
-      label: 'Hyperliquid',
+      label: 'Hyperliquid hedge',
       level: 'err',
       primary: 'HL key not configured',
-      hint: 'set MAINNET_HL_PRIVATE_KEY in Coolify',
+      hint: 'set MAINNET_HL_PRIVATE_KEY',
     };
   }
   const margin = status.hlAccountValueUsdc ?? 0;
   if (margin <= 0) {
     return {
-      label: 'Hyperliquid',
+      label: 'Hyperliquid hedge',
       level: 'err',
       primary: '$0 margin',
-      hint: 'bridge USDC from Arbitrum at app.hyperliquid.xyz/bridge',
+      hint: 'bridge USDC from Arbitrum',
       detail: shortAddr(status.hlAddress),
     };
   }
   if (!status.hlExecutionEnabled) {
     return {
-      label: 'Hyperliquid',
+      label: 'Hyperliquid hedge',
       level: 'warn',
       primary: `${formatUsdc(margin)} margin · exec OFF`,
-      hint: 'set MAINNET_HL_EXECUTION_ENABLED=true to hedge',
+      hint: 'set MAINNET_HL_EXECUTION_ENABLED=true',
       detail: shortAddr(status.hlAddress),
     };
   }
   const exposure = status.openHlExposureUsdc ?? 0;
   return {
-    label: 'Hyperliquid',
+    label: 'Hyperliquid hedge',
     level: 'ok',
     primary: `${formatUsdc(margin)} margin · ${formatUsdc(exposure)} exposed`,
     hint: status.lastHlAttemptAtMs
-      ? `last hedge attempt ${formatRelative(status.lastHlAttemptAtMs)}`
-      : 'no hedges attempted since boot',
+      ? `last hedge ${formatRelative(status.lastHlAttemptAtMs)}`
+      : 'awaiting first hedge',
     detail: shortAddr(status.hlAddress),
   };
 }
@@ -160,40 +159,72 @@ function shortAddr(a: string): string {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
-export function HealthPanel({ status }: { status: BotStatus | null | undefined }) {
+function HealthCard({ row }: { row: Row }) {
+  const tone = TONE[row.level];
+  const Icon = tone.icon;
+  return (
+    <div
+      className={cn(
+        'rounded-lg border p-3 transition-colors',
+        tone.border,
+        tone.bg,
+      )}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <span className={cn('text-xs uppercase tracking-wider font-medium', tone.text)}>
+          {row.label}
+        </span>
+        <Icon className={cn('h-4 w-4', tone.text)} />
+      </div>
+      <div className="font-mono text-sm">{row.primary}</div>
+      {row.hint && <div className="text-xs text-muted mt-1">{row.hint}</div>}
+      {row.detail && (
+        <div className="text-xs text-muted/70 font-mono mt-1">{row.detail}</div>
+      )}
+    </div>
+  );
+}
+
+export function HealthPanel({
+  status,
+  showAllLegs,
+}: {
+  status: BotStatus | null | undefined;
+  showAllLegs: boolean;
+}) {
   if (!status) {
     return (
-      <section className="rounded border border-border bg-surface p-4">
-        <h2 className="text-sm uppercase tracking-wider text-muted mb-3">Configuration health</h2>
-        <p className="text-muted text-sm">Loading status…</p>
-      </section>
+      <Card>
+        <CardHeader>
+          <CardTitle>Configuration health</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-muted text-sm">Loading status…</div>
+        </CardContent>
+      </Card>
     );
   }
-  const rows = [predictRow(status), polyRow(status), hlRow(status)];
+  const rows: Row[] = [predictRow(status)];
+  if (showAllLegs) {
+    rows.push(polyRow(status), hlRow(status));
+  }
   return (
-    <section className="rounded border border-border bg-surface p-4">
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="text-sm uppercase tracking-wider text-muted">Configuration health</h2>
-        <span className="text-xs text-muted">
-          all three must be green before a Predict signal → Poly fill → HL hedge round-trip can fire
-        </span>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {rows.map((r) => (
-          <div
-            key={r.label}
-            className={`rounded border px-3 py-2 ${COLORS[r.level]}`}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs uppercase tracking-wider opacity-70">{r.label}</span>
-              <span className={`w-2 h-2 rounded-full ${DOT[r.level]}`} />
-            </div>
-            <div className="font-mono text-sm">{r.primary}</div>
-            {r.hint && <div className="text-xs opacity-70 mt-1">{r.hint}</div>}
-            {r.detail && <div className="text-xs opacity-50 font-mono mt-1">{r.detail}</div>}
-          </div>
-        ))}
-      </div>
-    </section>
+    <Card>
+      <CardHeader>
+        <CardTitle>Configuration health</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div
+          className={cn(
+            'grid gap-3',
+            showAllLegs ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1',
+          )}
+        >
+          {rows.map((r) => (
+            <HealthCard key={r.label} row={r} />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

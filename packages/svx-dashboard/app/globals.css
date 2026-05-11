@@ -17,6 +17,16 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.code {
+  background: #0b0d12;
+  border: 1px solid #1c2230;
+  border-radius: 0.25rem;
+  padding: 0 0.3rem;
+  font-family: 'JetBrains Mono', Menlo, monospace;
+  font-size: 0.85em;
+  color: #7dd3fc;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

@@ -56,6 +56,14 @@ export interface BotStatus {
   // Hyperliquid hedge leg.
   hlExecutionEnabled?: boolean;
   hlNetwork?: 'mainnet' | 'testnet';
+  hlHedgeAsset?: string;
+  hlAddress?: `0x${string}` | null;
+  hlAccountValueUsdc?: number | null;
+  hlWithdrawableUsdc?: number | null;
+  hlBalanceAtMs?: number | null;
+  maxHlPerTradeUsdc?: number;
+  maxHlOpenUsdc?: number;
+  hlRequiredForPoly?: boolean;
   openHlExposureUsdc?: number;
   realizedHlPnlUsdc?: number;
   realizedHlPnl24hUsdc?: number;
@@ -63,6 +71,13 @@ export interface BotStatus {
   // Cross-venue combined (poly + hl) — the pure-vol PnL story.
   realizedCombinedPnlUsdc?: number;
   realizedCombinedPnl24hUsdc?: number;
+  // Last-attempt timestamps + risk thresholds for the health panel.
+  lastPolyAttemptAtMs?: number | null;
+  lastHlAttemptAtMs?: number | null;
+  maxPolyPositionUsdc?: number;
+  maxOpenPolyPositions?: number;
+  polyMinBookDepthShares?: number;
+  spreadThreshold?: number;
 }
 
 export interface SignalRecord {

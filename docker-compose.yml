@@ -105,6 +105,8 @@ services:
   #   MAINNET_POLY_API_KEY
   #   MAINNET_POLY_API_SECRET
   #   MAINNET_POLY_API_PASSPHRASE
+  # Additional Coolify secret for HL hedging (only when MAINNET_HL_EXECUTION_ENABLED=true):
+  #   MAINNET_HL_PRIVATE_KEY     — viem-format EVM private key for the HL operator
   # ===========================================================================
   bot-mainnet:
     build:
@@ -139,6 +141,15 @@ services:
       MAX_OPEN_POLY_POSITIONS: "${MAINNET_MAX_OPEN_POLY_POSITIONS:-5}"
       POLY_MIN_BOOK_DEPTH_SHARES: "${MAINNET_POLY_MIN_BOOK_DEPTH_SHARES:-20}"
       DAILY_POLY_LOSS_LIMIT_USDC: "${MAINNET_DAILY_POLY_LOSS_LIMIT_USDC:-10}"
+      # Hyperliquid delta hedge (Part 2 — OFF by default until operator
+      # bridges USDC into HL from Arbitrum).
+      HL_EXECUTION_ENABLED: "${MAINNET_HL_EXECUTION_ENABLED:-false}"
+      HL_NETWORK: "${MAINNET_HL_NETWORK:-mainnet}"
+      HL_HEDGE_ASSET: "${MAINNET_HL_HEDGE_ASSET:-BTC}"
+      MAX_HL_PER_TRADE_USDC: "${MAINNET_MAX_HL_PER_TRADE_USDC:-2}"
+      MAX_HL_OPEN_USDC: "${MAINNET_MAX_HL_OPEN_USDC:-10}"
+      DAILY_HL_LOSS_LIMIT_USDC: "${MAINNET_DAILY_HL_LOSS_LIMIT_USDC:-5}"
+      HL_REQUIRED_FOR_POLY: "${MAINNET_HL_REQUIRED_FOR_POLY:-false}"
       # Secrets — set in Coolify panel.
       SUI_PRIVATE_KEY_BECH32: "${MAINNET_SUI_PRIVATE_KEY_BECH32:-}"
       OPERATOR_JSON: "${MAINNET_OPERATOR_JSON:-}"
@@ -146,6 +157,7 @@ services:
       POLY_API_KEY: "${MAINNET_POLY_API_KEY:-}"
       POLY_API_SECRET: "${MAINNET_POLY_API_SECRET:-}"
       POLY_API_PASSPHRASE: "${MAINNET_POLY_API_PASSPHRASE:-}"
+      HL_PRIVATE_KEY: "${MAINNET_HL_PRIVATE_KEY:-}"
     volumes:
       - svx-data-mainnet:/data
     expose:

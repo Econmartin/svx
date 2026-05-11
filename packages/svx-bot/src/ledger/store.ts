@@ -75,7 +75,26 @@ CREATE TABLE IF NOT EXISTS trades (
   poly_fill_price REAL,
   poly_cost_usdc REAL,
   poly_tx_hash TEXT,
-  poly_status TEXT
+  poly_status TEXT,
+  -- Polymarket settlement (additive 2026-05-11) --
+  poly_settled INTEGER NOT NULL DEFAULT 0,
+  poly_settled_at_ms INTEGER,
+  poly_settlement_outcome TEXT,
+  poly_payout_usdc REAL,
+  poly_pnl_usdc REAL,
+  poly_redeem_tx_hash TEXT,
+  poly_redeem_status TEXT,
+  -- Hyperliquid delta-hedge leg (additive 2026-05-11) --
+  hl_asset TEXT,
+  hl_order_id TEXT,
+  hl_size REAL,
+  hl_side TEXT,
+  hl_open_price REAL,
+  hl_close_price REAL,
+  hl_status TEXT,
+  hl_pnl_usdc REAL,
+  hl_funding_paid_usdc REAL,
+  hl_closed_at_ms INTEGER
 );
 CREATE INDEX IF NOT EXISTS ix_trades_ts ON trades(ts_ms);
 CREATE INDEX IF NOT EXISTS ix_trades_oracle ON trades(oracle_id);
@@ -176,6 +195,27 @@ export class LedgerStore {
     ensureColumn('poly_cost_usdc', 'REAL');
     ensureColumn('poly_tx_hash', 'TEXT');
     ensureColumn('poly_status', 'TEXT');
+    // Polymarket settlement leg (additive 2026-05-11). All NULL on existing
+    // rows; populated by the settlement-poll loop as UMA resolves markets.
+    ensureColumn('poly_settled', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn('poly_settled_at_ms', 'INTEGER');
+    ensureColumn('poly_settlement_outcome', 'TEXT');
+    ensureColumn('poly_payout_usdc', 'REAL');
+    ensureColumn('poly_pnl_usdc', 'REAL');
+    ensureColumn('poly_redeem_tx_hash', 'TEXT');
+    ensureColumn('poly_redeem_status', 'TEXT');
+    // Hyperliquid delta-hedge leg (additive 2026-05-11). All NULL on
+    // existing rows; populated when the operator turns HL_EXECUTION_ENABLED on.
+    ensureColumn('hl_asset', 'TEXT');
+    ensureColumn('hl_order_id', 'TEXT');
+    ensureColumn('hl_size', 'REAL');
+    ensureColumn('hl_side', 'TEXT');
+    ensureColumn('hl_open_price', 'REAL');
+    ensureColumn('hl_close_price', 'REAL');
+    ensureColumn('hl_status', 'TEXT');
+    ensureColumn('hl_pnl_usdc', 'REAL');
+    ensureColumn('hl_funding_paid_usdc', 'REAL');
+    ensureColumn('hl_closed_at_ms', 'INTEGER');
   }
 
   close(): void {
@@ -461,15 +501,183 @@ export class LedgerStore {
     return r?.c ?? 0;
   }
 
-  /** Count of unsettled trades that have a Polymarket leg attached (filled). */
+  /**
+   * Count of OPEN Polymarket-leg positions — trades where the Poly fill went
+   * through but the underlying market hasn't yet resolved on UMA. Read by the
+   * Poly risk gate to enforce `maxOpenPolyPositions`.
+   */
   countOpenPolyPositions(): number {
     const r = this.db
       .prepare<[], { c: number }>(
         `SELECT COUNT(*) AS c FROM trades
-         WHERE settled = 0 AND poly_status = 'filled'`,
+         WHERE poly_status = 'filled' AND poly_settled = 0`,
       )
       .get();
     return r?.c ?? 0;
+  }
+
+  /**
+   * Trades whose Polymarket fill was successful but UMA hasn't resolved yet.
+   * The settlement-poll loop iterates this each cycle, groups by conditionId,
+   * and queries gamma for resolution status.
+   */
+  unsettledPolyTrades(): TradeRecord[] {
+    return this.tradeRows(
+      `WHERE poly_status = 'filled' AND poly_settled = 0 ORDER BY ts_ms ASC`,
+    );
+  }
+
+  /**
+   * Mark a Poly leg as settled. Payout = filled_shares * (won ? 1 : 0); PnL =
+   * payout - cost. The winning outcome ('yes'|'no') is recorded so that the
+   * dashboard can show "lost" vs "won" without consulting gamma again.
+   */
+  markPolySettled(
+    tradeId: string,
+    outcome: 'yes' | 'no',
+    payoutUsdc: number,
+    pnlUsdc: number,
+    settledAtMs: number,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE trades SET poly_settled = 1, poly_settled_at_ms = ?,
+                            poly_settlement_outcome = ?, poly_payout_usdc = ?,
+                            poly_pnl_usdc = ?
+         WHERE id = ?`,
+      )
+      .run(settledAtMs, outcome, payoutUsdc, pnlUsdc, tradeId);
+  }
+
+  /**
+   * Winning Polymarket positions that haven't been redeemed on-chain yet.
+   * Losing positions (`poly_payout_usdc = 0`) are skipped — redeeming them
+   * just burns gas. Failed redeems (`poly_redeem_status='failed'`) are also
+   * skipped so we don't retry forever — operator clears them manually via
+   * the runbook (`pnpm --filter svx-bot retry-poly-redeem`).
+   */
+  unredeemedWinningPolyTrades(): TradeRecord[] {
+    return this.tradeRows(
+      `WHERE poly_settled = 1 AND poly_payout_usdc > 0
+         AND poly_redeem_tx_hash IS NULL
+         AND (poly_redeem_status IS NULL OR poly_redeem_status != 'failed')
+       ORDER BY ts_ms ASC`,
+    );
+  }
+
+  /**
+   * Persist a CTF redeem tx hash + status on a single trade row.
+   * Pass `txHash=null` on failure so the column stays NULL — `poly_redeem_status`
+   * carries the failure marker.
+   */
+  markPolyRedeemed(
+    tradeId: string,
+    txHash: string | null,
+    status: 'success' | 'failed' = 'success',
+  ): void {
+    this.db
+      .prepare(`UPDATE trades SET poly_redeem_tx_hash = ?, poly_redeem_status = ? WHERE id = ?`)
+      .run(txHash, status, tradeId);
+  }
+
+  /**
+   * Sum of realized Polymarket-leg PnL across settled trades since `sinceMs`.
+   * Mirrors `realizedPnlSince` for the Predict leg. Feeds the daily-loss gate
+   * on `RiskGate.checkPoly` once Part 1's settlement loop has populated rows.
+   */
+  realizedPolyPnlSince(sinceMs: number): number {
+    const r = this.db
+      .prepare<[number], { p: number }>(
+        `SELECT COALESCE(SUM(poly_pnl_usdc), 0) AS p FROM trades
+         WHERE poly_settled = 1 AND ts_ms >= ?`,
+      )
+      .get(sinceMs);
+    return r?.p ?? 0;
+  }
+
+  /** Closed Polymarket trades for the dashboard's "Closed positions" table. */
+  closedPolyTrades(limit = 500): TradeRecord[] {
+    return this.tradeRows(
+      `WHERE poly_status = 'filled' AND poly_settled = 1 ORDER BY poly_settled_at_ms DESC LIMIT ?`,
+      [limit],
+    );
+  }
+
+  // ============================================================
+  // Hyperliquid delta-hedge leg (Part 2)
+  // ============================================================
+
+  /**
+   * Persist HL hedge details on an existing trade row. Idempotent — called
+   * immediately after the Polymarket fill that triggered the hedge.
+   */
+  recordHlLeg(
+    tradeId: string,
+    leg: {
+      asset: string;
+      orderId: string;
+      size: number;
+      side: 'long' | 'short';
+      openPrice: number;
+      status: 'open' | 'failed';
+    },
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE trades SET hl_asset = ?, hl_order_id = ?, hl_size = ?,
+                            hl_side = ?, hl_open_price = ?, hl_status = ?
+         WHERE id = ?`,
+      )
+      .run(leg.asset, leg.orderId, leg.size, leg.side, leg.openPrice, leg.status, tradeId);
+  }
+
+  /** Record close of an HL leg + final realized PnL. */
+  closeHlLeg(
+    tradeId: string,
+    leg: {
+      closePrice: number;
+      pnlUsdc: number;
+      fundingPaidUsdc: number;
+      closedAtMs: number;
+    },
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE trades SET hl_close_price = ?, hl_pnl_usdc = ?,
+                            hl_funding_paid_usdc = ?, hl_closed_at_ms = ?,
+                            hl_status = 'closed'
+         WHERE id = ?`,
+      )
+      .run(leg.closePrice, leg.pnlUsdc, leg.fundingPaidUsdc, leg.closedAtMs, tradeId);
+  }
+
+  /** Open HL hedges — used to close on settlement and compute current exposure. */
+  openHlHedges(): TradeRecord[] {
+    return this.tradeRows(
+      `WHERE hl_status = 'open' AND hl_size IS NOT NULL ORDER BY ts_ms ASC`,
+    );
+  }
+
+  /** Sum of open HL exposure (USD notional) — feeds the risk gate. */
+  openHlExposureUsdc(): number {
+    const r = this.db
+      .prepare<[], { s: number }>(
+        `SELECT COALESCE(SUM(hl_size * hl_open_price), 0) AS s FROM trades
+         WHERE hl_status = 'open'`,
+      )
+      .get();
+    return r?.s ?? 0;
+  }
+
+  /** Realized HL PnL since `sinceMs` — feeds the daily HL loss gate. */
+  realizedHlPnlSince(sinceMs: number): number {
+    const r = this.db
+      .prepare<[number], { p: number }>(
+        `SELECT COALESCE(SUM(hl_pnl_usdc), 0) AS p FROM trades
+         WHERE hl_status = 'closed' AND hl_closed_at_ms >= ?`,
+      )
+      .get(sinceMs);
+    return r?.p ?? 0;
   }
 
   /** Sum of pUSD spent on currently-open Poly positions. */
@@ -665,6 +873,23 @@ export class LedgerStore {
           poly_cost_usdc: number | null;
           poly_tx_hash: string | null;
           poly_status: string | null;
+          poly_settled: number | null;
+          poly_settled_at_ms: number | null;
+          poly_settlement_outcome: string | null;
+          poly_payout_usdc: number | null;
+          poly_pnl_usdc: number | null;
+          poly_redeem_tx_hash: string | null;
+          poly_redeem_status: string | null;
+          hl_asset: string | null;
+          hl_order_id: string | null;
+          hl_size: number | null;
+          hl_side: string | null;
+          hl_open_price: number | null;
+          hl_close_price: number | null;
+          hl_status: string | null;
+          hl_pnl_usdc: number | null;
+          hl_funding_paid_usdc: number | null;
+          hl_closed_at_ms: number | null;
         }
       >(`SELECT * FROM trades ${suffix}`)
       .all(...params);
@@ -704,6 +929,26 @@ export class LedgerStore {
       polyCostUsdc: r.poly_cost_usdc ?? undefined,
       polyTxHash: r.poly_tx_hash ?? undefined,
       polyStatus: (r.poly_status as 'submitted' | 'filled' | 'failed' | 'partial' | undefined) ?? undefined,
+      polySettled: r.poly_settled === 1,
+      polySettledAtMs: r.poly_settled_at_ms ?? undefined,
+      polySettlementOutcome:
+        (r.poly_settlement_outcome as 'yes' | 'no' | undefined) ?? undefined,
+      polyPayoutUsdc: r.poly_payout_usdc ?? undefined,
+      polyPnlUsdc: r.poly_pnl_usdc ?? undefined,
+      polyRedeemTxHash: r.poly_redeem_tx_hash ?? undefined,
+      polyRedeemStatus:
+        (r.poly_redeem_status as 'pending' | 'success' | 'failed' | undefined) ?? undefined,
+      hlAsset: r.hl_asset ?? undefined,
+      hlOrderId: r.hl_order_id ?? undefined,
+      hlSize: r.hl_size ?? undefined,
+      hlSide: (r.hl_side as 'long' | 'short' | undefined) ?? undefined,
+      hlOpenPrice: r.hl_open_price ?? undefined,
+      hlClosePrice: r.hl_close_price ?? undefined,
+      hlStatus:
+        (r.hl_status as 'open' | 'closed' | 'failed' | undefined) ?? undefined,
+      hlPnlUsdc: r.hl_pnl_usdc ?? undefined,
+      hlFundingPaidUsdc: r.hl_funding_paid_usdc ?? undefined,
+      hlClosedAtMs: r.hl_closed_at_ms ?? undefined,
     }));
   }
 }

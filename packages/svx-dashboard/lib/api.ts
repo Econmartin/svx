@@ -47,6 +47,22 @@ export interface BotStatus {
   polyPusdBalance?: number | null;
   polyGasPol?: number | null;
   polyBalanceAtMs?: number | null;
+  /** Realized Polymarket-leg PnL across all settled trades (pUSD). */
+  realizedPolyPnlUsdc?: number;
+  /** Rolling 24h realized Polymarket-leg PnL (pUSD) — feeds the daily limit. */
+  realizedPolyPnl24hUsdc?: number;
+  /** Configured daily loss limit (pUSD) for the Polymarket leg. */
+  dailyPolyLossLimitUsdc?: number;
+  // Hyperliquid hedge leg.
+  hlExecutionEnabled?: boolean;
+  hlNetwork?: 'mainnet' | 'testnet';
+  openHlExposureUsdc?: number;
+  realizedHlPnlUsdc?: number;
+  realizedHlPnl24hUsdc?: number;
+  dailyHlLossLimitUsdc?: number;
+  // Cross-venue combined (poly + hl) — the pure-vol PnL story.
+  realizedCombinedPnlUsdc?: number;
+  realizedCombinedPnl24hUsdc?: number;
 }
 
 export interface SignalRecord {
@@ -98,6 +114,25 @@ export interface TradeRecord {
   polyCostUsdc?: number;
   polyTxHash?: string;
   polyStatus?: 'submitted' | 'filled' | 'failed' | 'partial';
+  // Polymarket settlement (populated once UMA resolves the market).
+  polySettled?: boolean;
+  polySettledAtMs?: number;
+  polySettlementOutcome?: 'yes' | 'no';
+  polyPayoutUsdc?: number;
+  polyPnlUsdc?: number;
+  polyRedeemTxHash?: string;
+  polyRedeemStatus?: 'pending' | 'success' | 'failed';
+  // Hyperliquid hedge leg.
+  hlAsset?: string;
+  hlOrderId?: string;
+  hlSize?: number;
+  hlSide?: 'long' | 'short';
+  hlOpenPrice?: number;
+  hlClosePrice?: number;
+  hlStatus?: 'open' | 'closed' | 'failed';
+  hlPnlUsdc?: number;
+  hlFundingPaidUsdc?: number;
+  hlClosedAtMs?: number;
 }
 
 export interface OracleSummary {
@@ -151,6 +186,9 @@ export function createApi(base: string) {
     signals: (limit = 100) => get<SignalRecord[]>(`/signals?limit=${limit}`),
     positionsOpen: () => get<TradeRecord[]>('/positions/open'),
     positionsClosed: (limit = 500) => get<TradeRecord[]>(`/positions/closed?limit=${limit}`),
+    positionsClosedPoly: (limit = 500) =>
+      get<TradeRecord[]>(`/positions/closed-poly?limit=${limit}`),
+    positionsHlOpen: () => get<TradeRecord[]>('/positions/hl-open'),
     oracles: () => get<OracleSummary[]>('/oracles'),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
   };

@@ -16,6 +16,9 @@ importers:
       '@mysten/sui':
         specifier: ^1.18.0
         version: 1.45.2(typescript@5.9.3)
+      '@nktkas/hyperliquid':
+        specifier: ^0.32.2
+        version: 0.32.2(typescript@5.9.3)
       '@polymarket/clob-client-v2':
         specifier: ^1.0.6
         version: 1.0.6(typescript@5.9.3)(zod@3.25.76)
@@ -1061,6 +1064,22 @@ packages:
     dev: false
     optional: true
 
+  /@nktkas/hyperliquid@0.32.2(typescript@5.9.3):
+    resolution: {integrity: sha512-0Wh/keNAgnfdA/cLmdJDDzTZq/CSoT3lL/eY+MzF9R5U10d5J6nin/sEaH5HA+9K8CIag36ZtZ9dCxDvYEb0nw==}
+    engines: {node: '>=20.19.0'}
+    dependencies:
+      '@nktkas/rews': 2.1.1
+      '@noble/hashes': 2.2.0
+      valibot: 1.3.1(typescript@5.9.3)
+    transitivePeerDependencies:
+      - typescript
+    dev: false
+
+  /@nktkas/rews@2.1.1:
+    resolution: {integrity: sha512-jB1dy7lQY3ygin1k9FyOioUvPq1QxoolUPDYXd7y73uF6QE+ntbpbMj96nO5Akl8g/b86l6w6HnWo0V5nhR4+g==}
+    engines: {node: '>=18'}
+    dev: false
+
   /@noble/ciphers@1.3.0:
     resolution: {integrity: sha512-2I0gnIVPtfnMw9ee9h1dJG7tp81+8Ob3OJb3Mv37rx5L40/b0i7djjCVvGOVqc9AEIQyvyu1i6ypKdFw8R8gQw==}
     engines: {node: ^14.21.3 || >=16}
@@ -1083,6 +1102,11 @@ packages:
   /@noble/hashes@1.8.0:
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
+    dev: false
+
+  /@noble/hashes@2.2.0:
+    resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
+    engines: {node: '>= 20.19.0'}
     dev: false
 
   /@nodelib/fs.scandir@2.1.5:
@@ -3789,6 +3813,17 @@ packages:
   /utils-merge@1.0.1:
     resolution: {integrity: sha512-pMZTvIkT1d+TFGvDOqodOclx0QWkkgi6Tdoa8gC8ffGAAqz9pzPTZWAybbsHHoED/ztMtkv/VoYTYyShUn81hA==}
     engines: {node: '>= 0.4.0'}
+    dev: false
+
+  /valibot@1.3.1(typescript@5.9.3):
+    resolution: {integrity: sha512-sfdRir/QFM0JaF22hqTroPc5xy4DimuGQVKFrzF1YfGwaS1nJot3Y8VqMdLO2Lg27fMzat2yD3pY5PbAYO39Gg==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+    dependencies:
+      typescript: 5.9.3
     dev: false
 
   /valibot@1.4.0(typescript@5.9.3):

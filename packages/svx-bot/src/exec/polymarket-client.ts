@@ -23,7 +23,7 @@ import {
   type ApiKeyCreds,
   type OrderBookSummary,
 } from '@polymarket/clob-client-v2';
-import { createPublicClient, http, parseAbi } from 'viem';
+import { createPublicClient, http, parseAbi, parseUnits, type Address } from 'viem';
 import { polygon, polygonAmoy } from 'viem/chains';
 import type { SvxConfig } from '../config.js';
 import { dataPath } from '../config.js';
@@ -38,6 +38,31 @@ const ERC20_ABI = parseAbi([
   'function balanceOf(address) view returns (uint256)',
   'function decimals() view returns (uint8)',
 ]);
+
+/**
+ * Polymarket multi-strike events (e.g. "Bitcoin above $80k/$82k/$84k on
+ * May 11") are NegRisk markets. Redemption goes through the NegRiskAdapter,
+ * which combines the per-strike conditional tokens and pays out pUSD 1:1
+ * for winning shares.
+ *
+ * Standard CTF (`ConditionalTokens.redeemPositions`) is the fallback for
+ * non-NegRisk markets. The signatures differ — we choose at call time based
+ * on the `negRisk` flag returned by gamma.
+ *
+ * Addresses confirmed on Polygon mainnet (chain 137) from getContractConfig
+ * + Polymarket public docs.
+ */
+const NEG_RISK_ADAPTER: Address = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
+const CONDITIONAL_TOKENS: Address = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+
+const NEG_RISK_ADAPTER_ABI = parseAbi([
+  'function redeemPositions(bytes32 _conditionId, uint256[] _amounts)',
+]);
+const CONDITIONAL_TOKENS_ABI = parseAbi([
+  'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets)',
+]);
+
+const ZERO_BYTES32 = ('0x' + '0'.repeat(64)) as `0x${string}`;
 
 export interface PolyExecOptions {
   /** L2 API credentials. Required for any state-changing call. */
@@ -152,6 +177,76 @@ export class PolymarketExecClient {
   /** Cheap accessor — same address used for funder/signer. */
   get operatorAddress(): `0x${string}` {
     return this.address;
+  }
+
+  /**
+   * Redeem CTF positions for a resolved market. Burns the outcome tokens
+   * we hold and credits pUSD to the operator wallet 1:1 with winning shares.
+   * Losing shares pay 0 and are still consumed by the redeem (no penalty,
+   * but no point spending gas on them — caller should skip pure-losers).
+   *
+   * `shares` is the number of WINNING outcome shares we hold (the redeem
+   * payout in pUSD). Wei conversion uses 6 decimals matching pUSD.
+   *
+   * Polymarket's "Bitcoin above X" strikes are NegRisk markets — set
+   * `negRisk=true`. The NegRiskAdapter takes a parallel `_amounts` array;
+   * we pass [winningShares, 0] when Yes won, [0, winningShares] otherwise.
+   * Standard CTF takes `indexSets` instead — [1] for Yes only, [2] for No
+   * only — and redeems all of our balance for those index sets (no amount).
+   *
+   * Returns the Polygon tx hash. Throws on revert (caller logs + retries
+   * next loop iteration).
+   */
+  async redeemPolyWinnings(args: {
+    conditionId: string;
+    negRisk: boolean;
+    winningOutcome: 'yes' | 'no';
+    shares: number;
+  }): Promise<`0x${string}`> {
+    const { walletClient } = loadPolyOperatorKey(this.cfg);
+    const contracts = getContractConfig(this.endpoints.chainId);
+    const conditionId = args.conditionId as `0x${string}`;
+    log.info('svx.poly_client.redeem.submit', {
+      conditionId,
+      winningOutcome: args.winningOutcome,
+      shares: args.shares,
+      negRisk: args.negRisk,
+    });
+
+    // walletClient was constructed with account+chain bound in
+    // loadPolyOperatorKey, so we don't repeat them here.
+    if (args.negRisk) {
+      // NegRisk: amounts parallel to outcomes [Yes, No] in wei (6 dp).
+      const sharesWei = parseUnits(args.shares.toFixed(6), 6);
+      const amounts = args.winningOutcome === 'yes' ? [sharesWei, 0n] : [0n, sharesWei];
+      const tx = await walletClient.writeContract({
+        chain: walletClient.chain,
+        account: walletClient.account!,
+        address: NEG_RISK_ADAPTER,
+        abi: NEG_RISK_ADAPTER_ABI,
+        functionName: 'redeemPositions',
+        args: [conditionId, amounts],
+      });
+      log.info('svx.poly_client.redeem.ok', { conditionId, tx, path: 'negRisk' });
+      return tx;
+    }
+
+    // Standard CTF: index sets are bitmask-style [1, 2] for [Yes, No]. Pass
+    // only the winning side so we don't waste gas burning losing tokens
+    // (we don't hold any if we never bought them, but redeemPositions still
+    // reads ERC1155 balances for each indexSet passed).
+    const winningIndex = args.winningOutcome === 'yes' ? 1n : 2n;
+    const collateral = contracts.collateral as Address;
+    const tx = await walletClient.writeContract({
+      chain: walletClient.chain,
+      account: walletClient.account!,
+      address: CONDITIONAL_TOKENS,
+      abi: CONDITIONAL_TOKENS_ABI,
+      functionName: 'redeemPositions',
+      args: [collateral, ZERO_BYTES32, conditionId, [winningIndex]],
+    });
+    log.info('svx.poly_client.redeem.ok', { conditionId, tx, path: 'ctf' });
+    return tx;
   }
 
   /** Symmetric to marketBuy. `shares` is the number of outcome shares to sell. */

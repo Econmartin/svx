@@ -5,11 +5,16 @@ import type { LedgerStore } from '../src/ledger/store.js';
 import type { SvxConfig } from '../src/config.js';
 
 // Minimal fake ledger that satisfies what RiskGate actually calls.
-function fakeLedger(opts: { paused?: boolean; consecutiveLosses?: number } = {}): LedgerStore {
+function fakeLedger(opts: {
+  paused?: boolean;
+  consecutiveLosses?: number;
+  polyPnl24h?: number;
+} = {}): LedgerStore {
   return {
     getPause: () => ({ paused: !!opts.paused, reason: opts.paused ? 'test pause' : undefined }),
     setPause: () => {},
     consecutiveLosses: () => opts.consecutiveLosses ?? 0,
+    realizedPolyPnlSince: () => opts.polyPnl24h ?? 0,
   } as unknown as LedgerStore;
 }
 
@@ -40,6 +45,13 @@ const baseCfg: SvxConfig = {
   polyMinBookDepthShares: 20,
   dailyPolyLossLimitUsdc: 10,
   polyFillTimeoutMs: 30_000,
+  hlExecutionEnabled: false,
+  hlNetwork: 'mainnet',
+  hlHedgeAsset: 'BTC',
+  maxHlPerTradeUsdc: 2,
+  maxHlOpenUsdc: 10,
+  dailyHlLossLimitUsdc: 5,
+  hlRequiredForPoly: false,
   dataDir: '/tmp/svx-test',
   apiHost: '127.0.0.1',
   apiPort: 4321,

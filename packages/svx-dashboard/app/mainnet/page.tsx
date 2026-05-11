@@ -29,10 +29,14 @@ import { StatusBadge } from '@/components/StatusBadge';
 export default function MainnetOverviewPage() {
   const fetchStatus = useCallback(() => apiMainnet.status(), []);
   const fetchOpen = useCallback(() => apiMainnet.positionsOpen(), []);
+  const fetchClosedPoly = useCallback(() => apiMainnet.positionsClosedPoly(50), []);
+  const fetchHlOpen = useCallback(() => apiMainnet.positionsHlOpen(), []);
   const fetchSignals = useCallback(() => apiMainnet.signals(20), []);
 
   const { data: status, error: statusError } = usePolling(fetchStatus, 10_000);
   const { data: open } = usePolling(fetchOpen, 10_000);
+  const { data: closedPoly } = usePolling(fetchClosedPoly, 30_000);
+  const { data: hlOpen } = usePolling(fetchHlOpen, 10_000);
   const { data: recentSignals } = usePolling(fetchSignals, 5_000);
 
   if (!apiMainnet.enabled) {
@@ -100,9 +104,40 @@ export default function MainnetOverviewPage() {
             hint: 'native gas balance',
           },
           {
-            label: 'Open poly positions',
-            value: open?.filter((t) => t.polyStatus === 'filled').length ?? '—',
-            hint: `${status?.openPositionCount ?? 0} total trades open`,
+            label: 'pUSD PnL (24h)',
+            value: formatUsdc(status?.realizedPolyPnl24hUsdc ?? 0),
+            hint: status?.dailyPolyLossLimitUsdc != null
+              ? `limit −${formatUsdc(status.dailyPolyLossLimitUsdc)}`
+              : 'daily limit unset',
+          },
+          {
+            label: 'pUSD PnL (all)',
+            value: formatUsdc(status?.realizedPolyPnlUsdc ?? 0),
+            hint: `${closedPoly?.length ?? 0} closed`,
+          },
+          {
+            label: 'HL exposure',
+            value: status?.hlExecutionEnabled
+              ? formatUsdc(status.openHlExposureUsdc ?? 0)
+              : '—',
+            hint: status?.hlExecutionEnabled
+              ? `${hlOpen?.length ?? 0} open hedges`
+              : 'hedging off',
+          },
+          {
+            label: 'HL PnL (all)',
+            value: status?.hlExecutionEnabled
+              ? formatUsdc(status.realizedHlPnlUsdc ?? 0)
+              : '—',
+            hint:
+              status?.dailyHlLossLimitUsdc != null
+                ? `limit −${formatUsdc(status.dailyHlLossLimitUsdc)}`
+                : 'daily limit unset',
+          },
+          {
+            label: 'Combined PnL (all)',
+            value: formatUsdc(status?.realizedCombinedPnlUsdc ?? 0),
+            hint: 'poly + hl = pure-vol PnL',
           },
           {
             label: 'Signals 24h',
@@ -178,6 +213,128 @@ export default function MainnetOverviewPage() {
                 <tr>
                   <td colSpan={7} className="text-center text-muted py-4">
                     No Polymarket positions yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {status?.hlExecutionEnabled && (
+        <section className="rounded border border-border bg-surface p-4">
+          <h2 className="text-sm uppercase tracking-wider text-muted mb-3">
+            Open Hyperliquid hedges ({status?.hlNetwork ?? 'mainnet'})
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="font-mono w-full">
+              <thead>
+                <tr>
+                  <th>Opened</th>
+                  <th>Asset</th>
+                  <th>Side</th>
+                  <th>Size</th>
+                  <th>Open px</th>
+                  <th>Notional</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(hlOpen ?? []).map((t) => (
+                  <tr key={t.id}>
+                    <td className="text-muted">
+                      {new Date(t.timestampMs).toLocaleTimeString()}
+                    </td>
+                    <td>{t.hlAsset ?? 'BTC'}</td>
+                    <td>{t.hlSide?.toUpperCase() ?? '—'}</td>
+                    <td>{t.hlSize?.toFixed(5) ?? '—'}</td>
+                    <td>${t.hlOpenPrice?.toFixed(1) ?? '—'}</td>
+                    <td>
+                      {t.hlSize != null && t.hlOpenPrice != null
+                        ? formatUsdc(t.hlSize * t.hlOpenPrice)
+                        : '—'}
+                    </td>
+                    <td className="text-xs">{t.hlStatus ?? '—'}</td>
+                  </tr>
+                ))}
+                {!(hlOpen ?? []).length && (
+                  <tr>
+                    <td colSpan={7} className="text-center text-muted py-4">
+                      No open Hyperliquid hedges.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      <section className="rounded border border-border bg-surface p-4">
+        <h2 className="text-sm uppercase tracking-wider text-muted mb-3">
+          Closed Polymarket positions
+        </h2>
+        <div className="overflow-x-auto">
+          <table className="font-mono w-full">
+            <thead>
+              <tr>
+                <th>Settled</th>
+                <th>Strike</th>
+                <th>Bet</th>
+                <th>Won</th>
+                <th>Shares</th>
+                <th>Cost</th>
+                <th>Payout</th>
+                <th>Poly PnL</th>
+                <th>HL PnL</th>
+                <th>Combined</th>
+                <th>Redeem</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(closedPoly ?? []).map((t) => {
+                const won =
+                  t.polySettlementOutcome != null && t.polyOutcome === t.polySettlementOutcome;
+                const combined = (t.polyPnlUsdc ?? 0) + (t.hlPnlUsdc ?? 0);
+                return (
+                  <tr key={t.id} className={combined >= 0 ? 'text-win' : 'text-loss'}>
+                    <td className="text-muted">
+                      {t.polySettledAtMs
+                        ? new Date(t.polySettledAtMs).toLocaleString()
+                        : '—'}
+                    </td>
+                    <td>${t.strike.toFixed(0)}</td>
+                    <td>{t.polyOutcome?.toUpperCase() ?? '—'}</td>
+                    <td>{won ? 'Y' : 'N'}</td>
+                    <td>{t.polyFilledShares?.toFixed(2) ?? '—'}</td>
+                    <td>{formatUsdc(t.polyCostUsdc)}</td>
+                    <td>{formatUsdc(t.polyPayoutUsdc)}</td>
+                    <td>{formatUsdc(t.polyPnlUsdc)}</td>
+                    <td>{t.hlPnlUsdc != null ? formatUsdc(t.hlPnlUsdc) : '—'}</td>
+                    <td>{formatUsdc(combined)}</td>
+                    <td className="text-xs">
+                      {t.polyRedeemTxHash ? (
+                        <a
+                          href={`https://polygonscan.com/tx/${t.polyRedeemTxHash}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline hover:text-accent"
+                        >
+                          tx
+                        </a>
+                      ) : won ? (
+                        (t.polyRedeemStatus ?? 'pending')
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!(closedPoly ?? []).length && (
+                <tr>
+                  <td colSpan={11} className="text-center text-muted py-4">
+                    No settled Polymarket positions yet.
                   </td>
                 </tr>
               )}

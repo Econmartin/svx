@@ -10,10 +10,11 @@ track.
 > via an SVI volatility surface. Polymarket prices a few discrete strikes via
 > a human-driven order book. When they disagree by more than three percentage
 > points, there's a trade. Here is a bot that takes those trades
-> automatically."
+> automatically — and is already trading them on Polygon mainnet today."
 
 Show the dashboard landing page. Point to the live status badge, the
-realized-PnL chart, and the recent-signals table.
+realized-PnL chart, and the recent-signals table. Open `/mainnet` for the
+Polygon side.
 
 ## 0:20–1:00 — The math, briefly
 
@@ -30,21 +31,29 @@ to within 1e-6."*
 
 ## 1:00–2:30 — Live trading log
 
-Switch to the **Signals** page. Filter to `paper_executed`.
+Switch to the **Signals** page. Filter to `live_executed` (mainnet) or
+`paper_executed` (testnet view).
 
 > "Every row is a real signal generated from real Predict + real Polymarket
 > data. Each one names the oracle, the strike, the Predict probability, the
-> Polymarket Yes price, the spread, and the side we'd take. We've been
-> running this for [N] weeks; here's the log."
+> Polymarket Yes price, the spread, and the side we'd take."
 
 Click a row, point to the `predict_iv` column ("0.65 → Predict thinks the
 strike is 65% likely") and the `poly_iv` column ("0.59 → Polymarket implies
 59%; the 6% gap is the trade").
 
-Switch to the **Positions** page. Show closed trades, PnL distribution.
+Switch to the **/mainnet** page. Point to:
 
-> "Win rate is [X]%. Average trade PnL is [Y] dUSDC. Over [N] weeks of
-> testnet operation, total realized PnL is [Z] dUSDC."
+- The pUSD balance + wallet address (link to polygonscan).
+- **Open Polymarket positions** — the bot's current Yes/No share holdings.
+- **Closed Polymarket positions** — settled trades with payout, PnL, and a
+  polygonscan link to the auto-redeem tx.
+- The realized pUSD PnL (24h / all-time) StatRow values — those are the
+  numbers the daily-loss gate enforces against.
+
+> "Each closed row is the full lifecycle: signal → buy on Polymarket → wait
+> for UMA → auto-redeem winning shares for pUSD. The redeem tx is on
+> polygonscan, the PnL is recorded, the daily-loss gate updates."
 
 ## 2:30–3:30 — Risk controls demo
 
@@ -72,28 +81,52 @@ and the manual kill switch.
 ## 3:30–4:30 — Mainnet readiness
 
 Switch to a terminal and show `docs/mainnet-runbook.md`. Highlight the
-capital ramp table and the pre-flight checklist.
+two parts: live Polymarket operations (top-up, kill-switch, log triage)
+and the pre-flight checklist for the future Sui mainnet switch.
 
-> "When DeepBook Predict ships on mainnet, SVX flips one config flag and
-> swaps in the mainnet package ID. The capital ramp starts at 50 USDC per
-> trade, scales to target over two weeks. Operator key on a hardware wallet,
-> alerts wired, on-call rotation if it's a team."
+> "The Polymarket leg is mainnet today — the bot trades real pUSD against
+> real BTC strike markets and auto-redeems winning shares via the
+> NegRiskAdapter. When DeepBook Predict ships on Sui mainnet, the second
+> leg flips on with a config change and an address swap. The runbook
+> covers both."
 
 > "There are no users. There is no vault. There is no token. SVX trades its
-> own balance. The 50% mainnet-prize gate is trivially clearable: the bot
-> runs, the bot trades, the bot is on mainnet."
+> own balance. The 50% mainnet-prize gate is already cleared: the bot
+> runs, the bot trades, the bot is on mainnet — Polygon now, Sui as soon
+> as Predict ships there."
 
-## 4:30–5:00 — What's next
+## 4:30–5:00 — What's next + the Hyperliquid stretch goal
 
-> "Three stretch goals on the roadmap:
+> "The hackathon brief explicitly listed Hyperliquid delta hedging as the
+> stretch goal for this exact bot. We built it.
 >
-> 1. Hyperliquid delta hedge for pure-vol PnL.
-> 2. Internal Predict-vs-Predict butterfly/calendar arb-free checker — a
->    diagnostic for the SVI feeder.
-> 3. Multi-asset: ETH, SOL, anything Predict adds.
+> Every Polymarket fill triggers a delta-sized BTC perp hedge on
+> Hyperliquid — short BTC when we bought Yes, long when we bought No. The
+> hedge closes at settlement on the same poll loop that detects UMA
+> resolution. Combined PnL on the dashboard is poly + HL = pure-vol PnL.
 >
-> The math, the data layer, and the risk gate are all multi-asset by
-> construction; only the matching logic needs an extension."
+> Three venues, one bot, delta-neutral by construction. We don't care
+> which way BTC moves — only whether the spread we observed was real."
+
+Open the `/mainnet` dashboard:
+- Point to the **HL exposure** stat — current open hedge notional.
+- Point to the **HL PnL (all)** stat — funding cost + perp PnL.
+- Point to the **Combined PnL (all)** stat — the pure-vol number.
+- Scroll to "Open Hyperliquid hedges" — one row per active hedge with
+  size, side, open price.
+- Scroll to "Closed Polymarket positions" — Poly PnL, HL PnL, Combined
+  columns side-by-side. Show how the combined column has tighter swings
+  than the Poly column alone.
+
+> "Two more lines of work from here:
+>
+> 1. **Dynamic hedge rebalancing** for longer-dated positions — re-sizing
+>    the HL leg as delta drifts during the day. Currently a static hedge
+>    at trade open is sufficient because Polymarket BTC markets typically
+>    resolve same-day.
+> 2. **Multi-asset** — extend the matching layer to ETH and SOL once
+>    Predict adds them. The math, sizing, risk gate, and execution paths
+>    are all asset-agnostic; only the matching glue needs an extension."
 
 Close on the dashboard URL + GitHub link. Done.
 

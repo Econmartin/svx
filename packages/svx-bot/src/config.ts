@@ -100,6 +100,26 @@ const Schema = z.object({
   /** Max time (ms) to wait for the Polymarket leg to fill before we abort. */
   polyFillTimeoutMs: z.number().int().positive().default(30_000),
 
+  // === Hyperliquid delta hedge (Part 2 — OFF by default) ===
+  /** Kill switch for the HL hedging leg. Defaults OFF — operator turns on
+   *  after one-time bridge funding from Arbitrum. */
+  hlExecutionEnabled: z.boolean().default(false),
+  /** Hyperliquid network — `mainnet` or `testnet`. */
+  hlNetwork: z.enum(['mainnet', 'testnet']).default('mainnet'),
+  /** Asset to hedge (must match Hyperliquid's perp universe). */
+  hlHedgeAsset: z.string().default('BTC'),
+  /** Per-trade USD notional cap on the HL leg. Bounds the hedge size so a
+   *  short-expiry gamma blow-up can't size a hedge bigger than we want. */
+  maxHlPerTradeUsdc: z.number().positive().default(2),
+  /** Total open HL exposure cap (USD notional, summed across all open hedges). */
+  maxHlOpenUsdc: z.number().positive().default(10),
+  /** Daily HL loss limit (USD). Auto-pauses on breach. */
+  dailyHlLossLimitUsdc: z.number().positive().default(5),
+  /** When the HL exchange is unreachable, should the bot refuse to open new
+   *  poly trades? `true` = strict (no naked Poly), `false` = permissive
+   *  (continue opening Poly without hedge, log a warning). Default false. */
+  hlRequiredForPoly: z.boolean().default(false),
+
   dataDir: z.string().default('./data'),
   apiHost: z.string().default('127.0.0.1'),
   apiPort: z.number().int().positive().default(4321),
@@ -152,6 +172,13 @@ export function loadConfig(): SvxConfig {
     polyMinBookDepthShares: parseNum(process.env.POLY_MIN_BOOK_DEPTH_SHARES, 20),
     dailyPolyLossLimitUsdc: parseNum(process.env.DAILY_POLY_LOSS_LIMIT_USDC, 10),
     polyFillTimeoutMs: parseNum(process.env.POLY_FILL_TIMEOUT_MS, 30_000),
+    hlExecutionEnabled: parseBool(process.env.HL_EXECUTION_ENABLED, false),
+    hlNetwork: (process.env.HL_NETWORK as 'mainnet' | 'testnet' | undefined) ?? 'mainnet',
+    hlHedgeAsset: process.env.HL_HEDGE_ASSET ?? 'BTC',
+    maxHlPerTradeUsdc: parseNum(process.env.MAX_HL_PER_TRADE_USDC, 2),
+    maxHlOpenUsdc: parseNum(process.env.MAX_HL_OPEN_USDC, 10),
+    dailyHlLossLimitUsdc: parseNum(process.env.DAILY_HL_LOSS_LIMIT_USDC, 5),
+    hlRequiredForPoly: parseBool(process.env.HL_REQUIRED_FOR_POLY, false),
     dataDir: process.env.SVX_DATA_DIR ?? path.join(WORKSPACE_ROOT, 'data'),
     apiHost: process.env.SVX_API_HOST ?? '127.0.0.1',
     apiPort: parseNum(process.env.SVX_API_PORT, 4321),

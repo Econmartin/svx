@@ -95,10 +95,9 @@ export class RiskGate {
    * Polymarket-leg risk gates. Separate from check() because the cost is in
    * pUSD (not dUSDC) and the open-position count is per-leg.
    *
-   * Daily-PnL gate is intentionally omitted for now — Polymarket positions
-   * settle via UMA hours after expiry, so we can't reliably compute realized
-   * PnL until poly settlement is wired. Per-trade + concurrent caps bound the
-   * worst-case exposure: maxPolyPositionUsdc * maxOpenPolyPositions.
+   * Daily-PnL gate (`dailyPolyLossLimitUsdc`) became active once the
+   * settlement-poll loop started populating `poly_pnl_usdc`. Pauses the bot
+   * via the shared pause flag — same auto-pause UX as the dUSDC limit.
    */
   checkPoly(input: { costUsdc: number; openPolyPositionCount: number }): RiskDecision {
     const paused = this.isPaused();
@@ -115,6 +114,62 @@ export class RiskGate {
       return {
         ok: false,
         reason: `${input.openPolyPositionCount} open poly positions ≥ cap ${this.cfg.maxOpenPolyPositions}`,
+      };
+    }
+
+    const polyPnl24h = this.ledger.realizedPolyPnlSince(Date.now() - 24 * 3600_000);
+    if (polyPnl24h <= -this.cfg.dailyPolyLossLimitUsdc) {
+      this.pause(`daily poly loss limit hit: ${polyPnl24h.toFixed(2)} pUSD`);
+      return {
+        ok: false,
+        reason: `24h poly loss ${polyPnl24h.toFixed(2)} ≤ −${this.cfg.dailyPolyLossLimitUsdc}`,
+      };
+    }
+
+    return { ok: true };
+  }
+
+  /**
+   * Hyperliquid hedge risk gate. Enforced before every HL order open.
+   *
+   * The caller passes the proposed hedge's USD notional and the current
+   * total HL exposure (read from the ledger). Three gates layered:
+   *   1. Per-trade USD cap (`maxHlPerTradeUsdc`)
+   *   2. Total open exposure cap (`maxHlOpenUsdc`)
+   *   3. 24h realized HL PnL ≤ -`dailyHlLossLimitUsdc` → auto-pause
+   *
+   * The pause flag is the SAME flag used by the dUSDC / pUSD gates, so a
+   * daily-loss breach on any leg pauses everything together — the operator
+   * resumes via the same `svx resume` command.
+   */
+  checkHl(input: {
+    notionalUsdc: number;
+    openHlExposureUsdc: number;
+  }): RiskDecision {
+    const paused = this.isPaused();
+    if (paused.paused) return { ok: false, reason: paused.reason ?? 'paused' };
+
+    if (input.notionalUsdc > this.cfg.maxHlPerTradeUsdc + 1e-6) {
+      return {
+        ok: false,
+        reason: `hl notional ${input.notionalUsdc.toFixed(2)} > per-trade cap ${this.cfg.maxHlPerTradeUsdc}`,
+      };
+    }
+
+    const totalExposureAfter = input.openHlExposureUsdc + input.notionalUsdc;
+    if (totalExposureAfter > this.cfg.maxHlOpenUsdc + 1e-6) {
+      return {
+        ok: false,
+        reason: `hl total exposure ${totalExposureAfter.toFixed(2)} > cap ${this.cfg.maxHlOpenUsdc}`,
+      };
+    }
+
+    const hlPnl24h = this.ledger.realizedHlPnlSince(Date.now() - 24 * 3600_000);
+    if (hlPnl24h <= -this.cfg.dailyHlLossLimitUsdc) {
+      this.pause(`daily HL loss limit hit: ${hlPnl24h.toFixed(2)} USDC`);
+      return {
+        ok: false,
+        reason: `24h HL loss ${hlPnl24h.toFixed(2)} ≤ −${this.cfg.dailyHlLossLimitUsdc}`,
       };
     }
 

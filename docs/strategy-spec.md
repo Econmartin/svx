@@ -3,6 +3,20 @@
 This document is the source of truth for what SVX trades and why. Read it
 before changing the math or the risk controls.
 
+## Status (2026-05-11)
+
+**Polymarket leg: LIVE on Polygon mainnet.** The bot submits market-buy
+orders on the Polymarket CLOB v2, holds outcome shares through expiry, polls
+gamma for UMA resolution, and auto-redeems winning shares via the
+NegRiskAdapter / ConditionalTokens contracts. Realized pUSD PnL is enforced
+against `dailyPolyLossLimitUsdc` (default $10 — auto-pause on breach).
+
+**Predict leg: PAPER pending Sui mainnet.** All four protocol primitives
+(`create_manager`, `deposit`, `mint`, `redeem_permissionless`) are exercised
+end-to-end on testnet — the operator's PredictManager is funded with dUSDC
+and has live trades on record. Flipping to mainnet is an address-swap +
+`PAPER_TRADING=false`, documented in [mainnet-runbook.md](mainnet-runbook.md).
+
 ## The trade
 
 For every (Predict oracle, Polymarket strike-market) where:
@@ -72,11 +86,75 @@ Implementation: [packages/svx-bot/src/exec/sizer.ts](../packages/svx-bot/src/exe
 Each control has a dedicated path in [packages/svx-bot/src/exec/risk.ts](../packages/svx-bot/src/exec/risk.ts) and
 [packages/svx-bot/src/signal/filter.ts](../packages/svx-bot/src/signal/filter.ts).
 
+## Polymarket execution path
+
+The bot submits orders to Polymarket through the [CLOB v2 SDK](https://github.com/Polymarket/clob-client)
+using an L1 EVM keypair (`SignatureTypeV2.EOA`). pUSD is the collateral
+asset; it lives in the operator's own wallet and is wrapped from USDC.e via
+Polymarket's Collateral Onramp (see [mainnet-runbook.md](mainnet-runbook.md) §1.1).
+
+Outcome selection mirrors the spread rationale:
+
+| `predictDirection` | Mathematical opportunity | Poly outcome bought |
+|---|---|---|
+| `down` | `predict_up < poly_yes_ask` — Predict says less likely than poly prices | YES (buy the cheaper side) |
+| `up`   | `predict_up > poly_yes_ask` — Predict says more likely than poly prices | NO (buy the cheaper side; equivalent to selling YES) |
+
+Per-trade pUSD cap is `MAX_POLY_POSITION_USDC` (default $2 — small enough to
+be tolerable as naked-binary exposure pending the planned Hyperliquid hedge).
+
+### Settlement + auto-redeem
+
+After every loop iteration the bot polls gamma every 5 min for unsettled
+poly trades. When a market closes with `outcomePrices[Yes]=1` or `=0`, the
+bot:
+
+1. Records `poly_settled=1`, `poly_payout_usdc = filledShares * (won ? 1 : 0)`,
+   `poly_pnl_usdc = payout - cost`, `poly_settlement_outcome`.
+2. Groups winning trades by `conditionId` and submits **one** redeem tx per
+   market — `NegRiskAdapter.redeemPositions(conditionId, [yesAmt, noAmt])`
+   for NegRisk markets, `ConditionalTokens.redeemPositions(...)` otherwise.
+3. Persists `poly_redeem_tx_hash` + `poly_redeem_status`. Failures are
+   surfaced on the dashboard for manual cleanup (runbook §1.5).
+
+The realized pUSD PnL feeds the daily loss limit on every subsequent
+`risk.checkPoly()` — auto-pauses the bot for 24h on breach.
+
+## Hyperliquid delta hedge
+
+The Polymarket leg leaves directional exposure equal to `Δ × shares` where
+`Δ = ∂N(d2)/∂S = -φ(d2) / (S · √w)` evaluated at the snapshot's spot,
+strike, IV and TTM. After every successful Polymarket fill the bot opens a
+perp on Hyperliquid sized to exactly that delta, on the side that
+neutralizes it:
+
+| Polymarket side | Bot Δ exposure | Hyperliquid hedge |
+|---|---|---|
+| Bought Yes (above strike) | +Δ (long BTC) | Short BTC perp |
+| Bought No (below strike) | −Δ (short BTC) | Long BTC perp |
+
+The hedge closes on the same settlement-poll loop that resolves the Poly
+trade — IOC limit, reduce-only, opposite side. Combined PnL on the
+dashboard is `poly_pnl_usdc + hl_pnl_usdc`. The whole strategy is
+delta-neutral by construction; the residual is pure vol-spread edge.
+
+Risk gates layered on top (all in `risk.checkHl`):
+- `maxHlPerTradeUsdc` — per-trade USD-notional cap on the hedge.
+- `maxHlOpenUsdc` — total open HL exposure (USD).
+- `dailyHlLossLimitUsdc` — 24h-rolling HL PnL ≤ -limit → auto-pause.
+- Default leverage 1×. Code path supports higher but defaults to 1× so
+  liquidation is functionally impossible at current trade sizes.
+
+Implementation: [`pricing/binary-delta.ts`](../packages/svx-bot/src/pricing/binary-delta.ts),
+[`exec/hyperliquid-client.ts`](../packages/svx-bot/src/exec/hyperliquid-client.ts),
+hedge wiring in [`index.ts`](../packages/svx-bot/src/index.ts) after the
+Polymarket fill block.
+
 ## What v1 deliberately does NOT do
 
-- **No delta hedging on Hyperliquid.** Pure binary mispricing has bounded
-  loss (the premium); adding a perp hedge adds cross-venue execution risk,
-  funding-rate exposure, and a third API to babysit. Stretch.
+- **No dynamic hedge rebalancing.** Static hedge at trade open is sufficient
+  for sub-day expiries (Polymarket BTC markets typically settle same-day).
+  Rebalancing as delta drifts during the day is follow-up work.
 - **No spread trades.** Verticals/calendars/butterflies are out of scope.
 - **No Predict-vs-Predict internal arb.** Detecting butterfly/calendar
   violations *within* Predict's surface is a Phase 4 stretch — it's a useful

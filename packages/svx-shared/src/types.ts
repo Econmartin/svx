@@ -170,6 +170,44 @@ export interface TradeRecord {
   polyTxHash?: string;
   /** Status of the Poly leg: 'submitted' | 'filled' | 'failed' | 'partial'. */
   polyStatus?: 'submitted' | 'filled' | 'failed' | 'partial';
+
+  // === Polymarket settlement leg (populated by the settlement-poll loop) ===
+  /** True once UMA has resolved the market and we've recorded payout/PnL. */
+  polySettled?: boolean;
+  /** Wall-clock when we recorded settlement (ms). */
+  polySettledAtMs?: number;
+  /** Winning outcome — 'yes' = "BTC above strike", 'no' = the other side. */
+  polySettlementOutcome?: 'yes' | 'no';
+  /** pUSD payout = filled_shares * (won ? 1 : 0). */
+  polyPayoutUsdc?: number;
+  /** Realized Poly-leg PnL = payout - poly_cost_usdc. Drives daily-loss gate. */
+  polyPnlUsdc?: number;
+  /** Polygon tx hash of the CTF redeemPositions call. */
+  polyRedeemTxHash?: string;
+  /** 'success' | 'failed' | 'pending'. 'pending' = waiting on next sweep. */
+  polyRedeemStatus?: 'pending' | 'success' | 'failed';
+
+  // === Hyperliquid delta-hedge leg (Part 2) ===
+  /** Asset on Hyperliquid — defaults to 'BTC' today. */
+  hlAsset?: string;
+  /** HL order ID returned by the exchange API. */
+  hlOrderId?: string;
+  /** Hedge size in base currency (e.g. BTC). */
+  hlSize?: number;
+  /** 'long' | 'short' — opposite of the Polymarket-side directional exposure. */
+  hlSide?: 'long' | 'short';
+  /** Avg fill price (USDC) when the hedge opened. */
+  hlOpenPrice?: number;
+  /** Avg fill price (USDC) when the hedge closed at settlement. */
+  hlClosePrice?: number;
+  /** 'open' | 'closed' | 'failed'. */
+  hlStatus?: 'open' | 'closed' | 'failed';
+  /** Realized HL leg PnL — drives the daily HL loss gate. */
+  hlPnlUsdc?: number;
+  /** Cumulative funding paid while the position was open (positive = cost). */
+  hlFundingPaidUsdc?: number;
+  /** When the HL leg closed (ms). */
+  hlClosedAtMs?: number;
 }
 
 export interface RiskDecision {

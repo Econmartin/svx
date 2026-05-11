@@ -1,5 +1,8 @@
 'use client';
 
+import { Badge } from '@/components/ui/badge';
+import { Pause, Radio, FlaskConical } from 'lucide-react';
+
 interface Props {
   paused: boolean;
   reason?: string;
@@ -9,14 +12,21 @@ interface Props {
 export function StatusBadge({ paused, reason, live }: Props) {
   if (paused) {
     return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-loss/10 text-loss px-3 py-1 text-xs font-mono">
-        <span className="w-2 h-2 rounded-full bg-loss" /> paused {reason ? `· ${reason}` : ''}
-      </span>
+      <Badge variant="paused" className="gap-1.5">
+        <Pause className="h-3 w-3" />
+        paused
+        {reason ? <span className="opacity-70">· {reason}</span> : null}
+      </Badge>
     );
   }
   return (
-    <span className="inline-flex items-center gap-2 rounded-full bg-win/10 text-win px-3 py-1 text-xs font-mono">
-      <span className="w-2 h-2 rounded-full bg-win animate-pulse" /> {live ? 'live' : 'paper'}
-    </span>
+    <Badge variant={live ? 'live' : 'default'} className="gap-1.5">
+      {live ? (
+        <Radio className="h-3 w-3 animate-pulse" />
+      ) : (
+        <FlaskConical className="h-3 w-3" />
+      )}
+      {live ? 'live' : 'paper'}
+    </Badge>
   );
 }

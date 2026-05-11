@@ -82,6 +82,22 @@ interface BotState {
   };
   /** Last time we refreshed the Polymarket balance from on-chain. */
   lastPolyBalanceAtMs: number;
+  /** Hyperliquid margin balance — populated when hlExec is configured.
+   *  Surfaces on /status so the dashboard's health panel can show whether
+   *  the HL leg is ready to fire. */
+  hlBalance?: {
+    address: `0x${string}`;
+    network: 'mainnet' | 'testnet';
+    accountValueUsdc: number;
+    withdrawableUsdc: number;
+    updatedAtMs: number;
+  };
+  /** Last time we refreshed the HL balance via clearinghouseState. */
+  lastHlBalanceAtMs: number;
+  /** Last time the bot attempted a Polymarket fill (success or fail). 0 if never. */
+  lastPolyAttemptAtMs: number;
+  /** Last time the bot attempted an HL hedge (success or fail). 0 if never. */
+  lastHlAttemptAtMs: number;
   /** Last time we polled gamma for Polymarket settlement / ran auto-redeem.
    *  UMA resolves markets hours after expiry, so 5-min cadence is plenty. */
   lastPolySettlementCheckMs: number;
@@ -89,6 +105,7 @@ interface BotState {
 
 const MANAGER_BALANCE_REFRESH_MS = 30_000;
 const POLY_BALANCE_REFRESH_MS = 60_000;
+const HL_BALANCE_REFRESH_MS = 60_000;
 const POLY_SETTLEMENT_CHECK_INTERVAL_MS = 5 * 60_000; // every 5 minutes — UMA resolution takes hours, no benefit polling faster
 
 const PRUNE_INTERVAL_MS = 6 * 3600_000; // every 6 hours
@@ -123,6 +140,9 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastManagerBalanceAtMs: 0,
     lastPruneAtMs: 0,
     lastPolyBalanceAtMs: 0,
+    lastHlBalanceAtMs: 0,
+    lastPolyAttemptAtMs: 0,
+    lastHlAttemptAtMs: 0,
     lastPolySettlementCheckMs: 0,
   };
 
@@ -401,6 +421,25 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     }
   }
 
+  // Refresh HL margin balance every HL_BALANCE_REFRESH_MS. Single REST call
+  // (clearinghouseState). Powers the dashboard's health panel so the operator
+  // can see "HL leg is funded + reachable" even before the first hedge fires.
+  if (hlExec && Date.now() - state.lastHlBalanceAtMs > HL_BALANCE_REFRESH_MS) {
+    try {
+      const bal = await hlExec.getBalance();
+      state.hlBalance = {
+        address: hlExec.address,
+        network: hlExec.endpoints.network,
+        accountValueUsdc: bal.accountValueUsdc,
+        withdrawableUsdc: bal.withdrawableUsdc,
+        updatedAtMs: Date.now(),
+      };
+      state.lastHlBalanceAtMs = Date.now();
+    } catch (e) {
+      log.warn('svx.hl.balance_refresh_failed', { err: errMsg(e) });
+    }
+  }
+
   for (const match of matches) {
     const oracleSnap = oracleSnapshots.get(match.oracle.oracleId);
     if (!oracleSnap) continue;
@@ -584,6 +623,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           continue;
         }
 
+        state.lastPolyAttemptAtMs = Date.now();
         try {
           log.info('svx.poly.submit', {
             outcome,
@@ -666,6 +706,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             });
           }
         } else if (hedge.btcSize > 0) {
+          state.lastHlAttemptAtMs = Date.now();
           try {
             const fill = await hlExec.openMarketPerp({
               asset: cfg.hlHedgeAsset,

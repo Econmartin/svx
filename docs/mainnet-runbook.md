@@ -105,6 +105,53 @@ All log lines are single-line JSON. Key prefixes to grep:
 A healthy loop iteration emits one `svx.loop.start`, ≤ ~5 `svx.poly.submit`
 (rarely), and a `svx.signal.live_executed` per fired trade.
 
+### 1.4.5 Polymarket Safe-proxy setup (one-time)
+
+Polymarket's CLOB only accepts orders from **registered** maker addresses. If
+you generated a fresh EOA via `generate-poly-wallet` and wrapped pUSD into
+that EOA directly, the CLOB rejects every order with:
+
+```
+"error": "maker address not allowed, please use the deposit wallet flow"
+```
+
+The bot detects this specifically, auto-pauses, and surfaces
+`svx.poly.maker_not_allowed` in the logs. Fix:
+
+1. **Deploy a Safe proxy** for the EOA. Behind Ireland VPN, open
+   https://polymarket.com → click "Log in" → connect with the EOA (Brave
+   Wallet or Rabby with the operator key imported). On first login the UI
+   auto-deploys a Gnosis Safe proxy that holds your funds. Note its
+   address (visible under "Profile" → "Wallet" or via the Safe's link in
+   the URL).
+
+2. **Move pUSD from EOA → proxy.** From the dev box:
+   ```bash
+   cd /Users/martinswdev/Repos/SVX/.claude/worktrees/sad-haslett-1430f3
+   # Dry run first
+   pnpm --filter svx-bot send-pusd-to-proxy -- --to=0x<proxy> --amount=10
+   # Submit
+   pnpm --filter svx-bot send-pusd-to-proxy -- --to=0x<proxy> --amount=10 --confirm
+   ```
+   This sends pUSD via ERC20 `transfer` from the EOA to the proxy
+   address. Costs ~$0.05 of POL gas on the EOA.
+
+3. **Update Coolify env** for the `bot-mainnet` service:
+   ```
+   MAINNET_POLY_FUNDER_ADDRESS=0x<proxy_address>
+   MAINNET_POLY_SIGNATURE_TYPE=POLY_GNOSIS_SAFE
+   ```
+   Save → service restarts. `svx.poly_client.constructed` should log the
+   proxy as funder + `POLY_GNOSIS_SAFE` as signature mode.
+
+4. **Resume the bot**: open a Coolify terminal for `bot-mainnet` →
+   `pnpm --filter svx-bot resume` (clears the pause set by the
+   maker-not-allowed auto-pause). Next signal fires through the proxy.
+
+The proxy address is deterministic per EOA. Once deployed it persists —
+no need to redo any of this after a bot redeploy unless you rotate the
+EOA private key.
+
 ### 1.5 What to do when
 
 #### 3+ `fill_failed` in a row

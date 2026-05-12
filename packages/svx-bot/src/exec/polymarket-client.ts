@@ -81,14 +81,45 @@ export class PolymarketExecClient {
     this.endpoints = endpoints;
     this.address = address;
 
+    // Polymarket signature mode selection. Default 'EOA' keeps the existing
+    // direct-EOA behavior (works only for whitelisted addresses). Most
+    // operators land on POLY_GNOSIS_SAFE — Polymarket's web UI auto-deploys
+    // a Safe proxy that owns the pUSD; the EOA signs orders on its behalf.
+    const sigTypeMap = {
+      EOA: SignatureTypeV2.EOA,
+      POLY_PROXY: SignatureTypeV2.POLY_PROXY,
+      POLY_GNOSIS_SAFE: SignatureTypeV2.POLY_GNOSIS_SAFE,
+    } as const;
+    const signatureType = sigTypeMap[cfg.polySignatureType];
+    const funderAddress =
+      cfg.polyFunderAddress && /^0x[0-9a-fA-F]{40}$/.test(cfg.polyFunderAddress)
+        ? (cfg.polyFunderAddress as `0x${string}`)
+        : address;
+
+    if (cfg.polySignatureType !== 'EOA' && funderAddress.toLowerCase() === address.toLowerCase()) {
+      log.warn('svx.poly_client.funder_mismatch', {
+        signatureType: cfg.polySignatureType,
+        funderAddress,
+        hint:
+          'POLY_SIGNATURE_TYPE is non-EOA but POLY_FUNDER_ADDRESS is unset — falling back to EOA address as funder. Orders will reject if a proxy is required.',
+      });
+    }
+
     const chain = endpoints.network === 'amoy' ? Chain.AMOY : Chain.POLYGON;
     this.clob = new ClobClient({
       host: endpoints.clobHost,
       chain,
       signer: walletClient,
       creds: opts.creds,
-      signatureType: SignatureTypeV2.EOA,
-      funderAddress: address,
+      signatureType,
+      funderAddress,
+    });
+
+    log.info('svx.poly_client.constructed', {
+      eoa: address,
+      funder: funderAddress,
+      signatureType: cfg.polySignatureType,
+      network: endpoints.network,
     });
   }
 
@@ -406,6 +437,28 @@ export function parsePolyFillResponse(resp: unknown, requestedUsdc: number): Pol
   const costUsdc =
     fillPrice != null && filledShares != null ? fillPrice * filledShares : undefined;
   return { orderId, status, filledShares, fillPrice, costUsdc, txHash, raw: resp };
+}
+
+/**
+ * Detect the "maker address not allowed" CLOB error that fires when an EOA
+ * tries to trade without a registered proxy wallet. The error response shape:
+ *   { error: 'maker address not allowed, please use the deposit wallet flow',
+ *     status: 400 }
+ * The fix is operator-side (set up a Safe proxy) — the bot can't recover
+ * on its own. We use this to surface a clear error AND short-circuit the
+ * tight retry loop.
+ */
+export function isMakerNotAllowedError(resp: unknown): boolean {
+  if (!resp || typeof resp !== 'object') return false;
+  const r = resp as Record<string, unknown>;
+  const errStr = typeof r.error === 'string' ? r.error.toLowerCase() : '';
+  const msgStr = typeof r.errorMsg === 'string' ? r.errorMsg.toLowerCase() : '';
+  return (
+    errStr.includes('maker address not allowed') ||
+    errStr.includes('deposit wallet flow') ||
+    msgStr.includes('maker address not allowed') ||
+    msgStr.includes('deposit wallet flow')
+  );
 }
 
 /** Coerce strings, numbers, bigints, booleans into a string. Returns undefined for null/undefined/objects. */

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { parsePolyFillResponse } from '../src/exec/polymarket-client.js';
+import { parsePolyFillResponse, isMakerNotAllowedError } from '../src/exec/polymarket-client.js';
 import { RiskGate } from '../src/exec/risk.js';
 import type { LedgerStore } from '../src/ledger/store.js';
 import type { SvxConfig } from '../src/config.js';
@@ -45,6 +45,8 @@ const baseCfg: SvxConfig = {
   polyMinBookDepthShares: 20,
   dailyPolyLossLimitUsdc: 10,
   polyFillTimeoutMs: 30_000,
+  polySignatureType: 'EOA' as const,
+  polyFunderAddress: '',
   hlExecutionEnabled: false,
   hlNetwork: 'mainnet',
   hlHedgeAsset: 'BTC',
@@ -137,6 +139,41 @@ describe('parsePolyFillResponse', () => {
   it('marks failure when success=false + status field absent entirely', () => {
     const r = parsePolyFillResponse({ success: false, errorMsg: 'insufficient liquidity' }, 2);
     expect(r.status).toBe('failed');
+  });
+});
+
+describe('isMakerNotAllowedError', () => {
+  it('matches the exact Polymarket CLOB rejection string', () => {
+    const resp = {
+      error: 'maker address not allowed, please use the deposit wallet flow',
+      status: 400,
+    };
+    expect(isMakerNotAllowedError(resp)).toBe(true);
+  });
+
+  it('matches case-insensitively', () => {
+    expect(isMakerNotAllowedError({ error: 'Maker Address Not Allowed' })).toBe(true);
+  });
+
+  it('matches when the phrase is in errorMsg instead of error', () => {
+    expect(isMakerNotAllowedError({ errorMsg: 'use the deposit wallet flow' })).toBe(true);
+  });
+
+  it('does not match a generic error', () => {
+    expect(isMakerNotAllowedError({ error: 'insufficient liquidity' })).toBe(false);
+  });
+
+  it('does not match successful fills', () => {
+    expect(
+      isMakerNotAllowedError({ status: 'matched', orderID: '0x', makingAmount: '5' }),
+    ).toBe(false);
+  });
+
+  it('handles null / undefined / non-object inputs', () => {
+    expect(isMakerNotAllowedError(null)).toBe(false);
+    expect(isMakerNotAllowedError(undefined)).toBe(false);
+    expect(isMakerNotAllowedError('string')).toBe(false);
+    expect(isMakerNotAllowedError(42)).toBe(false);
   });
 });
 

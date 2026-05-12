@@ -635,7 +635,23 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             tokenId: polyTokenId,
             usdcAmount: cfg.maxPolyPositionUsdc,
           });
-          const fill = parsePolyFillResponse(resp, cfg.maxPolyPositionUsdc);
+          // Defense-in-depth: parsing the SDK response can throw on
+          // unexpected shapes (we've seen status=boolean, status=number).
+          // Wrap so an unparseable response doesn't crash the trade flow —
+          // log the raw response so we can update the parser, and treat
+          // the order as failed (won't be retried in a tight loop since
+          // the next signal evaluation may not match).
+          let fill: ReturnType<typeof parsePolyFillResponse>;
+          try {
+            fill = parsePolyFillResponse(resp, cfg.maxPolyPositionUsdc);
+          } catch (parseErr) {
+            log.error('svx.poly.parse_failed', {
+              err: errMsg(parseErr),
+              rawResponse: resp,
+              note: 'Order MAY have been submitted on-chain — check the wallet history.',
+            });
+            continue;
+          }
           if (fill.status === 'failed') {
             log.warn('svx.poly.fill_failed', { resp: fill.raw });
             continue;

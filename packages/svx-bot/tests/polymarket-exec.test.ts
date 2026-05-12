@@ -96,6 +96,48 @@ describe('parsePolyFillResponse', () => {
     expect(r.filledShares).toBe(10);
     expect(r.costUsdc).toBeCloseTo(3.1);
   });
+
+  // Regressions — observed wild response shapes that previously crashed
+  // with "r.status?.toLowerCase is not a function".
+  it('does not throw when status is a boolean', () => {
+    const r = parsePolyFillResponse({ status: false, success: false, errorMsg: 'x' }, 2);
+    expect(r.status).toBe('failed');
+  });
+
+  it('does not throw when status is a number (200 = success in some paths)', () => {
+    const r = parsePolyFillResponse(
+      { status: 200, success: true, makingAmount: '4', price: '0.5' },
+      2,
+    );
+    expect(r.status).toBe('filled');
+    expect(r.filledShares).toBeCloseTo(4);
+  });
+
+  it('handles BigInt-style filled / price (some SDK versions)', () => {
+    const r = parsePolyFillResponse(
+      { status: 'matched', makingAmount: BigInt(7), price: BigInt(0) },
+      2,
+    );
+    expect(r.filledShares).toBe(7);
+  });
+
+  it('coerces a numeric orderID to a string', () => {
+    const r = parsePolyFillResponse({ status: 'matched', orderID: 12345, filled: 1 }, 2);
+    expect(r.orderId).toBe('12345');
+  });
+
+  it('falls back to orderHashes[0] when no orderID/orderId/id', () => {
+    const r = parsePolyFillResponse(
+      { status: 'matched', orderHashes: ['0xabc', '0xdef'], filled: 1 },
+      2,
+    );
+    expect(r.orderId).toBe('0xabc');
+  });
+
+  it('marks failure when success=false + status field absent entirely', () => {
+    const r = parsePolyFillResponse({ success: false, errorMsg: 'insufficient liquidity' }, 2);
+    expect(r.status).toBe('failed');
+  });
 });
 
 describe('RiskGate.checkPoly', () => {

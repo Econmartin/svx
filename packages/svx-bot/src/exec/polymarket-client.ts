@@ -347,33 +347,87 @@ export interface PolyFillResult {
 
 /**
  * Parse the V2 SDK's market-order response into a normalized fill record.
- * The exact shape varies by SDK version + order type; we normalize defensively
- * and treat anything we don't recognize as `submitted` (no shares filled).
+ *
+ * The response shape varies by SDK version, order type, and fill outcome.
+ * Observed shapes in the wild:
+ *   { status: 'matched', orderID: '0x...', makingAmount: '5.5', price: '0.29' }
+ *   { status: 'unmatched', filled: 0 }
+ *   { success: false, errorMsg: 'insufficient liquidity', status: false }
+ *   { success: true, status: 200, orderHashes: ['0x...'] }
+ *
+ * Defensive about every field — `r.status` has been seen as a string, a
+ * boolean, AND a number depending on the path. Returns a normalized
+ * PolyFillResult; throws only if `resp` itself is corrupt (caller catches
+ * + logs as 'failed').
  */
 export function parsePolyFillResponse(resp: unknown, requestedUsdc: number): PolyFillResult {
   const r = (resp ?? {}) as Record<string, unknown>;
-  const statusRaw = (r.status as string | undefined)?.toLowerCase();
-  const orderId = (r.orderID ?? r.orderId ?? r.id) as string | undefined;
+
+  // Status normalization — coerce whatever shape into a lowercase string
+  // for the success check, or undefined if nothing usable.
+  const statusRaw = coerceString(r.status)?.toLowerCase();
+
+  // Order id — Polymarket has used orderID / orderId / id / orderHash(es)
+  // historically. Some return strings, some bigints. Coerce to string.
+  const orderIdRaw =
+    r.orderID ?? r.orderId ?? r.id ?? r.orderHash ?? firstOf(r.orderHashes);
+  const orderId = coerceString(orderIdRaw);
+
+  // Share count — successful market orders report filled size via one of
+  // several field names. All paths return string OR number.
   const filledRaw = r.makingAmount ?? r.takingAmount ?? r.filled ?? r.size;
-  const filledShares =
-    typeof filledRaw === 'string' ? Number(filledRaw) : (filledRaw as number | undefined);
+  const filledShares = coerceNumber(filledRaw);
+
+  // Fill price — directly reported, OR derivable from requestedUsdc/shares.
   const fillPriceRaw = r.price ?? r.avgPrice;
-  let fillPrice: number | undefined =
-    typeof fillPriceRaw === 'string' ? Number(fillPriceRaw) : (fillPriceRaw as number | undefined);
-  if (fillPrice == null && filledShares && filledShares > 0) {
+  let fillPrice = coerceNumber(fillPriceRaw);
+  if ((fillPrice == null || !isFinite(fillPrice)) && filledShares && filledShares > 0) {
     fillPrice = requestedUsdc / filledShares;
   }
-  const txHash = (r.transactionHash ?? r.txHash) as string | undefined;
+
+  const txHash = coerceString(r.transactionHash ?? r.txHash);
+
   const success =
     statusRaw === 'matched' ||
     statusRaw === 'filled' ||
     statusRaw === 'live' ||
+    statusRaw === '200' ||  // some SDK versions stringify HTTP-like status
     r.success === true;
+
   let status: PolyFillResult['status'] = 'submitted';
   if (success && filledShares && filledShares > 0) status = 'filled';
   else if (!success && filledShares && filledShares > 0) status = 'partial';
-  else if (!success) status = 'failed';
+  else if (r.success === false || statusRaw === 'error' || statusRaw === 'rejected') {
+    status = 'failed';
+  } else if (!success) {
+    status = 'failed';
+  }
+
   const costUsdc =
     fillPrice != null && filledShares != null ? fillPrice * filledShares : undefined;
   return { orderId, status, filledShares, fillPrice, costUsdc, txHash, raw: resp };
+}
+
+/** Coerce strings, numbers, bigints, booleans into a string. Returns undefined for null/undefined/objects. */
+function coerceString(v: unknown): string | undefined {
+  if (v == null) return undefined;
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') return String(v);
+  return undefined;
+}
+
+/** Coerce strings/numbers/bigints into a finite number, else undefined. */
+function coerceNumber(v: unknown): number | undefined {
+  if (v == null) return undefined;
+  if (typeof v === 'number') return isFinite(v) ? v : undefined;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    return isFinite(n) ? n : undefined;
+  }
+  if (typeof v === 'bigint') return Number(v);
+  return undefined;
+}
+
+function firstOf(v: unknown): unknown {
+  return Array.isArray(v) ? v[0] : undefined;
 }

@@ -176,6 +176,76 @@ export interface SurfaceResponse {
   points: SurfacePoint[];
 }
 
+/**
+ * Truth-from-chain snapshot for the three operator wallets. Returned by
+ * `GET /wallets`. Each block is null when the corresponding venue isn't
+ * configured for this bot instance.
+ */
+export interface WalletsSnapshot {
+  sui: null | {
+    address: string;
+    managerId: string | null;
+    navUsdc: number;
+    managerBalanceUsdc: number;
+    managerBalanceAtMs: number | null;
+    predictPackageId: string;
+    paperTrading: boolean;
+    openPositions: Array<{
+      tradeId: string;
+      oracleId: string;
+      strike: number;
+      direction: 'up' | 'down';
+      quantity: number;
+      cost: number;
+      txDigest?: string;
+    }>;
+  };
+  polygon: null | {
+    address: `0x${string}`;
+    network: 'amoy' | 'polygon';
+    pUsdBalance: number;
+    polBalance: number;
+    balanceAtMs: number;
+    executionEnabled: boolean;
+    openPositions: Array<{
+      tradeId: string;
+      conditionId?: string;
+      outcome?: 'yes' | 'no';
+      tokenId?: string;
+      shares?: number;
+      fillPrice?: number;
+      costUsdc?: number;
+      openedAtMs: number;
+      polyTxHash?: string;
+    }>;
+  };
+  hyperliquid: null | {
+    address: `0x${string}`;
+    network: 'mainnet' | 'testnet';
+    accountValueUsdc: number;
+    withdrawableUsdc: number;
+    balanceAtMs: number;
+    executionEnabled: boolean;
+    ledgerHedges: Array<{
+      tradeId: string;
+      asset?: string;
+      side?: 'long' | 'short';
+      size?: number;
+      openPrice?: number;
+      orderId?: string;
+      openedAtMs: number;
+    }>;
+    chainPositions: null | Array<{
+      asset: string;
+      side: 'long' | 'short';
+      szi: number;
+      entryPx: number;
+      unrealizedPnlUsd: number;
+      cumFundingUsdc: number;
+    }>;
+  };
+}
+
 function makeGet(base: string) {
   return async function get<T>(path: string): Promise<T> {
     if (!base) throw new Error(`API base URL not configured for ${path}`);
@@ -204,6 +274,7 @@ export function createApi(base: string) {
     positionsClosedPoly: (limit = 500) =>
       get<TradeRecord[]>(`/positions/closed-poly?limit=${limit}`),
     positionsHlOpen: () => get<TradeRecord[]>('/positions/hl-open'),
+    wallets: () => get<WalletsSnapshot>('/wallets'),
     oracles: () => get<OracleSummary[]>('/oracles'),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
   };

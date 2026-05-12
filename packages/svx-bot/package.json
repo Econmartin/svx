@@ -25,7 +25,10 @@
     "generate-hl-wallet": "tsx scripts/generate-hl-wallet.ts",
     "setup-hl-account": "tsx scripts/setup-hl-account.ts",
     "verify-hl-wallet": "tsx scripts/verify-hl-wallet.ts",
-    "force-hl-trade": "tsx scripts/force-hl-trade.ts"
+    "force-hl-trade": "tsx scripts/force-hl-trade.ts",
+    "resume": "tsx src/cli.ts resume",
+    "pause": "tsx src/cli.ts pause",
+    "status": "tsx src/cli.ts status"
   },
   "dependencies": {
     "@mysten/bcs": "^1.1.0",

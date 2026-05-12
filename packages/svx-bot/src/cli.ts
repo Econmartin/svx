@@ -28,9 +28,7 @@ async function main(): Promise<void> {
       console.log('paused — kill flag at /tmp/svx-paused');
       return;
     case 'resume':
-      clearKillFlag();
-      console.log('resumed — kill flag cleared');
-      return;
+      return resume();
     case 'status':
       return printStatus();
     case 'report':
@@ -41,6 +39,32 @@ async function main(): Promise<void> {
   }
 }
 
+/**
+ * Full resume — clears every layer the bot uses to detect "paused":
+ *  1. The filesystem kill flag (`/tmp/svx-paused`).
+ *  2. The ledger's persisted pause state (set by daily-loss / circuit-breaker
+ *     auto-pause). Without this, restarting the bot wouldn't unstick a
+ *     circuit-breaker pause.
+ */
+function resume(): void {
+  const cfg = loadConfig();
+  const ledger = new LedgerStore(path.join(path.resolve(cfg.dataDir), 'svx.sqlite'));
+  const before = ledger.getPause();
+  clearKillFlag();
+  ledger.setPause(false);
+  console.log(
+    JSON.stringify({
+      msg: 'svx.resume',
+      killFlagCleared: true,
+      ledgerWasPaused: before.paused,
+      ledgerPauseReason: before.reason,
+      hint:
+        'If pause was due to the consecutive-loss circuit breaker, also bump CIRCUIT_BREAKER_LOSSES — the bot will re-pause on the next tick if the current loss streak is still ≥ threshold.',
+    }),
+  );
+  ledger.close();
+}
+
 function printHelp(): void {
   console.log(`Usage: svx <command>
 
@@ -48,7 +72,9 @@ Commands:
   start [--once]    Run the bot scheduler. Paper mode by default; live mode
                     requires PAPER_TRADING=false in env. --once = single tick.
   pause             Set the manual kill flag (/tmp/svx-paused).
-  resume            Clear the manual kill flag.
+  resume            Clear ALL pause sources: kill flag + ledger pause state
+                    (the latter is set by the daily-loss / consecutive-loss
+                    circuit breakers).
   status            Print current bot status from the ledger.
   report            Print PnL summary.
 `);

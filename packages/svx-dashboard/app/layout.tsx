@@ -20,6 +20,7 @@ const NAV = [
   ['Overview', '/'],
   ['Signals', '/signals'],
   ['Positions', '/positions'],
+  ['Wallets', '/wallets'],
   ['Surface', '/surface'],
   ['About', '/about'],
 ] as const;

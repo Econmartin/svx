@@ -108,6 +108,23 @@ const Schema = z.object({
   dailyPolyLossLimitUsdc: z.number().positive().default(10),
   /** Max time (ms) to wait for the Polymarket leg to fill before we abort. */
   polyFillTimeoutMs: z.number().int().positive().default(30_000),
+  /**
+   * Polymarket signature mode: 'EOA' (direct EOA — works only for whitelisted
+   * addresses), 'POLY_PROXY' (Polymarket-deployed proxy), or 'POLY_GNOSIS_SAFE'
+   * (the current default for Polymarket UI signups — Gnosis Safe holds funds,
+   * EOA owner signs orders).
+   *
+   * If you signed up via polymarket.com web UI, you have a POLY_GNOSIS_SAFE
+   * setup. The proxy/safe address goes in `polyFunderAddress` and pUSD must
+   * be held by the proxy (not the signing EOA).
+   */
+  polySignatureType: z.enum(['EOA', 'POLY_PROXY', 'POLY_GNOSIS_SAFE']).default('EOA'),
+  /**
+   * Funder address that owns the pUSD and outcome shares. Empty = use the EOA's
+   * own address (SignatureType=EOA only). Required as a 0x address when
+   * polySignatureType is POLY_PROXY or POLY_GNOSIS_SAFE.
+   */
+  polyFunderAddress: z.string().default(''),
 
   // === Hyperliquid delta hedge (Part 2 — OFF by default) ===
   /** Kill switch for the HL hedging leg. Defaults OFF — operator turns on
@@ -181,6 +198,10 @@ export function loadConfig(): SvxConfig {
     polyMinBookDepthShares: parseNum(process.env.POLY_MIN_BOOK_DEPTH_SHARES, 20),
     dailyPolyLossLimitUsdc: parseNum(process.env.DAILY_POLY_LOSS_LIMIT_USDC, 10),
     polyFillTimeoutMs: parseNum(process.env.POLY_FILL_TIMEOUT_MS, 30_000),
+    polySignatureType:
+      (process.env.POLY_SIGNATURE_TYPE as 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | undefined) ??
+      'EOA',
+    polyFunderAddress: process.env.POLY_FUNDER_ADDRESS ?? '',
     hlExecutionEnabled: parseBool(process.env.HL_EXECUTION_ENABLED, false),
     hlNetwork: (process.env.HL_NETWORK as 'mainnet' | 'testnet' | undefined) ?? 'mainnet',
     hlHedgeAsset: process.env.HL_HEDGE_ASSET ?? 'BTC',

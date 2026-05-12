@@ -43,7 +43,11 @@ export interface BotStatus {
   // Polymarket execution leg.
   polyExecutionEnabled?: boolean;
   polyNetwork?: 'amoy' | 'polygon' | null;
+  /** Funder address — where pUSD lives. Safe address in POLY_GNOSIS_SAFE mode. */
   polyAddress?: `0x${string}` | null;
+  /** Signer address — the EOA whose private key the bot holds. */
+  polySignerAddress?: `0x${string}` | null;
+  polySignatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | null;
   polyPusdBalance?: number | null;
   polyGasPol?: number | null;
   polyBalanceAtMs?: number | null;
@@ -202,6 +206,8 @@ export interface WalletsSnapshot {
   };
   polygon: null | {
     address: `0x${string}`;
+    signerAddress?: `0x${string}`;
+    signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE';
     network: 'amoy' | 'polygon';
     pUsdBalance: number;
     polBalance: number;

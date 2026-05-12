@@ -214,27 +214,39 @@ function PolygonCard({
   }
   const gasOk = polygon.polBalance > 0.1;
   const fundedOk = polygon.pUsdBalance > 0;
+  const usingSafe = polygon.signatureMode && polygon.signatureMode !== 'EOA';
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between flex-wrap gap-2">
           <span>Polygon — Polymarket operator</span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={polygon.executionEnabled ? 'live' : 'warn'}>
               {polygon.executionEnabled ? 'exec on' : 'exec off'}
             </Badge>
-            <a
-              href={`https://polygonscan.com/address/${polygon.address}`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs text-muted hover:text-accent inline-flex items-center gap-1 font-mono"
-            >
-              {shortAddr(polygon.address)} <ExternalLink className="h-3 w-3" />
-            </a>
+            {polygon.signatureMode && (
+              <Badge variant="outline" title="Signature mode used for CLOB orders">
+                {polygon.signatureMode}
+              </Badge>
+            )}
           </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <AddressRow
+            label={usingSafe ? 'Funder (Safe proxy)' : 'Funder (EOA)'}
+            address={polygon.address}
+            sublabel="holds pUSD + outcome shares"
+          />
+          {usingSafe && polygon.signerAddress && (
+            <AddressRow
+              label="Signer (EOA)"
+              address={polygon.signerAddress}
+              sublabel="signs CLOB orders, holds POL gas"
+            />
+          )}
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KeyValue
             label={`pUSD (${polygon.network})`}
@@ -578,6 +590,32 @@ function computeHlOrphans(hl: NonNullable<WalletsSnapshot['hyperliquid']>): {
 
 function shortAddr(a: string): string {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
+}
+
+function AddressRow({
+  label,
+  address,
+  sublabel,
+}: {
+  label: string;
+  address: string;
+  sublabel?: string;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-surface-elevated px-3 py-2">
+      <div className="text-xs uppercase tracking-wider text-muted">{label}</div>
+      <a
+        href={`https://polygonscan.com/address/${address}`}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-0.5 font-mono text-sm text-white hover:text-accent inline-flex items-center gap-1 break-all"
+      >
+        {address}
+        <ExternalLink className="h-3 w-3 shrink-0" />
+      </a>
+      {sublabel && <div className="text-xs text-muted mt-0.5">{sublabel}</div>}
+    </div>
+  );
 }
 
 function KeyValue({

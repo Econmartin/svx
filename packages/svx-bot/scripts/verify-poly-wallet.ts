@@ -15,11 +15,18 @@
  */
 
 import fs from 'node:fs';
+import { createPublicClient, http, parseAbi, formatUnits, type Address } from 'viem';
+import { polygon, polygonAmoy } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { loadConfig, dataPath } from '../src/config.js';
 import { derivePolyEndpoints } from '../src/exec/polymarket-keypair.js';
 
-function main(): void {
+const PUSD: Address = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';
+const ERC20_ABI = parseAbi([
+  'function balanceOf(address) view returns (uint256)',
+]);
+
+async function main(): Promise<void> {
   const cfg = loadConfig();
   const endpoints = derivePolyEndpoints(cfg);
 
@@ -40,41 +47,75 @@ function main(): void {
     ? (JSON.parse(fs.readFileSync(file, 'utf8')).operatorAddress as string | undefined)
     : undefined;
 
-  // Same EVM address works on both networks. Show both explorer links so
-  // the user can sanity-check whichever chain they're funding right now.
+  // Read on-chain pUSD balance at both the signer (EOA) and the configured
+  // funder (Safe in POLY_GNOSIS_SAFE mode). This is the diagnostic operators
+  // use to confirm "is the money in the right place?" before flipping the
+  // execution flag on.
+  const chain = endpoints.network === 'amoy' ? polygonAmoy : polygon;
+  const pub = createPublicClient({ chain, transport: http(endpoints.rpcUrl) });
+  const eoaPusdRaw = await pub.readContract({
+    address: PUSD,
+    abi: ERC20_ABI,
+    functionName: 'balanceOf',
+    args: [envAddr],
+  });
+  const eoaPusd = Number(formatUnits(eoaPusdRaw, 6));
+  const funderAddr =
+    cfg.polyFunderAddress && /^0x[0-9a-fA-F]{40}$/.test(cfg.polyFunderAddress)
+      ? (cfg.polyFunderAddress as Address)
+      : envAddr;
+  const funderPusdRaw =
+    funderAddr.toLowerCase() === envAddr.toLowerCase()
+      ? eoaPusdRaw
+      : await pub.readContract({
+          address: PUSD,
+          abi: ERC20_ABI,
+          functionName: 'balanceOf',
+          args: [funderAddr],
+        });
+  const funderPusd = Number(formatUnits(funderPusdRaw, 6));
+
+  const usingSafe =
+    cfg.polySignatureType !== 'EOA' &&
+    funderAddr.toLowerCase() !== envAddr.toLowerCase();
+
   const lines = [
     '',
     '─'.repeat(72),
     '  POLYMARKET WALLET VERIFICATION',
     '─'.repeat(72),
     '',
-    `  From POLY_PRIVATE_KEY:        ${envAddr}`,
-    `  From ${file
-      .split('/')
-      .slice(-2)
-      .join('/')}:  ${fileAddr ?? '(file not found — run setup-poly-wallet first)'}`,
+    `  Signature mode:               ${cfg.polySignatureType}`,
     '',
+    `  Signer (EOA from PRIVATE_KEY):  ${envAddr}`,
+    `    pUSD balance:                 ${eoaPusd.toFixed(6)}`,
+    `    Explorer (mainnet):           https://polygonscan.com/address/${envAddr}`,
+    '',
+    usingSafe
+      ? `  Funder (Safe / POLY_FUNDER):    ${funderAddr}`
+      : `  Funder = Signer (EOA mode)`,
+    usingSafe ? `    pUSD balance:                 ${funderPusd.toFixed(6)}` : '',
+    usingSafe ? `    Explorer (mainnet):           https://polygonscan.com/address/${funderAddr}` : '',
+    usingSafe ? '' : '',
+    `  From persisted file:          ${fileAddr ?? '(file not found — run setup-poly-wallet first)'}`,
     `  Match (env vs file):          ${
       fileAddr ? (envAddr.toLowerCase() === fileAddr.toLowerCase() ? '✓ YES' : '✗ NO — STOP') : '— (no file yet)'
     }`,
     '',
-    '  Same EVM address works on both Polygon mainnet AND Amoy testnet.',
-    '  Check the explorer for whichever network you are funding now:',
-    '',
-    `    Mainnet (REAL MONEY): https://polygonscan.com/address/${envAddr}`,
-    `    Amoy (testnet):       https://amoy.polygonscan.com/address/${envAddr}`,
-    '',
-    '  Before sending real money:',
-    '  • Open the mainnet explorer link — confirm the address has',
-    '    little/no on-chain history (a fresh wallet you generated).',
-    '  • Compare the address above to the one you saved in 1Password',
-    '    when you first ran generate-poly-wallet.',
-    '  • Triple-check the network on Kraken says POLYGON before submitting.',
+    usingSafe
+      ? '  Trading: orders are signed by the EOA + executed on behalf of the Safe.'
+      : '  Trading: orders signed and funded by the same EOA.',
+    usingSafe
+      ? '  CLOB reads pUSD balance from the SAFE — must be > 0 for orders to fill.'
+      : '  CLOB reads pUSD balance from the EOA — must be > 0 for orders to fill.',
     '',
     '─'.repeat(72),
     '',
   ];
-  console.log(lines.join('\n'));
+  console.log(lines.filter((l) => l !== '').concat(['']).join('\n'));
 }
 
-main();
+main().catch((e) => {
+  console.error(JSON.stringify({ msg: 'verify_poly_wallet.fatal', err: e instanceof Error ? e.message : String(e) }));
+  process.exit(1);
+});

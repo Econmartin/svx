@@ -46,6 +46,8 @@ const baseCfg: SvxConfig = {
   polyMinBookDepthShares: 20,
   dailyPolyLossLimitUsdc: 10,
   polyFillTimeoutMs: 30_000,
+  polySignatureType: 'EOA',
+  polyFunderAddress: '',
   hlExecutionEnabled: false,
   hlNetwork: 'mainnet',
   hlHedgeAsset: 'BTC',

@@ -25,12 +25,15 @@ interface ApiDeps {
     lastManagerBalanceAtMs?: number;
     lastBtcSpot?: { value: number; updatedAtMs: number };
     /** Polymarket pUSD wallet balance — populated by main loop when polyExec
-     *  is active. Lets the dashboard show poly bankroll alongside Sui NAV. */
+     *  is active. `address` is the FUNDER (Safe or EOA depending on
+     *  signature mode); pUSD balance is read from this address. */
     polyBalance?: {
       address: `0x${string}`;
       network: 'amoy' | 'polygon';
       pUsd: number;
       gasPol: number;
+      signerAddress?: `0x${string}`;
+      signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE';
       updatedAtMs: number;
     };
     /** Hyperliquid perp margin balance — populated by the HL_BALANCE_REFRESH
@@ -115,6 +118,8 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       polyExecutionEnabled: deps.cfg.polyExecutionEnabled,
       polyNetwork: deps.state.polyBalance?.network ?? null,
       polyAddress: deps.state.polyBalance?.address ?? null,
+      polySignerAddress: deps.state.polyBalance?.signerAddress ?? null,
+      polySignatureMode: deps.state.polyBalance?.signatureMode ?? null,
       polyPusdBalance: deps.state.polyBalance?.pUsd ?? null,
       polyGasPol: deps.state.polyBalance?.gasPol ?? null,
       polyBalanceAtMs: deps.state.polyBalance?.updatedAtMs ?? null,
@@ -229,9 +234,14 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
           }
         : null,
       // Polymarket — pUSD wallet + open outcome share positions.
+      // `address` is the funder (Safe in POLY_GNOSIS_SAFE mode), where
+      // pUSD + outcome shares actually live. `signerAddress` is the EOA
+      // that signs orders + holds POL gas.
       polygon: deps.state.polyBalance
         ? {
             address: deps.state.polyBalance.address,
+            signerAddress: deps.state.polyBalance.signerAddress,
+            signatureMode: deps.state.polyBalance.signatureMode,
             network: deps.state.polyBalance.network,
             pUsdBalance: deps.state.polyBalance.pUsd,
             polBalance: deps.state.polyBalance.gasPol,

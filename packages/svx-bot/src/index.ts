@@ -78,12 +78,16 @@ interface BotState {
    *  ITM/OTM without making its own oracle calls. */
   lastBtcSpot?: { value: number; updatedAtMs: number };
   /** Polymarket pUSD + gas balance, refreshed periodically when polyExec is
-   *  configured. Surfaced on /status so the dashboard can show poly bankroll. */
+   *  configured. Surfaced on /status so the dashboard can show poly bankroll.
+   *  `address` = the FUNDER (Safe in POLY_GNOSIS_SAFE mode, EOA in EOA mode).
+   *  `signerAddress` = always the EOA. */
   polyBalance?: {
     address: `0x${string}`;
     network: 'amoy' | 'polygon';
     pUsd: number;
     gasPol: number;
+    signerAddress?: `0x${string}`;
+    signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE';
     updatedAtMs: number;
   };
   /** Last time we refreshed the Polymarket balance from on-chain. */
@@ -429,11 +433,17 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         polyExec.getCollateralBalance(),
         polyExec.getGasBalance(),
       ]);
+      // address surfaces the FUNDER (Safe/proxy in POLY_GNOSIS_SAFE mode,
+      // EOA in EOA mode) so the dashboard polygonscan link points to
+      // where the money actually is. EOA (signer) is exposed separately
+      // via state.polyExec for completeness.
       state.polyBalance = {
-        address: polyExec.address,
+        address: polyExec.funderAddress,
         network: polyExec.endpoints.network,
         pUsd: pUsd.pUsd,
         gasPol: gas.eth,
+        signerAddress: polyExec.address,
+        signatureMode: polyExec.signatureMode,
         updatedAtMs: Date.now(),
       };
       state.lastPolyBalanceAtMs = Date.now();
@@ -1042,6 +1052,24 @@ export async function reconcilePolySettlements(
     if (winners.length === 0) continue;
     const totalShares = winners.reduce((s, t) => s + (t.polyFilledShares ?? 0), 0);
     if (totalShares <= 0) continue;
+
+    // Safe-mode limitation: the Safe (not the EOA we sign with) owns the
+    // outcome shares. Direct EOA-signed redeem calls would revert with
+    // "no balance". Mark as pending-manual instead of failing — the
+    // operator clicks "Claim" on polymarket.com to redeem. Auto-redeem
+    // via Safe.execTransaction is follow-up work.
+    if (polyExec.signatureMode !== 'EOA') {
+      for (const w of winners) ledger.markPolyRedeemed(w.id, null, 'failed');
+      log.warn('svx.poly.redeem.skipped_safe_mode', {
+        conditionId: conditionId.slice(0, 10),
+        winnerCount: winners.length,
+        totalShares,
+        hint:
+          'Operator: click "Claim" on the resolved market at polymarket.com to redeem shares.',
+      });
+      continue;
+    }
+
     try {
       const txHash = await polyExec.redeemPolyWinnings({
         conditionId,

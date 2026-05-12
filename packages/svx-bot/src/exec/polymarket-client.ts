@@ -71,7 +71,15 @@ export interface PolyExecOptions {
 
 export class PolymarketExecClient {
   readonly endpoints: PolyEndpoints;
+  /** EOA address — the signer. POL gas lives here. */
   readonly address: `0x${string}`;
+  /** Funder address — where pUSD + outcome shares actually live. Equals
+   *  `address` for SignatureType=EOA, the Safe address for POLY_GNOSIS_SAFE,
+   *  the proxy address for POLY_PROXY. The CLOB sees orders as coming from
+   *  this address. */
+  readonly funderAddress: `0x${string}`;
+  /** Which signature flavor the SDK is using. */
+  readonly signatureMode: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE';
   private readonly clob: ClobClient;
   private readonly cfg: SvxConfig;
 
@@ -104,6 +112,9 @@ export class PolymarketExecClient {
           'POLY_SIGNATURE_TYPE is non-EOA but POLY_FUNDER_ADDRESS is unset — falling back to EOA address as funder. Orders will reject if a proxy is required.',
       });
     }
+
+    this.funderAddress = funderAddress;
+    this.signatureMode = cfg.polySignatureType;
 
     const chain = endpoints.network === 'amoy' ? Chain.AMOY : Chain.POLYGON;
     this.clob = new ClobClient({
@@ -142,7 +153,15 @@ export class PolymarketExecClient {
     return creds;
   }
 
-  /** Read pUSD balance at the operator address (returns floating pUSD, 6 dp). */
+  /**
+   * Read pUSD balance at the FUNDER address (Safe / proxy / EOA depending on
+   * signature mode). This is what the CLOB sees as the maker's collateral —
+   * if it's zero, orders will be rejected for insufficient balance.
+   *
+   * For SignatureType=POLY_GNOSIS_SAFE, the Safe holds the pUSD; this reads
+   * the Safe's balance, not the signer EOA's. For SignatureType=EOA, funder
+   * defaults to the EOA so this returns the EOA balance.
+   */
   async getCollateralBalance(): Promise<{
     address: `0x${string}`;
     pUsd: number;
@@ -156,9 +175,9 @@ export class PolymarketExecClient {
       address: collateral,
       abi: ERC20_ABI,
       functionName: 'balanceOf',
-      args: [this.address],
+      args: [this.funderAddress],
     });
-    return { address: this.address, pUsd: Number(raw) / 1e6, raw };
+    return { address: this.funderAddress, pUsd: Number(raw) / 1e6, raw };
   }
 
   /** Read native gas (MATIC/POL) balance at the operator address. */
@@ -215,6 +234,15 @@ export class PolymarketExecClient {
    * we hold and credits pUSD to the operator wallet 1:1 with winning shares.
    * Losing shares pay 0 and are still consumed by the redeem (no penalty,
    * but no point spending gas on them — caller should skip pure-losers).
+   *
+   * **Limitation (POLY_GNOSIS_SAFE mode):** this call signs as the EOA and
+   * directly invokes the redeem contract. In Safe mode, the Safe (not the
+   * EOA) owns the outcome shares, so this redeem will fail with "no
+   * balance". Until we add Safe meta-tx support (signed by EOA, executed
+   * via `Safe.execTransaction`), winning trades on Safe-mode bots have to
+   * be manually redeemed through Polymarket's web UI ("Claim" button on
+   * the resolved market). The bot still records PnL correctly via the
+   * settlement-poll loop — redemption just needs an operator click.
    *
    * `shares` is the number of WINNING outcome shares we hold (the redeem
    * payout in pUSD). Wei conversion uses 6 decimals matching pUSD.

@@ -57,6 +57,11 @@ import { log } from './util/log.js';
 
 interface BotState {
   startedAtMs: number;
+  /** Sui operator address — populated when live or when paper-mode loads
+   *  the keypair for dashboard display. Null when no keypair is configured. */
+  suiAddress?: string;
+  /** Sui PredictManager object ID — populated alongside suiAddress in live mode. */
+  managerId?: string;
   /** Operator wallet dUSDC balance (live mode) or virtual budget (paper). */
   navUsdc: number;
   /** dUSDC sitting inside the PredictManager — payouts from auto-redeem land
@@ -92,6 +97,18 @@ interface BotState {
     withdrawableUsdc: number;
     updatedAtMs: number;
   };
+  /** Hyperliquid on-chain open positions — truth-from-chain. The bot's
+   *  ledger tracks hedges it OPENED, but HL state might have arbitrary
+   *  positions (operator manual trades, force-hl-trade tests). The
+   *  /wallets page compares this to the ledger to spot drift. */
+  hlPositions?: Array<{
+    asset: string;
+    side: 'long' | 'short';
+    szi: number;
+    entryPx: number;
+    unrealizedPnlUsd: number;
+    cumFundingUsdc: number;
+  }>;
   /** Last time we refreshed the HL balance via clearinghouseState. */
   lastHlBalanceAtMs: number;
   /** Last time the bot attempted a Polymarket fill (success or fail). 0 if never. */
@@ -181,6 +198,8 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       managerId: op.managerId,
       operatorAddress: op.operatorAddress,
     };
+    state.suiAddress = op.operatorAddress;
+    state.managerId = op.managerId;
     realWalletReader = () => readManagerBalance(live!);
     // Refresh NAV (operator wallet) and manager balance from on-chain.
     state.navUsdc = await realWalletReader();
@@ -203,6 +222,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     try {
       const { loadOperatorKey: tryLoad } = await import('./exec/keypair.js');
       const { keypair, address } = tryLoad();
+      state.suiAddress = address;
       const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
       realWalletReader = async () => {
         const { totalBalance } = await sui.getBalance({ owner: address, coinType: ADDRESSES.dusdcType });
@@ -421,12 +441,15 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     }
   }
 
-  // Refresh HL margin balance every HL_BALANCE_REFRESH_MS. Single REST call
-  // (clearinghouseState). Powers the dashboard's health panel so the operator
-  // can see "HL leg is funded + reachable" even before the first hedge fires.
+  // Refresh HL margin balance + on-chain positions every HL_BALANCE_REFRESH_MS.
+  // Two REST calls (clearinghouseState pulls both, we just project the bits
+  // we need). Powers the dashboard's health panel + /wallets truth-from-chain.
   if (hlExec && Date.now() - state.lastHlBalanceAtMs > HL_BALANCE_REFRESH_MS) {
     try {
-      const bal = await hlExec.getBalance();
+      const [bal, positions] = await Promise.all([
+        hlExec.getBalance(),
+        hlExec.getOpenPositions().catch(() => []),
+      ]);
       state.hlBalance = {
         address: hlExec.address,
         network: hlExec.endpoints.network,
@@ -434,6 +457,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         withdrawableUsdc: bal.withdrawableUsdc,
         updatedAtMs: Date.now(),
       };
+      state.hlPositions = positions;
       state.lastHlBalanceAtMs = Date.now();
     } catch (e) {
       log.warn('svx.hl.balance_refresh_failed', { err: errMsg(e) });

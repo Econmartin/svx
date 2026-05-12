@@ -18,6 +18,8 @@ interface ApiDeps {
   cfg: SvxConfig;
   state: {
     startedAtMs: number;
+    suiAddress?: string;
+    managerId?: string;
     navUsdc: number;
     managerBalanceUsdc?: number;
     lastManagerBalanceAtMs?: number;
@@ -40,6 +42,15 @@ interface ApiDeps {
       withdrawableUsdc: number;
       updatedAtMs: number;
     };
+    /** HL on-chain open positions snapshot (truth-from-chain). */
+    hlPositions?: Array<{
+      asset: string;
+      side: 'long' | 'short';
+      szi: number;
+      entryPx: number;
+      unrealizedPnlUsd: number;
+      cumFundingUsdc: number;
+    }>;
     /** When the bot last ATTEMPTED a Polymarket order (success or fail). */
     lastPolyAttemptAtMs?: number;
     /** When the bot last ATTEMPTED an HL hedge (success or fail). */
@@ -148,6 +159,104 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
   /** Open Hyperliquid hedges — for the dashboard's HL section. */
   app.get('/positions/hl-open', (_req, res) => {
     res.json(deps.ledger.openHlHedges());
+  });
+
+  /**
+   * Truth-from-chain wallets snapshot. Aggregates the three operator
+   * wallets so the dashboard's /wallets page can render them on one
+   * pull. Each block is independently null if the bot isn't configured
+   * for that venue (e.g. no HL key set).
+   */
+  app.get('/wallets', (_req, res) => {
+    const open = deps.ledger.openTrades();
+    // Polymarket: ledger's view of currently-open outcome share positions.
+    // We can't easily query the ERC1155 balances per token-id without a
+    // batch contract call, but the ledger should track every position
+    // the bot opened. Cross-reference for orphans by comparing to
+    // wallet history on polygonscan when needed.
+    const polyOpen = open
+      .filter((t) => t.polyStatus === 'filled')
+      .map((t) => ({
+        tradeId: t.id,
+        conditionId: t.polyConditionId,
+        outcome: t.polyOutcome,
+        tokenId: t.polyTokenId,
+        shares: t.polyFilledShares,
+        fillPrice: t.polyFillPrice,
+        costUsdc: t.polyCostUsdc,
+        openedAtMs: t.timestampMs,
+        polyTxHash: t.polyTxHash,
+      }));
+    // HL: ledger view of expected hedges, plus the on-chain snapshot.
+    const hlLedgerOpen = deps.ledger.openHlHedges().map((t) => ({
+      tradeId: t.id,
+      asset: t.hlAsset,
+      side: t.hlSide,
+      size: t.hlSize,
+      openPrice: t.hlOpenPrice,
+      orderId: t.hlOrderId,
+      openedAtMs: t.timestampMs,
+    }));
+    const hlOnChain = deps.state.hlPositions ?? null;
+    res.json({
+      // Sui — populated whenever a keypair is configured (live mode + paper
+      // mode with real wallet reading enabled). Null only when no operator
+      // key exists.
+      sui: deps.state.suiAddress
+        ? {
+            address: deps.state.suiAddress,
+            managerId: deps.state.managerId ?? null,
+            navUsdc: deps.state.navUsdc,
+            managerBalanceUsdc: deps.state.managerBalanceUsdc ?? 0,
+            managerBalanceAtMs: deps.state.lastManagerBalanceAtMs ?? null,
+            predictPackageId: deps.addresses.packageId,
+            // Open positions inside the PredictManager — inferred from the
+            // local ledger (on-chain has the source of truth via dynamic-
+            // fields lookup; ledger should match unless something went
+            // wrong, in which case the dashboard flags it).
+            openPositions: open
+              .filter((t) => t.mode === 'live' && !t.settled)
+              .map((t) => ({
+                tradeId: t.id,
+                oracleId: t.oracleId,
+                strike: t.strike,
+                direction: t.direction,
+                quantity: t.quantityDusdc,
+                cost: t.costUsdc,
+                txDigest: t.txDigest,
+              })),
+            paperTrading: deps.cfg.paperTrading,
+          }
+        : null,
+      // Polymarket — pUSD wallet + open outcome share positions.
+      polygon: deps.state.polyBalance
+        ? {
+            address: deps.state.polyBalance.address,
+            network: deps.state.polyBalance.network,
+            pUsdBalance: deps.state.polyBalance.pUsd,
+            polBalance: deps.state.polyBalance.gasPol,
+            balanceAtMs: deps.state.polyBalance.updatedAtMs,
+            openPositions: polyOpen,
+            executionEnabled: deps.cfg.polyExecutionEnabled,
+          }
+        : null,
+      // Hyperliquid — perp margin + open positions (both ledger AND chain).
+      hyperliquid: deps.state.hlBalance
+        ? {
+            address: deps.state.hlBalance.address,
+            network: deps.state.hlBalance.network,
+            accountValueUsdc: deps.state.hlBalance.accountValueUsdc,
+            withdrawableUsdc: deps.state.hlBalance.withdrawableUsdc,
+            balanceAtMs: deps.state.hlBalance.updatedAtMs,
+            // Ledger says these hedges should be open.
+            ledgerHedges: hlLedgerOpen,
+            // On-chain says THESE positions are open. Cross-reference
+            // for orphan/missing detection on the dashboard.
+            chainPositions: hlOnChain,
+            executionEnabled: deps.cfg.hlExecutionEnabled,
+          }
+        : null,
+    });
   });
 
   /** Closed Polymarket positions — both winners (redeemed) and losers. */

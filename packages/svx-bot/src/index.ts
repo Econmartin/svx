@@ -46,6 +46,7 @@ import {
   PolymarketExecClient,
   parsePolyFillResponse,
   tryCreatePolymarketExecClient,
+  isMakerNotAllowedError,
 } from './exec/polymarket-client.js';
 import {
   HyperliquidExecClient,
@@ -659,6 +660,22 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             tokenId: polyTokenId,
             usdcAmount: cfg.maxPolyPositionUsdc,
           });
+
+          // Operator-action-required: maker-not-allowed means the EOA
+          // isn't registered as a proxy. Bot can't recover; auto-pause
+          // to stop the tight retry loop and surface a clear message.
+          if (isMakerNotAllowedError(resp)) {
+            log.error('svx.poly.maker_not_allowed', {
+              hint:
+                'Polymarket rejects trades from un-registered EOAs. Set up a Safe proxy via polymarket.com, transfer pUSD from EOA to the proxy, then set MAINNET_POLY_FUNDER_ADDRESS=<proxy> and MAINNET_POLY_SIGNATURE_TYPE=POLY_GNOSIS_SAFE in Coolify.',
+              rawResponse: resp,
+            });
+            risk.pause(
+              'Polymarket maker-address rejected — proxy setup required (see runbook §1.6.4)',
+            );
+            continue;
+          }
+
           // Defense-in-depth: parsing the SDK response can throw on
           // unexpected shapes (we've seen status=boolean, status=number).
           // Wrap so an unparseable response doesn't crash the trade flow —

@@ -105,33 +105,36 @@ export default function OverviewPage() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Open positions{open?.length ? ` (${open.length})` : ''}</span>
-              {open?.length ? (
-                <span className="text-xs text-muted normal-case">live snapshot</span>
-              ) : null}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <OpenPositionsTable
-              open={open ?? []}
-              spot={status?.spotBtc ?? null}
-              isMainnet={isMainnet}
-            />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Last 15 signals</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <RecentSignals signals={recentSignals ?? []} />
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span>Open positions{open?.length ? ` (${open.length})` : ''}</span>
+            {open?.length ? (
+              <span className="text-xs text-muted normal-case">live snapshot</span>
+            ) : null}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <OpenPositionsTable
+            open={open ?? []}
+            spot={status?.spotBtc ?? null}
+            isMainnet={isMainnet}
+            polyExecutionEnabled={status?.polyExecutionEnabled ?? false}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span>Recent signals</span>
+            <span className="text-xs text-muted normal-case">last 15</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <RecentSignals signals={recentSignals ?? []} />
+        </CardContent>
+      </Card>
 
       <footer className="text-xs text-muted font-mono flex items-center gap-2">
         <span>Predict package:</span>
@@ -256,75 +259,114 @@ function OpenPositionsTable({
   open,
   spot,
   isMainnet,
+  polyExecutionEnabled,
 }: {
   open: TradeRecord[];
   spot: number | null;
   isMainnet: boolean;
+  polyExecutionEnabled: boolean;
 }) {
-  // Mainnet view: filter to trades with a Poly leg attached.
-  const rows = isMainnet ? open.filter((t) => !!t.polyStatus) : open;
+  // Mainnet view: show all open trades, distinguish those with a real Poly
+  // leg from those that are paper-only (Sui-side paper signal, no Poly
+  // execution because POLY_EXECUTION_ENABLED was false).
+  const rows = open;
   if (rows.length === 0) {
-    return <div className="text-muted text-sm py-6 text-center">No open positions.</div>;
+    return (
+      <div className="space-y-3 py-4">
+        <div className="text-muted text-sm text-center">No open positions.</div>
+        {isMainnet && !polyExecutionEnabled && (
+          <div className="text-xs text-warn text-center max-w-md mx-auto">
+            Signals are evaluating but POLY_EXECUTION_ENABLED is off — no
+            Polymarket orders are being placed. Set
+            <code className="px-1 mx-1 bg-bg rounded font-mono">MAINNET_POLY_EXECUTION_ENABLED=true</code>
+            in Coolify to start firing.
+          </div>
+        )}
+      </div>
+    );
   }
+  const paperOnlyCount = isMainnet
+    ? rows.filter((t) => !t.polyStatus).length
+    : 0;
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Opened</TableHead>
-          <TableHead>Strike</TableHead>
-          {isMainnet ? <TableHead>Outcome</TableHead> : <TableHead>Side</TableHead>}
-          <TableHead>{isMainnet ? 'Shares' : 'Stake'}</TableHead>
-          {isMainnet ? <TableHead>Fill</TableHead> : <TableHead>Entry</TableHead>}
-          {isMainnet && <TableHead>Hedge</TableHead>}
-          <TableHead>{isMainnet ? 'Status' : 'Spot'}</TableHead>
-          <TableHead>{isMainnet ? '' : 'Status'}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((t) => {
-          if (isMainnet) {
+    <div className="space-y-3">
+      {isMainnet && paperOnlyCount > 0 && !polyExecutionEnabled && (
+        <div className="text-xs text-warn px-3 py-2 rounded bg-warn/10 border border-warn/30">
+          <strong>{paperOnlyCount}</strong> of these are <em>Sui-paper</em> rows
+          — signals that would have executed if MAINNET_POLY_EXECUTION_ENABLED
+          were true. No real money in flight.
+        </div>
+      )}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Opened</TableHead>
+            <TableHead>Strike</TableHead>
+            {isMainnet ? <TableHead>Outcome</TableHead> : <TableHead>Side</TableHead>}
+            <TableHead>{isMainnet ? 'Shares' : 'Stake'}</TableHead>
+            {isMainnet ? <TableHead>Fill</TableHead> : <TableHead>Entry</TableHead>}
+            {isMainnet && <TableHead>Hedge</TableHead>}
+            <TableHead>{isMainnet ? 'Status' : 'Spot'}</TableHead>
+            <TableHead>{isMainnet ? '' : 'Status'}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((t) => {
+            if (isMainnet) {
+              const hasPoly = !!t.polyStatus;
+              return (
+                <TableRow key={t.id} className={!hasPoly ? 'opacity-60' : ''}>
+                  <TableCell className="text-muted text-xs">
+                    {new Date(t.timestampMs).toLocaleTimeString()}
+                  </TableCell>
+                  <TableCell>${t.strike.toFixed(0)}</TableCell>
+                  <TableCell>{t.polyOutcome?.toUpperCase() ?? t.direction.toUpperCase()}</TableCell>
+                  <TableCell>
+                    {hasPoly ? t.polyFilledShares?.toFixed(2) ?? '—' : '—'}
+                  </TableCell>
+                  <TableCell>
+                    {t.polyFillPrice != null ? formatPct(t.polyFillPrice, 2) : '—'}
+                  </TableCell>
+                  <TableCell>
+                    {t.hlStatus === 'open' && t.hlSize != null ? (
+                      <span className="text-warn text-xs">
+                        {t.hlSide?.toUpperCase()} {t.hlSize.toFixed(5)}
+                      </span>
+                    ) : (
+                      <span className="text-muted text-xs">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {hasPoly ? (
+                      <Badge variant={t.polyStatus === 'filled' ? 'live' : 'default'}>
+                        {t.polyStatus}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">sui-paper</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell />
+                </TableRow>
+              );
+            }
+            const m = moneyness(t, spot);
             return (
-              <TableRow key={t.id}>
+              <TableRow key={t.id} className={m.cls}>
                 <TableCell className="text-muted text-xs">
                   {new Date(t.timestampMs).toLocaleTimeString()}
                 </TableCell>
                 <TableCell>${t.strike.toFixed(0)}</TableCell>
-                <TableCell>{t.polyOutcome?.toUpperCase() ?? '—'}</TableCell>
-                <TableCell>{t.polyFilledShares?.toFixed(2) ?? '—'}</TableCell>
-                <TableCell>
-                  {t.polyFillPrice != null ? formatPct(t.polyFillPrice, 2) : '—'}
-                </TableCell>
-                <TableCell>
-                  {t.hlStatus === 'open' && t.hlSize != null ? (
-                    <span className="text-warn text-xs">
-                      {t.hlSide?.toUpperCase()} {t.hlSize.toFixed(5)}
-                    </span>
-                  ) : (
-                    <span className="text-muted text-xs">none</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-xs">{t.polyStatus}</TableCell>
-                <TableCell />
+                <TableCell>{t.direction}</TableCell>
+                <TableCell>{formatUsdc(t.costUsdc)}</TableCell>
+                <TableCell>{formatPct(t.costPrice)}</TableCell>
+                <TableCell>{m.spotLabel}</TableCell>
+                <TableCell className="text-xs">{m.statusLabel}</TableCell>
               </TableRow>
             );
-          }
-          const m = moneyness(t, spot);
-          return (
-            <TableRow key={t.id} className={m.cls}>
-              <TableCell className="text-muted text-xs">
-                {new Date(t.timestampMs).toLocaleTimeString()}
-              </TableCell>
-              <TableCell>${t.strike.toFixed(0)}</TableCell>
-              <TableCell>{t.direction}</TableCell>
-              <TableCell>{formatUsdc(t.costUsdc)}</TableCell>
-              <TableCell>{formatPct(t.costPrice)}</TableCell>
-              <TableCell>{m.spotLabel}</TableCell>
-              <TableCell className="text-xs">{m.statusLabel}</TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+          })}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
 

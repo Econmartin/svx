@@ -29,7 +29,8 @@
     "force-hl-trade": "tsx scripts/force-hl-trade.ts",
     "resume": "tsx src/cli.ts resume",
     "pause": "tsx src/cli.ts pause",
-    "status": "tsx src/cli.ts status"
+    "status": "tsx src/cli.ts status",
+    "validate-signals": "tsx scripts/validate-signals.ts"
   },
   "dependencies": {
     "@mysten/bcs": "^1.1.0",

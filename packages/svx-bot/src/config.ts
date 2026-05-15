@@ -109,16 +109,21 @@ const Schema = z.object({
   /** Max time (ms) to wait for the Polymarket leg to fill before we abort. */
   polyFillTimeoutMs: z.number().int().positive().default(30_000),
   /**
-   * Polymarket signature mode: 'EOA' (direct EOA — works only for whitelisted
-   * addresses), 'POLY_PROXY' (Polymarket-deployed proxy), or 'POLY_GNOSIS_SAFE'
-   * (the current default for Polymarket UI signups — Gnosis Safe holds funds,
-   * EOA owner signs orders).
+   * Polymarket signature mode:
+   *   - 'EOA':              direct EOA — works only for whitelisted addresses.
+   *   - 'POLY_PROXY':       legacy Polymarket-deployed proxy (pre-2024).
+   *   - 'POLY_GNOSIS_SAFE': pre-2026-05 Gnosis Safe signups via polymarket.com.
+   *   - 'POLY_1271':        the May 2026 "Deposit Wallet" rollout — smart-
+   *                         contract wallets that verify signatures via
+   *                         EIP-1271. NEW signups via polymarket.com get
+   *                         these. EOA owner signs orders; the Deposit
+   *                         Wallet's `isValidSignature` validates them.
    *
-   * If you signed up via polymarket.com web UI, you have a POLY_GNOSIS_SAFE
-   * setup. The proxy/safe address goes in `polyFunderAddress` and pUSD must
-   * be held by the proxy (not the signing EOA).
+   * For POLY_1271, the L2 API key MUST be re-derived against the proxy
+   * (not the EOA) — use scripts/derive-poly-api-key-1271.ts since the SDK's
+   * top-level createApiKey() has a known bug that binds keys to the EOA.
    */
-  polySignatureType: z.enum(['EOA', 'POLY_PROXY', 'POLY_GNOSIS_SAFE']).default('EOA'),
+  polySignatureType: z.enum(['EOA', 'POLY_PROXY', 'POLY_GNOSIS_SAFE', 'POLY_1271']).default('EOA'),
   /**
    * Funder address that owns the pUSD and outcome shares. Empty = use the EOA's
    * own address (SignatureType=EOA only). Required as a 0x address when

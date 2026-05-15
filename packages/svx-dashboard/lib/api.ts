@@ -47,7 +47,7 @@ export interface BotStatus {
   polyAddress?: `0x${string}` | null;
   /** Signer address — the EOA whose private key the bot holds. */
   polySignerAddress?: `0x${string}` | null;
-  polySignatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | null;
+  polySignatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | 'POLY_1271' | null;
   polyPusdBalance?: number | null;
   polyGasPol?: number | null;
   polyBalanceAtMs?: number | null;
@@ -207,7 +207,7 @@ export interface WalletsSnapshot {
   polygon: null | {
     address: `0x${string}`;
     signerAddress?: `0x${string}`;
-    signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE';
+    signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | 'POLY_1271';
     network: 'amoy' | 'polygon';
     pUsdBalance: number;
     polBalance: number;

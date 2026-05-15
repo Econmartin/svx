@@ -33,7 +33,7 @@ interface ApiDeps {
       pUsd: number;
       gasPol: number;
       signerAddress?: `0x${string}`;
-      signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE';
+      signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | 'POLY_1271';
       updatedAtMs: number;
     };
     /** Hyperliquid perp margin balance — populated by the HL_BALANCE_REFRESH

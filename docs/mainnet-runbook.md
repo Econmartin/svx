@@ -105,52 +105,97 @@ All log lines are single-line JSON. Key prefixes to grep:
 A healthy loop iteration emits one `svx.loop.start`, ≤ ~5 `svx.poly.submit`
 (rarely), and a `svx.signal.live_executed` per fired trade.
 
-### 1.4.5 Polymarket Safe-proxy setup (one-time)
+### 1.4.5 Polymarket Deposit Wallet (POLY_1271) setup — one-time
 
-Polymarket's CLOB only accepts orders from **registered** maker addresses. If
-you generated a fresh EOA via `generate-poly-wallet` and wrapped pUSD into
-that EOA directly, the CLOB rejects every order with:
+**Context (May 2026 Polymarket rollout):** New polymarket.com signups get a
+"Deposit Wallet" — a smart-contract wallet that verifies signatures via
+EIP-1271. The CLOB only accepts orders signed against the Deposit Wallet
+address, not the EOA. Direct EOA orders get rejected with:
 
 ```
 "error": "maker address not allowed, please use the deposit wallet flow"
 ```
 
-The bot detects this specifically, auto-pauses, and surfaces
-`svx.poly.maker_not_allowed` in the logs. Fix:
+If you see `svx.poly.maker_not_allowed` in the logs, the bot auto-paused
+itself for this reason. Fix:
 
-1. **Deploy a Safe proxy** for the EOA. Behind Ireland VPN, open
-   https://polymarket.com → click "Log in" → connect with the EOA (Brave
-   Wallet or Rabby with the operator key imported). On first login the UI
-   auto-deploys a Gnosis Safe proxy that holds your funds. Note its
-   address (visible under "Profile" → "Wallet" or via the Safe's link in
-   the URL).
+#### Step 1 — Deploy the Deposit Wallet via polymarket.com
 
-2. **Move pUSD from EOA → proxy.** From the dev box:
-   ```bash
-   cd /Users/martinswdev/Repos/SVX/.claude/worktrees/sad-haslett-1430f3
-   # Dry run first
-   pnpm --filter svx-bot send-pusd-to-proxy -- --to=0x<proxy> --amount=10
-   # Submit
-   pnpm --filter svx-bot send-pusd-to-proxy -- --to=0x<proxy> --amount=10 --confirm
-   ```
-   This sends pUSD via ERC20 `transfer` from the EOA to the proxy
-   address. Costs ~$0.05 of POL gas on the EOA.
+Behind Ireland VPN, open https://polymarket.com → **Log in** → connect
+the operator EOA (Brave Wallet / Rabby / MetaMask with the operator key
+imported). On first login the UI deploys a smart-contract Deposit Wallet
+for you. Find its address:
 
-3. **Update Coolify env** for the `bot-mainnet` service:
-   ```
-   MAINNET_POLY_FUNDER_ADDRESS=0x<proxy_address>
-   MAINNET_POLY_SIGNATURE_TYPE=POLY_GNOSIS_SAFE
-   ```
-   Save → service restarts. `svx.poly_client.constructed` should log the
-   proxy as funder + `POLY_GNOSIS_SAFE` as signature mode.
+- Profile page → "Wallet" tab usually shows it
+- Or inspect page HTML: it appears under `proxyAddress` / `proxyWallet` /
+  `baseAddress` (all the same value)
+- Polymarket misleadingly labels this as "Builder address — API use only,
+  do not send funds". That label is wrong for our purposes — this IS the
+  trading proxy and we DO send funds there.
 
-4. **Resume the bot**: open a Coolify terminal for `bot-mainnet` →
-   `pnpm --filter svx-bot resume` (clears the pause set by the
-   maker-not-allowed auto-pause). Next signal fires through the proxy.
+Note: place one tiny manual trade via the UI (e.g. $5 on any market) to
+ensure the wallet is fully active.
 
-The proxy address is deterministic per EOA. Once deployed it persists —
-no need to redo any of this after a bot redeploy unless you rotate the
-EOA private key.
+#### Step 2 — Move pUSD from EOA → Deposit Wallet
+
+```bash
+cd /Users/martinswdev/Repos/SVX/.claude/worktrees/sad-haslett-1430f3
+pnpm --filter svx-bot send-pusd-to-proxy -- --to=0x<dw> --amount=10
+pnpm --filter svx-bot send-pusd-to-proxy -- --to=0x<dw> --amount=10 --confirm
+```
+
+#### Step 3 — Re-derive the L2 API key against the Deposit Wallet
+
+This is the step that catches everyone. The standard `setup-poly-wallet`
+script (and the SDK's `createOrDeriveApiKey()`) bind the API key to the
+EOA — but for POLY_1271 the API key MUST be bound to the Deposit Wallet
+address. The TS SDK has a known bug
+(https://github.com/Polymarket/clob-client-v2/issues/67) so we work
+around it with a dedicated script:
+
+```bash
+# Update local .env first:
+#   POLY_PRIVATE_KEY=0x<eoa>
+#   POLY_FUNDER_ADDRESS=0x<dw>
+#   POLY_NETWORK=polygon
+pnpm --filter svx-bot derive-poly-api-key-1271
+```
+
+This signs the L1 auth payload via the EOA + sends the DW address as the
+`POLY_ADDRESS` header, so the CLOB binds the resulting API key to the
+Deposit Wallet. Output prints `apiKey`/`secret`/`passphrase` and persists
+to `data/poly-operator.polygon.json`.
+
+#### Step 4 — Update Coolify env (bot-mainnet service)
+
+```
+MAINNET_POLY_SIGNATURE_TYPE=POLY_1271
+MAINNET_POLY_FUNDER_ADDRESS=0x<dw_address>
+MAINNET_POLY_API_KEY=<new from step 3>
+MAINNET_POLY_API_SECRET=<new from step 3>
+MAINNET_POLY_API_PASSPHRASE=<new from step 3>
+```
+
+Save → service restarts. Expected log lines on boot:
+```
+svx.poly_client.constructed  funder: 0x<dw>  signatureType: POLY_1271
+```
+
+#### Step 5 — Resume
+
+```bash
+pnpm --filter svx-bot resume   # clears the auto-pause
+```
+
+Next signal should fire cleanly. Watch for `svx.poly.filled` (not
+`maker_not_allowed`).
+
+#### What about POLY_GNOSIS_SAFE?
+
+Pre-May-2026 accounts created via the old polymarket.com flow have a
+Gnosis Safe proxy. Those still work with `POLY_SIGNATURE_TYPE=POLY_GNOSIS_SAFE`
+and the standard `setup-poly-wallet` flow. The bot supports both — pick
+based on when you created the account.
 
 ### 1.5 What to do when
 

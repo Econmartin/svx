@@ -87,7 +87,7 @@ interface BotState {
     pUsd: number;
     gasPol: number;
     signerAddress?: `0x${string}`;
-    signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE';
+    signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | 'POLY_1271';
     updatedAtMs: number;
   };
   /** Last time we refreshed the Polymarket balance from on-chain. */
@@ -677,11 +677,13 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           if (isMakerNotAllowedError(resp)) {
             log.error('svx.poly.maker_not_allowed', {
               hint:
-                'Polymarket rejects trades from un-registered EOAs. Set up a Safe proxy via polymarket.com, transfer pUSD from EOA to the proxy, then set MAINNET_POLY_FUNDER_ADDRESS=<proxy> and MAINNET_POLY_SIGNATURE_TYPE=POLY_GNOSIS_SAFE in Coolify.',
+                'Polymarket Deposit Wallet (DW) requires POLY_1271 mode + an API key re-derived against the DW address. Run `pnpm --filter svx-bot derive-poly-api-key-1271`, copy the new creds to MAINNET_POLY_API_*, set MAINNET_POLY_SIGNATURE_TYPE=POLY_1271 in Coolify. Full instructions in runbook §1.4.5.',
               rawResponse: resp,
+              currentSigType: cfg.polySignatureType,
+              currentFunder: cfg.polyFunderAddress || 'unset',
             });
             risk.pause(
-              'Polymarket maker-address rejected — proxy setup required (see runbook §1.6.4)',
+              'Polymarket maker-address rejected — Deposit Wallet (POLY_1271) setup required (runbook §1.4.5)',
             );
             continue;
           }

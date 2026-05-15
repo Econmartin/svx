@@ -152,6 +152,10 @@ export interface TradeRecord {
   hlPnlUsdc?: number;
   hlFundingPaidUsdc?: number;
   hlClosedAtMs?: number;
+  /** Strategy that opened the trade. 'poly_arb' (original cross-venue) or
+   *  'vol_arb' (standalone HL vol strategy). Defaults to 'poly_arb' on
+   *  rows that pre-date the strategy tag (May 2026). */
+  strategy?: 'poly_arb' | 'vol_arb';
 }
 
 export interface OracleSummary {
@@ -185,6 +189,49 @@ export interface SurfaceResponse {
  * `GET /wallets`. Each block is null when the corresponding venue isn't
  * configured for this bot instance.
  */
+/**
+ * Vol-arb strategy state. Returned by `GET /strategy/vol-arb/state`.
+ * The dashboard's /vol-arb page renders this end to end.
+ */
+export interface VolArbDecisionLog {
+  ts: number;
+  action: 'hold' | 'open_long' | 'open_short' | 'close';
+  reason: string;
+  predictIv: number;
+  realizedVol: number;
+  ivSpread: number;
+  predictUpAtSpot: number;
+  acted: boolean;
+}
+
+export interface VolArbStateResponse {
+  enabled: boolean;
+  thresholds: {
+    openSpread: number;
+    closeSpread: number;
+    directionBias: number;
+    timeStopMinutes: number;
+    minSamples: number;
+  };
+  caps: {
+    perTradeUsdc: number;
+    totalUsdc: number;
+    dailyLossUsdc: number;
+  };
+  state: {
+    midHistory: Array<{ ts: number; price: number }>;
+    lastPredictIv: number | null;
+    lastRealizedVol: number | null;
+    lastDecision: VolArbDecisionLog | null;
+    recentDecisions: VolArbDecisionLog[];
+  } | null;
+  openPositions: TradeRecord[];
+  closedPositions: TradeRecord[];
+  openExposureUsdc: number;
+  realizedPnl24hUsdc: number;
+  realizedPnlUsdc: number;
+}
+
 export interface WalletsSnapshot {
   sui: null | {
     address: string;
@@ -281,6 +328,7 @@ export function createApi(base: string) {
       get<TradeRecord[]>(`/positions/closed-poly?limit=${limit}`),
     positionsHlOpen: () => get<TradeRecord[]>('/positions/hl-open'),
     wallets: () => get<WalletsSnapshot>('/wallets'),
+    volArbState: () => get<VolArbStateResponse>('/strategy/vol-arb/state'),
     oracles: () => get<OracleSummary[]>('/oracles'),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
   };

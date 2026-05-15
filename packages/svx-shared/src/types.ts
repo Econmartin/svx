@@ -208,6 +208,10 @@ export interface TradeRecord {
   hlFundingPaidUsdc?: number;
   /** When the HL leg closed (ms). */
   hlClosedAtMs?: number;
+
+  /** Which strategy opened this trade. Defaults to 'poly_arb' (the original
+   *  Predict×Polymarket arb). 'vol_arb' is the standalone HL vol strategy. */
+  strategy?: 'poly_arb' | 'vol_arb';
 }
 
 export interface RiskDecision {

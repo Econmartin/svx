@@ -20,6 +20,7 @@ const NAV = [
   ['Overview', '/'],
   ['Signals', '/signals'],
   ['Positions', '/positions'],
+  ['Vol-arb', '/vol-arb'],
   ['Wallets', '/wallets'],
   ['Surface', '/surface'],
   ['About', '/about'],

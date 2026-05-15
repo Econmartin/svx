@@ -33,7 +33,7 @@ interface ApiDeps {
       pUsd: number;
       gasPol: number;
       signerAddress?: `0x${string}`;
-      signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE';
+      signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | 'POLY_1271';
       updatedAtMs: number;
     };
     /** Hyperliquid perp margin balance — populated by the HL_BALANCE_REFRESH
@@ -58,6 +58,15 @@ interface ApiDeps {
     lastPolyAttemptAtMs?: number;
     /** When the bot last ATTEMPTED an HL hedge (success or fail). */
     lastHlAttemptAtMs?: number;
+    /** Vol-arb strategy state snapshot — surfaces IV/RV/decisions to the
+     *  dashboard's /vol-arb page. */
+    volArb?: {
+      midHistory: Array<{ ts: number; price: number }>;
+      lastPredictIv: number | null;
+      lastRealizedVol: number | null;
+      lastDecision: unknown;
+      recentDecisions: unknown[];
+    };
   };
   predict: PredictClient;
   addresses: PredictAddresses;
@@ -164,6 +173,40 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
   /** Open Hyperliquid hedges — for the dashboard's HL section. */
   app.get('/positions/hl-open', (_req, res) => {
     res.json(deps.ledger.openHlHedges());
+  });
+
+  /**
+   * Vol-arb strategy state. Returns the IV/RV time series + last decision +
+   * recent decision log + open/closed positions in one payload — the
+   * dashboard's /vol-arb page renders all of it.
+   */
+  app.get('/strategy/vol-arb/state', (_req, res) => {
+    const since24h = Date.now() - 24 * 3600_000;
+    const open = deps.ledger.openVolArbTrades();
+    const closed = deps.ledger.closedVolArbTrades(100);
+    const pnl24h = deps.ledger.realizedVolArbPnlSince(since24h);
+    const pnlAll = deps.ledger.realizedVolArbPnlSince(0);
+    res.json({
+      enabled: deps.cfg.volArbEnabled,
+      thresholds: {
+        openSpread: deps.cfg.volArbIvSpreadOpenThreshold,
+        closeSpread: deps.cfg.volArbIvSpreadCloseThreshold,
+        directionBias: deps.cfg.volArbDirectionBiasThreshold,
+        timeStopMinutes: deps.cfg.volArbTimeStopMinutes,
+        minSamples: deps.cfg.volArbMinSamples,
+      },
+      caps: {
+        perTradeUsdc: deps.cfg.maxVolArbPerTradeUsdc,
+        totalUsdc: deps.cfg.maxVolArbOpenUsdc,
+        dailyLossUsdc: deps.cfg.dailyVolArbLossLimitUsdc,
+      },
+      state: deps.state.volArb ?? null,
+      openPositions: open,
+      closedPositions: closed,
+      openExposureUsdc: deps.ledger.openVolArbExposureUsdc(),
+      realizedPnl24hUsdc: pnl24h,
+      realizedPnlUsdc: pnlAll,
+    });
   });
 
   /**

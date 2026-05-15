@@ -94,7 +94,10 @@ CREATE TABLE IF NOT EXISTS trades (
   hl_status TEXT,
   hl_pnl_usdc REAL,
   hl_funding_paid_usdc REAL,
-  hl_closed_at_ms INTEGER
+  hl_closed_at_ms INTEGER,
+  -- Strategy tag (additive 2026-05-15). 'poly_arb' for the original
+  -- cross-venue strategy, 'vol_arb' for the standalone HL vol strategy.
+  strategy TEXT NOT NULL DEFAULT 'poly_arb'
 );
 CREATE INDEX IF NOT EXISTS ix_trades_ts ON trades(ts_ms);
 CREATE INDEX IF NOT EXISTS ix_trades_oracle ON trades(oracle_id);
@@ -216,6 +219,11 @@ export class LedgerStore {
     ensureColumn('hl_pnl_usdc', 'REAL');
     ensureColumn('hl_funding_paid_usdc', 'REAL');
     ensureColumn('hl_closed_at_ms', 'INTEGER');
+    // Strategy tag (additive 2026-05-15). Existing rows are implicitly
+    // 'poly_arb' (the original cross-venue strategy). New strategies tag
+    // their trades so per-strategy PnL + positions can be segregated on
+    // the dashboard.
+    ensureColumn('strategy', "TEXT NOT NULL DEFAULT 'poly_arb'");
   }
 
   close(): void {
@@ -263,6 +271,8 @@ export class LedgerStore {
       polyAskAtExec?: number;
       predictIvAtExec?: number;
       edgeAtExec?: number;
+      /** Strategy tag. Defaults to 'poly_arb' for backwards compatibility. */
+      strategy?: 'poly_arb' | 'vol_arb';
     },
   ): string {
     const id = t.id ?? randomUUID();
@@ -272,12 +282,14 @@ export class LedgerStore {
          direction, quantity_dusdc, cost_price, cost_usdc, tx_digest, settled, payout_usdc, pnl_usdc,
          ms_to_expiry_at_exec, predict_prob_at_exec, poly_ask_at_exec, predict_iv_at_exec, edge_at_exec,
          poly_network, poly_token_id, poly_condition_id, poly_side, poly_outcome,
-         poly_order_id, poly_filled_shares, poly_fill_price, poly_cost_usdc, poly_tx_hash, poly_status)
+         poly_order_id, poly_filled_shares, poly_fill_price, poly_cost_usdc, poly_tx_hash, poly_status,
+         strategy)
          VALUES (@id, @sigId, @ts, @mode, @oracleId, @underlying, @expiry, @strike,
          @dir, @qty, @cp, @cost, @txd, @settled, @payout, @pnl,
          @msToE, @ppe, @pae, @pive, @edge,
          @polyNet, @polyTok, @polyCond, @polySide, @polyOut,
-         @polyOrd, @polyShr, @polyPx, @polyUsd, @polyTx, @polyStat)`,
+         @polyOrd, @polyShr, @polyPx, @polyUsd, @polyTx, @polyStat,
+         @strategy)`,
       )
       .run({
         id,
@@ -312,6 +324,7 @@ export class LedgerStore {
         polyUsd: t.polyCostUsdc ?? null,
         polyTx: t.polyTxHash ?? null,
         polyStat: t.polyStatus ?? null,
+        strategy: t.strategy ?? 'poly_arb',
       });
     return id;
   }
@@ -680,6 +693,49 @@ export class LedgerStore {
     return r?.p ?? 0;
   }
 
+  // ============================================================
+  // Vol-arb strategy queries (standalone HL trading, strategy='vol_arb')
+  // ============================================================
+
+  /** Trades opened by the vol-arb strategy that still have an open HL leg. */
+  openVolArbTrades(): TradeRecord[] {
+    return this.tradeRows(
+      `WHERE strategy = 'vol_arb' AND hl_status = 'open' ORDER BY ts_ms ASC`,
+    );
+  }
+
+  /** Closed vol-arb trades — dashboard history view. */
+  closedVolArbTrades(limit = 500): TradeRecord[] {
+    return this.tradeRows(
+      `WHERE strategy = 'vol_arb' AND hl_status = 'closed'
+       ORDER BY hl_closed_at_ms DESC LIMIT ?`,
+      [limit],
+    );
+  }
+
+  /** Sum of realized vol-arb PnL since `sinceMs` — feeds daily-loss gate. */
+  realizedVolArbPnlSince(sinceMs: number): number {
+    const r = this.db
+      .prepare<[number], { p: number }>(
+        `SELECT COALESCE(SUM(hl_pnl_usdc), 0) AS p FROM trades
+         WHERE strategy = 'vol_arb' AND hl_status = 'closed'
+           AND hl_closed_at_ms >= ?`,
+      )
+      .get(sinceMs);
+    return r?.p ?? 0;
+  }
+
+  /** Total open exposure (USD notional) for vol-arb positions. */
+  openVolArbExposureUsdc(): number {
+    const r = this.db
+      .prepare<[], { s: number }>(
+        `SELECT COALESCE(SUM(hl_size * hl_open_price), 0) AS s FROM trades
+         WHERE strategy = 'vol_arb' AND hl_status = 'open'`,
+      )
+      .get();
+    return r?.s ?? 0;
+  }
+
   /** Sum of pUSD spent on currently-open Poly positions. */
   openPolyExposureUsdc(): number {
     const r = this.db
@@ -890,6 +946,7 @@ export class LedgerStore {
           hl_pnl_usdc: number | null;
           hl_funding_paid_usdc: number | null;
           hl_closed_at_ms: number | null;
+          strategy: string | null;
         }
       >(`SELECT * FROM trades ${suffix}`)
       .all(...params);
@@ -949,6 +1006,7 @@ export class LedgerStore {
       hlPnlUsdc: r.hl_pnl_usdc ?? undefined,
       hlFundingPaidUsdc: r.hl_funding_paid_usdc ?? undefined,
       hlClosedAtMs: r.hl_closed_at_ms ?? undefined,
+      strategy: (r.strategy as 'poly_arb' | 'vol_arb' | null) ?? 'poly_arb',
     }));
   }
 }

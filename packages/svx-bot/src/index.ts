@@ -53,6 +53,17 @@ import {
   tryCreateHyperliquidExecClient,
 } from './exec/hyperliquid-client.js';
 import { hedgeSizeForPolyFill } from './pricing/binary-delta.js';
+import {
+  appendMid as appendVolArbMid,
+  btcSizeForUsdNotional,
+  computePredictAtmIv,
+  computePredictUpAtSpot,
+  computeRealizedVol,
+  decide as decideVolArb,
+  freshVolArbState,
+  recordDecision as recordVolArbDecision,
+  type VolArbState,
+} from './strategy/vol-arb.js';
 import { startApiServer } from './api/server.js';
 import { log } from './util/log.js';
 
@@ -87,7 +98,7 @@ interface BotState {
     pUsd: number;
     gasPol: number;
     signerAddress?: `0x${string}`;
-    signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE';
+    signatureMode?: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | 'POLY_1271';
     updatedAtMs: number;
   };
   /** Last time we refreshed the Polymarket balance from on-chain. */
@@ -123,6 +134,8 @@ interface BotState {
   /** Last time we polled gamma for Polymarket settlement / ran auto-redeem.
    *  UMA resolves markets hours after expiry, so 5-min cadence is plenty. */
   lastPolySettlementCheckMs: number;
+  /** Vol-arb strategy state — in-memory rolling buffer + last decision. */
+  volArb: VolArbState;
 }
 
 const MANAGER_BALANCE_REFRESH_MS = 30_000;
@@ -166,6 +179,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastPolyAttemptAtMs: 0,
     lastHlAttemptAtMs: 0,
     lastPolySettlementCheckMs: 0,
+    volArb: freshVolArbState(),
   };
 
   // If we have an operator key + manager record, read the real wallet balance
@@ -677,11 +691,13 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           if (isMakerNotAllowedError(resp)) {
             log.error('svx.poly.maker_not_allowed', {
               hint:
-                'Polymarket rejects trades from un-registered EOAs. Set up a Safe proxy via polymarket.com, transfer pUSD from EOA to the proxy, then set MAINNET_POLY_FUNDER_ADDRESS=<proxy> and MAINNET_POLY_SIGNATURE_TYPE=POLY_GNOSIS_SAFE in Coolify.',
+                'Polymarket Deposit Wallet (DW) requires POLY_1271 mode + an API key re-derived against the DW address. Run `pnpm --filter svx-bot derive-poly-api-key-1271`, copy the new creds to MAINNET_POLY_API_*, set MAINNET_POLY_SIGNATURE_TYPE=POLY_1271 in Coolify. Full instructions in runbook §1.4.5.',
               rawResponse: resp,
+              currentSigType: cfg.polySignatureType,
+              currentFunder: cfg.polyFunderAddress || 'unset',
             });
             risk.pause(
-              'Polymarket maker-address rejected — proxy setup required (see runbook §1.6.4)',
+              'Polymarket maker-address rejected — Deposit Wallet (POLY_1271) setup required (runbook §1.4.5)',
             );
             continue;
           }
@@ -921,6 +937,19 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     }
   }
 
+  // === Vol-arb strategy loop ===
+  // Runs every iteration regardless of poly-arb state. Records BTC mid into
+  // the rolling buffer; once enough samples accumulate, evaluates the
+  // IV-vs-RV signal and opens/closes HL perp positions accordingly.
+  // Always-on for telemetry; only fires real trades when volArbEnabled=true.
+  if (hlExec) {
+    try {
+      await runVolArbStep({ cfg, state, ledger, risk, hlExec, predict, oracleSummaries: oracles });
+    } catch (e) {
+      log.warn('svx.vol_arb.step_error', { err: errMsg(e) });
+    }
+  }
+
   // Periodic NAV snapshot for the dashboard chart.
   ledger.recordNav(
     state.navUsdc,
@@ -1094,6 +1123,178 @@ export async function reconcilePolySettlements(
       });
     }
   }
+}
+
+/**
+ * Vol-arb strategy step. Always-on for telemetry (records BTC mids,
+ * computes IV / RV / decisions). Only fires HL orders when
+ * `cfg.volArbEnabled === true` AND `cfg.hlExecutionEnabled === true`.
+ *
+ * Position lifecycle:
+ *   - Open: |IV − RV| > openThresh AND surface bias clear
+ *   - Close: |IV − RV| < closeThresh OR time-stop hit
+ */
+async function runVolArbStep(args: {
+  cfg: SvxConfig;
+  state: BotState;
+  ledger: LedgerStore;
+  risk: RiskGate;
+  hlExec: HyperliquidExecClient;
+  predict: PredictClient;
+  oracleSummaries: PredictOracleSummary[];
+}): Promise<void> {
+  const { cfg, state, ledger, risk, hlExec, predict, oracleSummaries } = args;
+  const nowMs = Date.now();
+
+  // 1. Sample current BTC mid from HL and append to the rolling buffer.
+  let btcMid: number | null = null;
+  try {
+    btcMid = await hlExec.getMid(cfg.hlHedgeAsset);
+  } catch (e) {
+    log.debug('svx.vol_arb.mid_failed', { err: errMsg(e) });
+    return;
+  }
+  if (btcMid && isFinite(btcMid) && btcMid > 0) {
+    appendVolArbMid(state.volArb, { ts: nowMs, price: btcMid });
+  }
+
+  // 2. Require warm-up.
+  if (state.volArb.midHistory.length < cfg.volArbMinSamples) {
+    return;
+  }
+
+  // 3. Snapshot the shortest-expiry BTC oracle (just what we need for ATM IV).
+  const btcOracles = oracleSummaries
+    .filter((o) => o.underlyingAsset === 'BTC' && o.status === 'active' && o.expiryMs > nowMs)
+    .sort((a, b) => a.expiryMs - b.expiryMs);
+  if (btcOracles.length === 0) return;
+  const snap = await predict.snapshotOracle(btcOracles[0]!.oracleId);
+  if (!snap) return;
+
+  // 4. Compute IV / RV / surface bias.
+  const ivResult = computePredictAtmIv([snap], nowMs);
+  if (!ivResult) return;
+  const realizedVol = computeRealizedVol(state.volArb.midHistory);
+  const predictUpAtSpot = computePredictUpAtSpot(ivResult.oracle, nowMs);
+
+  // 4. Identify any open vol-arb position. v1 supports at most one at a time.
+  const openVolArb = ledger.openVolArbTrades();
+  const openPos = openVolArb[0];
+  const openPosAgeMs = openPos ? nowMs - openPos.timestampMs : undefined;
+
+  // 5. Decide.
+  const decision = decideVolArb({
+    predictIv: ivResult.iv,
+    realizedVol,
+    predictUpAtSpot,
+    hasOpenPosition: !!openPos,
+    openPositionAgeMs: openPosAgeMs,
+    cfg,
+    nowMs,
+  });
+
+  let acted = false;
+
+  // 6. Execute (or just record).
+  if (cfg.volArbEnabled && cfg.hlExecutionEnabled) {
+    if (decision.action === 'open_long' || decision.action === 'open_short') {
+      // Size the trade against per-trade USD cap.
+      const usdNotional = cfg.maxVolArbPerTradeUsdc;
+      const riskCheck = risk.checkVolArb({
+        notionalUsdc: usdNotional,
+        openVolArbExposureUsdc: ledger.openVolArbExposureUsdc(),
+      });
+      if (!riskCheck.ok) {
+        log.info('svx.vol_arb.risk_blocked', { reason: riskCheck.reason });
+      } else {
+        const btcSize = btcSizeForUsdNotional(usdNotional, btcMid ?? ivResult.oracle.spot);
+        const side: 'long' | 'short' = decision.action === 'open_long' ? 'long' : 'short';
+        try {
+          const fill = await hlExec.openMarketPerp({
+            asset: cfg.hlHedgeAsset,
+            side,
+            size: btcSize,
+          });
+          if (fill.status === 'filled' && fill.orderId && fill.fillPrice > 0) {
+            const tradeId = ledger.insertTrade({
+              signalId: 'vol_arb',
+              timestampMs: nowMs,
+              mode: 'live',
+              oracleId: ivResult.oracle.oracleId,
+              underlyingAsset: ivResult.oracle.underlyingAsset,
+              expiryMs: ivResult.oracle.expiryMs,
+              strike: ivResult.oracle.spot,
+              direction: side === 'long' ? 'up' : 'down',
+              quantityDusdc: 0,
+              costPrice: 0,
+              costUsdc: 0,
+              settled: false,
+              strategy: 'vol_arb',
+              predictIvAtExec: ivResult.iv,
+            });
+            ledger.recordHlLeg(tradeId, {
+              asset: cfg.hlHedgeAsset,
+              orderId: fill.orderId,
+              size: fill.filledSize,
+              side,
+              openPrice: fill.fillPrice,
+              status: 'open',
+            });
+            acted = true;
+            log.info('svx.vol_arb.opened', {
+              side,
+              size: fill.filledSize,
+              price: fill.fillPrice,
+              ivSpread: decision.ivSpread,
+              predictUpAtSpot,
+              tradeId,
+            });
+          } else {
+            log.warn('svx.vol_arb.open_partial_or_rejected', {
+              status: fill.status,
+              filledSize: fill.filledSize,
+            });
+          }
+        } catch (e) {
+          log.error('svx.vol_arb.open_failed', { err: errMsg(e) });
+        }
+      }
+    } else if (decision.action === 'close' && openPos && openPos.hlSize && openPos.hlSide) {
+      try {
+        const closeFill = await hlExec.closeMarketPerp({
+          asset: openPos.hlAsset ?? 'BTC',
+          originalSide: openPos.hlSide,
+          size: openPos.hlSize,
+        });
+        if (closeFill.status !== 'rejected' && closeFill.fillPrice > 0 && openPos.hlOpenPrice) {
+          const closePx = closeFill.fillPrice;
+          const pnl =
+            openPos.hlSide === 'short'
+              ? (openPos.hlOpenPrice - closePx) * openPos.hlSize
+              : (closePx - openPos.hlOpenPrice) * openPos.hlSize;
+          ledger.closeHlLeg(openPos.id, {
+            closePrice: closePx,
+            pnlUsdc: pnl,
+            fundingPaidUsdc: 0,
+            closedAtMs: nowMs,
+          });
+          acted = true;
+          log.info('svx.vol_arb.closed', {
+            tradeId: openPos.id,
+            reason: decision.reason,
+            pnlUsdc: pnl.toFixed(4),
+            ageMinutes: (openPosAgeMs! / 60_000).toFixed(1),
+          });
+        } else {
+          log.warn('svx.vol_arb.close_rejected', { tradeId: openPos.id, raw: closeFill.raw });
+        }
+      } catch (e) {
+        log.error('svx.vol_arb.close_failed', { tradeId: openPos.id, err: errMsg(e) });
+      }
+    }
+  }
+
+  recordVolArbDecision(state.volArb, decision, acted);
 }
 
 async function reconcileSettlements(

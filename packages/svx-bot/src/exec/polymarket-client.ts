@@ -79,7 +79,7 @@ export class PolymarketExecClient {
    *  this address. */
   readonly funderAddress: `0x${string}`;
   /** Which signature flavor the SDK is using. */
-  readonly signatureMode: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE';
+  readonly signatureMode: 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | 'POLY_1271';
   private readonly clob: ClobClient;
   private readonly cfg: SvxConfig;
 
@@ -90,13 +90,15 @@ export class PolymarketExecClient {
     this.address = address;
 
     // Polymarket signature mode selection. Default 'EOA' keeps the existing
-    // direct-EOA behavior (works only for whitelisted addresses). Most
-    // operators land on POLY_GNOSIS_SAFE — Polymarket's web UI auto-deploys
-    // a Safe proxy that owns the pUSD; the EOA signs orders on its behalf.
+    // direct-EOA behavior (works only for whitelisted addresses). Operators
+    // who signed up via polymarket.com AFTER May 2026 have a "Deposit Wallet"
+    // and need POLY_1271 (EIP-1271 smart-contract wallet signatures);
+    // pre-May-2026 signups had a Gnosis Safe and need POLY_GNOSIS_SAFE.
     const sigTypeMap = {
       EOA: SignatureTypeV2.EOA,
       POLY_PROXY: SignatureTypeV2.POLY_PROXY,
       POLY_GNOSIS_SAFE: SignatureTypeV2.POLY_GNOSIS_SAFE,
+      POLY_1271: SignatureTypeV2.POLY_1271,
     } as const;
     const signatureType = sigTypeMap[cfg.polySignatureType];
     const funderAddress =

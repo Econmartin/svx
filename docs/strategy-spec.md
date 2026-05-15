@@ -150,6 +150,45 @@ Implementation: [`pricing/binary-delta.ts`](../packages/svx-bot/src/pricing/bina
 hedge wiring in [`index.ts`](../packages/svx-bot/src/index.ts) after the
 Polymarket fill block.
 
+## Vol-arb (standalone Hyperliquid strategy, added 2026-05-15)
+
+Sibling strategy to the poly-arb cross-venue trade. Doesn't depend on
+Polymarket — useful while Polymarket's Deposit Wallet API rollout is
+breaking third-party trading, and stands on its own afterwards as
+a second source of HL-side PnL.
+
+**The signal:** Predict's SVI surface gives a forward-looking ATM IV.
+Hyperliquid's recent mid-price history gives realized vol over the same
+horizon. When the two diverge meaningfully AND Predict's surface has a
+directional bias, the bot opens a perp position in that direction:
+
+```text
+σ_predict = √(w(k=0) / T_oracle)       # ATM IV, shortest-expiry oracle
+σ_realized = √(Σ(r_i − r̄)² / (n−1) × samples_per_year)
+spread = σ_predict − σ_realized
+
+if |spread| > openThreshold AND |P_up_at_spot − 0.5| > biasThreshold:
+  open long  if P_up_at_spot > 0.5
+  open short otherwise
+```
+
+**Position lifecycle:**
+
+- Close on signal weakening (`|spread| < closeThreshold` — hysteresis vs. open)
+- Close on time-stop (default 60 min)
+- One open position at a time (v1)
+
+**Independent risk envelope** — `maxVolArbPerTradeUsdc`, `maxVolArbOpenUsdc`,
+`dailyVolArbLossLimitUsdc` are separate from the poly-arb hedge gates so
+the two strategies don't crowd each other out of HL margin.
+
+**Off by default** — set `VOL_ARB_ENABLED=true` only after eyeballing the
+`/vol-arb` dashboard page, which is always-on for telemetry (records the
+IV/RV time series + decisions even when execution is off).
+
+Implementation: [`strategy/vol-arb.ts`](../packages/svx-bot/src/strategy/vol-arb.ts).
+Tests: [`tests/vol-arb.test.ts`](../packages/svx-bot/tests/vol-arb.test.ts) (25 cases).
+
 ## What v1 deliberately does NOT do
 
 - **No dynamic hedge rebalancing.** Static hedge at trade open is sufficient

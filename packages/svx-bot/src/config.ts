@@ -151,6 +151,43 @@ const Schema = z.object({
    *  (continue opening Poly without hedge, log a warning). Default false. */
   hlRequiredForPoly: z.boolean().default(false),
 
+  // === Vol-arb standalone strategy on Hyperliquid (Part 2 stretch) ===
+  /**
+   * Kill switch for the vol-arb strategy. Default OFF — operator turns
+   * on after eyeballing the signals on the dashboard. Independent of
+   * `hlExecutionEnabled` (which gates the Polymarket hedge leg).
+   */
+  volArbEnabled: z.boolean().default(false),
+  /**
+   * Open trigger: if |Predict ATM IV − HL realized vol| exceeds this, AND
+   * the SVI surface has a clear directional bias, open a perp position.
+   * In vol points (0.05 = 5%). Default 0.05.
+   */
+  volArbIvSpreadOpenThreshold: z.number().positive().default(0.05),
+  /**
+   * Close trigger: if |IV − RV| falls below this after a trade is open,
+   * close. Default 0.02 (smaller than open threshold for hysteresis).
+   */
+  volArbIvSpreadCloseThreshold: z.number().nonnegative().default(0.02),
+  /**
+   * Directional bias threshold from Predict's surface. The bot picks a
+   * direction only when P(spot > strike at expiry, evaluated at K=spot)
+   * exceeds `0.5 + volArbDirectionBiasThreshold` (long) or is below
+   * `0.5 − volArbDirectionBiasThreshold` (short). Default 0.03.
+   */
+  volArbDirectionBiasThreshold: z.number().min(0).max(0.5).default(0.03),
+  /** Per-trade USD-notional cap on vol-arb perp positions. */
+  maxVolArbPerTradeUsdc: z.number().positive().default(2),
+  /** Total open vol-arb exposure cap (USD). */
+  maxVolArbOpenUsdc: z.number().positive().default(10),
+  /** Daily vol-arb loss limit (USD); auto-pauses on breach. */
+  dailyVolArbLossLimitUsdc: z.number().positive().default(5),
+  /** Maximum time a vol-arb position stays open before time-stop close. */
+  volArbTimeStopMinutes: z.number().positive().default(60),
+  /** Min realized-vol samples in the rolling buffer before the strategy
+   *  fires. Below this we're still warming up. Default 30. */
+  volArbMinSamples: z.number().int().positive().default(30),
+
   dataDir: z.string().default('./data'),
   apiHost: z.string().default('127.0.0.1'),
   apiPort: z.number().int().positive().default(4321),
@@ -214,6 +251,15 @@ export function loadConfig(): SvxConfig {
     maxHlOpenUsdc: parseNum(process.env.MAX_HL_OPEN_USDC, 10),
     dailyHlLossLimitUsdc: parseNum(process.env.DAILY_HL_LOSS_LIMIT_USDC, 5),
     hlRequiredForPoly: parseBool(process.env.HL_REQUIRED_FOR_POLY, false),
+    volArbEnabled: parseBool(process.env.VOL_ARB_ENABLED, false),
+    volArbIvSpreadOpenThreshold: parseNum(process.env.VOL_ARB_OPEN_THRESHOLD, 0.05),
+    volArbIvSpreadCloseThreshold: parseNum(process.env.VOL_ARB_CLOSE_THRESHOLD, 0.02),
+    volArbDirectionBiasThreshold: parseNum(process.env.VOL_ARB_DIRECTION_BIAS, 0.03),
+    maxVolArbPerTradeUsdc: parseNum(process.env.MAX_VOL_ARB_PER_TRADE_USDC, 2),
+    maxVolArbOpenUsdc: parseNum(process.env.MAX_VOL_ARB_OPEN_USDC, 10),
+    dailyVolArbLossLimitUsdc: parseNum(process.env.DAILY_VOL_ARB_LOSS_LIMIT_USDC, 5),
+    volArbTimeStopMinutes: parseNum(process.env.VOL_ARB_TIME_STOP_MINUTES, 60),
+    volArbMinSamples: parseNum(process.env.VOL_ARB_MIN_SAMPLES, 30),
     dataDir: process.env.SVX_DATA_DIR ?? path.join(WORKSPACE_ROOT, 'data'),
     apiHost: process.env.SVX_API_HOST ?? '127.0.0.1',
     apiPort: parseNum(process.env.SVX_API_PORT, 4321),

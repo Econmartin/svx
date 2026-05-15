@@ -109,16 +109,21 @@ const Schema = z.object({
   /** Max time (ms) to wait for the Polymarket leg to fill before we abort. */
   polyFillTimeoutMs: z.number().int().positive().default(30_000),
   /**
-   * Polymarket signature mode: 'EOA' (direct EOA — works only for whitelisted
-   * addresses), 'POLY_PROXY' (Polymarket-deployed proxy), or 'POLY_GNOSIS_SAFE'
-   * (the current default for Polymarket UI signups — Gnosis Safe holds funds,
-   * EOA owner signs orders).
+   * Polymarket signature mode:
+   *   - 'EOA':              direct EOA — works only for whitelisted addresses.
+   *   - 'POLY_PROXY':       legacy Polymarket-deployed proxy (pre-2024).
+   *   - 'POLY_GNOSIS_SAFE': pre-2026-05 Gnosis Safe signups via polymarket.com.
+   *   - 'POLY_1271':        the May 2026 "Deposit Wallet" rollout — smart-
+   *                         contract wallets that verify signatures via
+   *                         EIP-1271. NEW signups via polymarket.com get
+   *                         these. EOA owner signs orders; the Deposit
+   *                         Wallet's `isValidSignature` validates them.
    *
-   * If you signed up via polymarket.com web UI, you have a POLY_GNOSIS_SAFE
-   * setup. The proxy/safe address goes in `polyFunderAddress` and pUSD must
-   * be held by the proxy (not the signing EOA).
+   * For POLY_1271, the L2 API key MUST be re-derived against the proxy
+   * (not the EOA) — use scripts/derive-poly-api-key-1271.ts since the SDK's
+   * top-level createApiKey() has a known bug that binds keys to the EOA.
    */
-  polySignatureType: z.enum(['EOA', 'POLY_PROXY', 'POLY_GNOSIS_SAFE']).default('EOA'),
+  polySignatureType: z.enum(['EOA', 'POLY_PROXY', 'POLY_GNOSIS_SAFE', 'POLY_1271']).default('EOA'),
   /**
    * Funder address that owns the pUSD and outcome shares. Empty = use the EOA's
    * own address (SignatureType=EOA only). Required as a 0x address when
@@ -145,6 +150,43 @@ const Schema = z.object({
    *  poly trades? `true` = strict (no naked Poly), `false` = permissive
    *  (continue opening Poly without hedge, log a warning). Default false. */
   hlRequiredForPoly: z.boolean().default(false),
+
+  // === Vol-arb standalone strategy on Hyperliquid (Part 2 stretch) ===
+  /**
+   * Kill switch for the vol-arb strategy. Default OFF — operator turns
+   * on after eyeballing the signals on the dashboard. Independent of
+   * `hlExecutionEnabled` (which gates the Polymarket hedge leg).
+   */
+  volArbEnabled: z.boolean().default(false),
+  /**
+   * Open trigger: if |Predict ATM IV − HL realized vol| exceeds this, AND
+   * the SVI surface has a clear directional bias, open a perp position.
+   * In vol points (0.05 = 5%). Default 0.05.
+   */
+  volArbIvSpreadOpenThreshold: z.number().positive().default(0.05),
+  /**
+   * Close trigger: if |IV − RV| falls below this after a trade is open,
+   * close. Default 0.02 (smaller than open threshold for hysteresis).
+   */
+  volArbIvSpreadCloseThreshold: z.number().nonnegative().default(0.02),
+  /**
+   * Directional bias threshold from Predict's surface. The bot picks a
+   * direction only when P(spot > strike at expiry, evaluated at K=spot)
+   * exceeds `0.5 + volArbDirectionBiasThreshold` (long) or is below
+   * `0.5 − volArbDirectionBiasThreshold` (short). Default 0.03.
+   */
+  volArbDirectionBiasThreshold: z.number().min(0).max(0.5).default(0.03),
+  /** Per-trade USD-notional cap on vol-arb perp positions. */
+  maxVolArbPerTradeUsdc: z.number().positive().default(2),
+  /** Total open vol-arb exposure cap (USD). */
+  maxVolArbOpenUsdc: z.number().positive().default(10),
+  /** Daily vol-arb loss limit (USD); auto-pauses on breach. */
+  dailyVolArbLossLimitUsdc: z.number().positive().default(5),
+  /** Maximum time a vol-arb position stays open before time-stop close. */
+  volArbTimeStopMinutes: z.number().positive().default(60),
+  /** Min realized-vol samples in the rolling buffer before the strategy
+   *  fires. Below this we're still warming up. Default 30. */
+  volArbMinSamples: z.number().int().positive().default(30),
 
   dataDir: z.string().default('./data'),
   apiHost: z.string().default('127.0.0.1'),
@@ -209,6 +251,15 @@ export function loadConfig(): SvxConfig {
     maxHlOpenUsdc: parseNum(process.env.MAX_HL_OPEN_USDC, 10),
     dailyHlLossLimitUsdc: parseNum(process.env.DAILY_HL_LOSS_LIMIT_USDC, 5),
     hlRequiredForPoly: parseBool(process.env.HL_REQUIRED_FOR_POLY, false),
+    volArbEnabled: parseBool(process.env.VOL_ARB_ENABLED, false),
+    volArbIvSpreadOpenThreshold: parseNum(process.env.VOL_ARB_OPEN_THRESHOLD, 0.05),
+    volArbIvSpreadCloseThreshold: parseNum(process.env.VOL_ARB_CLOSE_THRESHOLD, 0.02),
+    volArbDirectionBiasThreshold: parseNum(process.env.VOL_ARB_DIRECTION_BIAS, 0.03),
+    maxVolArbPerTradeUsdc: parseNum(process.env.MAX_VOL_ARB_PER_TRADE_USDC, 2),
+    maxVolArbOpenUsdc: parseNum(process.env.MAX_VOL_ARB_OPEN_USDC, 10),
+    dailyVolArbLossLimitUsdc: parseNum(process.env.DAILY_VOL_ARB_LOSS_LIMIT_USDC, 5),
+    volArbTimeStopMinutes: parseNum(process.env.VOL_ARB_TIME_STOP_MINUTES, 60),
+    volArbMinSamples: parseNum(process.env.VOL_ARB_MIN_SAMPLES, 30),
     dataDir: process.env.SVX_DATA_DIR ?? path.join(WORKSPACE_ROOT, 'data'),
     apiHost: process.env.SVX_API_HOST ?? '127.0.0.1',
     apiPort: parseNum(process.env.SVX_API_PORT, 4321),

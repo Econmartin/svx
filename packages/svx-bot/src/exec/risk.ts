@@ -175,4 +175,44 @@ export class RiskGate {
 
     return { ok: true };
   }
+
+  /**
+   * Vol-arb risk gate. Separate from `checkHl` because vol-arb has its own
+   * per-trade / total-exposure / daily-loss caps — keeping the two
+   * strategies' risk envelopes isolated prevents poly-arb hedge demand from
+   * crowding out vol-arb capacity (and vice versa).
+   */
+  checkVolArb(input: {
+    notionalUsdc: number;
+    openVolArbExposureUsdc: number;
+  }): RiskDecision {
+    const paused = this.isPaused();
+    if (paused.paused) return { ok: false, reason: paused.reason ?? 'paused' };
+
+    if (input.notionalUsdc > this.cfg.maxVolArbPerTradeUsdc + 1e-6) {
+      return {
+        ok: false,
+        reason: `vol-arb notional ${input.notionalUsdc.toFixed(2)} > per-trade cap ${this.cfg.maxVolArbPerTradeUsdc}`,
+      };
+    }
+
+    const totalAfter = input.openVolArbExposureUsdc + input.notionalUsdc;
+    if (totalAfter > this.cfg.maxVolArbOpenUsdc + 1e-6) {
+      return {
+        ok: false,
+        reason: `vol-arb total exposure ${totalAfter.toFixed(2)} > cap ${this.cfg.maxVolArbOpenUsdc}`,
+      };
+    }
+
+    const volArbPnl24h = this.ledger.realizedVolArbPnlSince(Date.now() - 24 * 3600_000);
+    if (volArbPnl24h <= -this.cfg.dailyVolArbLossLimitUsdc) {
+      this.pause(`daily vol-arb loss limit hit: ${volArbPnl24h.toFixed(2)} USDC`);
+      return {
+        ok: false,
+        reason: `24h vol-arb loss ${volArbPnl24h.toFixed(2)} ≤ −${this.cfg.dailyVolArbLossLimitUsdc}`,
+      };
+    }
+
+    return { ok: true };
+  }
 }

@@ -15,7 +15,11 @@ import {
   hedgeSizeForPolyFill,
   MAX_DELTA,
 } from '../src/pricing/binary-delta.js';
-import { parseHlOrderResponse } from '../src/exec/hyperliquid-client.js';
+import {
+  parseHlOrderResponse,
+  formatPriceForHl,
+  formatSize,
+} from '../src/exec/hyperliquid-client.js';
 import { RiskGate } from '../src/exec/risk.js';
 import type { SvxConfig } from '../src/config.js';
 import type { LedgerStore } from '../src/ledger/store.js';
@@ -233,6 +237,55 @@ describe('RiskGate.checkHl', () => {
     const d = r.checkHl({ notionalUsdc: 1, openHlExposureUsdc: 0 });
     expect(d.ok).toBe(false);
     expect(d.reason).toMatch(/24h HL loss/);
+  });
+});
+
+describe('formatPriceForHl', () => {
+  // Hyperliquid: max (6 - szDecimals) decimals AND max 5 significant figures
+  // — whichever is more restrictive.
+
+  it('produces integer-only prices for BTC at $78k (sig-figs wins)', () => {
+    // szDecimals=5 → decimal rule allows 1 decimal (78582.5)
+    // Sig-figs rule (5 total) at 78k → no decimals (78583)
+    // The tighter rule wins.
+    expect(formatPriceForHl(78582.5, 5)).toBe('78583');
+    expect(formatPriceForHl(80168.43, 5)).toBe('80168');
+    expect(formatPriceForHl(77010.85, 5)).toBe('77011');
+  });
+
+  it('rejects regression: previous formatPrice produced .5 prices that HL rejected', () => {
+    // The bot's logs showed limitPx=77010.85, 80168.43 — both rejected with
+    // "Price must be divisible by tick size". Formatter must now produce
+    // integers at this magnitude.
+    expect(formatPriceForHl(77010.85, 5)).not.toMatch(/\./);
+    expect(formatPriceForHl(80168.43, 5)).not.toMatch(/\./);
+  });
+
+  it('allows 1 decimal for ETH at $3.2k (sig-figs+decimal both allow 1)', () => {
+    // szDecimals=4 → max 2 decimals from perp rule
+    // Sig-figs at 3245 → 1 decimal allowed
+    // Min(2, 1) = 1 decimal.
+    expect(formatPriceForHl(3245.67, 4)).toBe('3245.7');
+  });
+
+  it('allows more decimals for low-price assets', () => {
+    // A $1.234 token with szDecimals=0 → 4 decimals from sig-figs rule
+    expect(formatPriceForHl(1.23456, 0)).toBe('1.2346');
+  });
+
+  it('floors to 0 for invalid inputs', () => {
+    expect(formatPriceForHl(0, 5)).toBe('0');
+    expect(formatPriceForHl(-100, 5)).toBe('0');
+    expect(formatPriceForHl(Infinity, 5)).toBe('0');
+    expect(formatPriceForHl(NaN, 5)).toBe('0');
+  });
+});
+
+describe('formatSize', () => {
+  it('honors szDecimals for size precision', () => {
+    expect(formatSize(0.00012345, 5)).toBe('0.00012');
+    expect(formatSize(1.23456, 4)).toBe('1.2346');
+    expect(formatSize(100, 0)).toBe('100');
   });
 });
 

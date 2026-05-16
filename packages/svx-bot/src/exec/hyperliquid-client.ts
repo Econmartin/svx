@@ -63,6 +63,9 @@ export class HyperliquidExecClient {
   private readonly exchange: ExchangeClient;
   /** Lazily-loaded asset index map ("BTC" -> 0, "ETH" -> 1, ...). */
   private assetIndex: Map<string, number> | null = null;
+  /** Cached size-decimals per asset (BTC=5, ETH=4, ...). Set when assetIndex
+   *  is populated; used by formatPriceForHl to enforce HL's price tick rules. */
+  private assetSzDecimals: Map<string, number> | null = null;
 
   constructor(opts: { network?: HlNetwork } = {}) {
     const { account, address, endpoints } = loadHlOperatorKey(opts.network);
@@ -78,19 +81,43 @@ export class HyperliquidExecClient {
   /**
    * Hyperliquid orders the perp universe in `meta().universe`. The index is
    * what `OrderParameters.a` must be set to. Cached after first fetch.
+   * Also caches `szDecimals` per asset for the price formatter.
    */
   async getAssetIndex(asset: string = HL_DEFAULT_ASSET): Promise<number> {
-    if (!this.assetIndex) {
-      const m = await this.info.meta();
-      const map = new Map<string, number>();
-      m.universe.forEach((u, i) => map.set(u.name, i));
-      this.assetIndex = map;
-    }
-    const idx = this.assetIndex.get(asset);
+    await this.ensureAssetMetaCached();
+    const idx = this.assetIndex!.get(asset);
     if (idx == null) {
       throw new Error(`Hyperliquid: asset ${asset} not found in perp universe`);
     }
     return idx;
+  }
+
+  /**
+   * `szDecimals` for an asset. Hyperliquid's price-tick rule depends on this:
+   *   - Max `6 - szDecimals` decimal places (perps)
+   *   - Max 5 significant figures
+   * BTC: 5, ETH: 4, etc.
+   */
+  async getAssetSzDecimals(asset: string = HL_DEFAULT_ASSET): Promise<number> {
+    await this.ensureAssetMetaCached();
+    const sz = this.assetSzDecimals!.get(asset);
+    if (sz == null) {
+      throw new Error(`Hyperliquid: asset ${asset} szDecimals not found in meta`);
+    }
+    return sz;
+  }
+
+  private async ensureAssetMetaCached(): Promise<void> {
+    if (this.assetIndex && this.assetSzDecimals) return;
+    const m = await this.info.meta();
+    const indexMap = new Map<string, number>();
+    const szMap = new Map<string, number>();
+    m.universe.forEach((u, i) => {
+      indexMap.set(u.name, i);
+      szMap.set(u.name, u.szDecimals);
+    });
+    this.assetIndex = indexMap;
+    this.assetSzDecimals = szMap;
   }
 
   /** Current mark price for an asset, from the `allMids` endpoint. */
@@ -142,25 +169,31 @@ export class HyperliquidExecClient {
   }): Promise<HlFillResult> {
     const asset = args.asset ?? HL_DEFAULT_ASSET;
     const assetIdx = await this.getAssetIndex(asset);
+    const szDecimals = await this.getAssetSzDecimals(asset);
     const mid = await this.getMid(asset);
     // Aggressive limit to ensure fill. The book is normally tight on BTC
     // perp; the slippage cushion just guarantees we cross.
     const price =
       args.side === 'long' ? mid * (1 + MARKET_PRICE_SLIPPAGE) : mid * (1 - MARKET_PRICE_SLIPPAGE);
+    const priceStr = formatPriceForHl(price, szDecimals);
+    const sizeStr = formatSize(args.size, szDecimals);
     log.info('svx.hl_client.open.submit', {
       asset,
       side: args.side,
       size: args.size,
+      sizeFormatted: sizeStr,
       mid,
       limitPx: price,
+      limitPxFormatted: priceStr,
+      szDecimals,
     });
     const resp = await this.exchange.order({
       orders: [
         {
           a: assetIdx,
           b: args.side === 'long',
-          p: formatPrice(price),
-          s: formatSize(args.size),
+          p: priceStr,
+          s: sizeStr,
           r: false,
           t: { limit: { tif: 'Ioc' } },
         },
@@ -189,24 +222,29 @@ export class HyperliquidExecClient {
   }): Promise<HlFillResult> {
     const asset = args.asset ?? HL_DEFAULT_ASSET;
     const assetIdx = await this.getAssetIndex(asset);
+    const szDecimals = await this.getAssetSzDecimals(asset);
     const mid = await this.getMid(asset);
     // Closing direction is OPPOSITE of original.
     const closingLong = args.originalSide === 'short';
     const price = closingLong ? mid * (1 + MARKET_PRICE_SLIPPAGE) : mid * (1 - MARKET_PRICE_SLIPPAGE);
+    const priceStr = formatPriceForHl(price, szDecimals);
+    const sizeStr = formatSize(args.size, szDecimals);
     log.info('svx.hl_client.close.submit', {
       asset,
       originalSide: args.originalSide,
       size: args.size,
+      sizeFormatted: sizeStr,
       mid,
       limitPx: price,
+      limitPxFormatted: priceStr,
     });
     const resp = await this.exchange.order({
       orders: [
         {
           a: assetIdx,
           b: closingLong,
-          p: formatPrice(price),
-          s: formatSize(args.size),
+          p: priceStr,
+          s: sizeStr,
           r: true,
           t: { limit: { tif: 'Ioc' } },
         },
@@ -225,17 +263,41 @@ export class HyperliquidExecClient {
 }
 
 /**
- * Format an HL price string. HL accepts up to 5 significant digits OR 1 dp
- * past the decimal, whichever is fewer. For BTC we typically want 1 dp
- * (e.g. "82450.5"). Keep it simple: round to 1 dp.
+ * Format an HL price string. Hyperliquid enforces TWO rules simultaneously:
+ *   1. Max `6 - szDecimals` decimal places (perps; spot is 8 instead of 6)
+ *   2. Max 5 significant figures
+ *
+ * For BTC (szDecimals=5) at $78k:
+ *   - Decimal rule allows 1 decimal: 78582.5
+ *   - Sig-figs rule allows 5 figs total: 78580 or 78583 (no decimals)
+ *   - The tighter wins → integer prices only
+ *
+ * For ETH (szDecimals=4) at $3.2k:
+ *   - Decimal rule allows 2 decimals: 3245.67
+ *   - Sig-figs rule allows 5 figs: 3245.6
+ *   - Tighter (1 decimal) wins
+ *
+ * Exported for tests.
  */
-function formatPrice(px: number): string {
-  return px.toFixed(1);
+export function formatPriceForHl(px: number, szDecimals: number): string {
+  if (!isFinite(px) || px <= 0) return '0';
+  const maxDecimalsByPerpRule = 6 - szDecimals;
+  // Sig-figs-based decimal allowance: 5 sig figs total minus the digits
+  // before the decimal point.
+  const log10 = Math.floor(Math.log10(Math.abs(px)));
+  const sigFigDecimals = 5 - 1 - log10;
+  const decimals = Math.max(0, Math.min(maxDecimalsByPerpRule, sigFigDecimals));
+  return px.toFixed(decimals);
 }
 
-/** BTC perp size precision is 5 decimal places (0.00001 BTC = ~$0.80 lot). */
-function formatSize(size: number): string {
-  return size.toFixed(5);
+/**
+ * Format an HL size string. Hyperliquid enforces size precision via
+ * `szDecimals` directly (e.g. BTC=5 → 0.00001 increments).
+ *
+ * Exported for tests.
+ */
+export function formatSize(size: number, szDecimals: number = 5): string {
+  return size.toFixed(szDecimals);
 }
 
 /**

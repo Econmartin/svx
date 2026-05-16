@@ -200,7 +200,10 @@ export class HyperliquidExecClient {
       ],
       grouping: 'na',
     });
-    const fill = parseHlOrderResponse(resp, args.size);
+    // Pass the FORMATTED size (what HL actually trades) so the "fully
+    // filled" check compares apples-to-apples — rounding from formatSize
+    // would otherwise make every fill look "partial".
+    const fill = parseHlOrderResponse(resp, Number(sizeStr));
     log.info('svx.hl_client.open.result', {
       orderId: fill.orderId,
       status: fill.status,
@@ -251,7 +254,10 @@ export class HyperliquidExecClient {
       ],
       grouping: 'na',
     });
-    const fill = parseHlOrderResponse(resp, args.size);
+    // Pass the FORMATTED size (what HL actually trades) so the "fully
+    // filled" check compares apples-to-apples — rounding from formatSize
+    // would otherwise make every fill look "partial".
+    const fill = parseHlOrderResponse(resp, Number(sizeStr));
     log.info('svx.hl_client.close.result', {
       orderId: fill.orderId,
       status: fill.status,
@@ -325,8 +331,15 @@ export function parseHlOrderResponse(resp: unknown, requestedSize: number): HlFi
     const sz = Number(filled.totalSz ?? 0);
     const avgPx = Number(filled.avgPx ?? 0);
     const oid = filled.oid != null ? String(filled.oid) : undefined;
+    // Tolerance: HL truncates `s` to szDecimals before matching, so an
+    // order requesting 0.000140453 BTC trades 0.00014 BTC and reports
+    // back 0.00014. Our requestedSize may be the formatted value (when
+    // the client passes Number(sizeStr)) or the raw pre-format value
+    // (defensive). 0.0001 covers up to szDecimals=4 rounding; for
+    // tighter szDecimals, 1% of requestedSize as fallback.
+    const tolerance = Math.max(1e-4, requestedSize * 0.01);
     const status: HlFillResult['status'] =
-      sz >= requestedSize - 1e-9 ? 'filled' : sz > 0 ? 'partial' : 'rejected';
+      sz >= requestedSize - tolerance ? 'filled' : sz > 0 ? 'partial' : 'rejected';
     return { orderId: oid, fillPrice: avgPx, filledSize: sz, status, raw: resp };
   }
   return { fillPrice: 0, filledSize: 0, status: 'rejected', raw: resp };

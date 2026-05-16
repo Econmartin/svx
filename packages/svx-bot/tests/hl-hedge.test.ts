@@ -199,6 +199,31 @@ describe('parseHlOrderResponse', () => {
     );
     expect(r.status).toBe('rejected');
   });
+
+  it('regression: real production fill where HL rounds to szDecimals (was incorrectly marked partial)', () => {
+    // Captured from production 2026-05-16. Bot requested 0.000140453 BTC,
+    // sent formatted 0.00014, HL filled 0.00014 reported back. Before the
+    // tolerance fix this was marked 'partial' and the trade wasn't
+    // recorded — orphan position. Should now be 'filled'.
+    const resp = {
+      response: {
+        type: 'order',
+        data: {
+          statuses: [
+            { filled: { totalSz: '0.00014', avgPx: '78318', oid: 428355383448 } },
+          ],
+        },
+      },
+    };
+    // Raw size requested (full precision)
+    const r1 = parseHlOrderResponse(resp, 0.000140453921537332);
+    expect(r1.status).toBe('filled');
+    expect(r1.filledSize).toBeCloseTo(0.00014);
+    expect(r1.orderId).toBe('428355383448');
+    // Formatted size (what the client now passes after the fix)
+    const r2 = parseHlOrderResponse(resp, 0.00014);
+    expect(r2.status).toBe('filled');
+  });
 });
 
 describe('RiskGate.checkHl', () => {

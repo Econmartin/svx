@@ -71,16 +71,40 @@ const baseCfg: SvxConfig = {
 };
 
 describe('parsePolyFillResponse', () => {
-  it('marks an order with `matched` status + non-zero shares as filled', () => {
+  it('marks a BUY response with takingAmount=shares + makingAmount=pUSD as filled (real mainnet response shape)', () => {
+    // Captured from a real production fill on 2026-05-16:
+    //   buy $1 of yes-shares at $0.13 → received 7.692306 shares for 0.999999 pUSD
+    const r = parsePolyFillResponse(
+      {
+        errorMsg: '',
+        orderID: '0x4861269e',
+        takingAmount: '7.692306',
+        makingAmount: '0.999999',
+        status: 'matched',
+        transactionsHashes: ['0xb3089b687c6b'],
+        success: true,
+      },
+      { requestedUsdc: 1, side: 'buy' },
+    );
+    expect(r.status).toBe('filled');
+    expect(r.orderId).toBe('0x4861269e');
+    expect(r.filledShares).toBeCloseTo(7.692306, 4);
+    expect(r.costUsdc).toBeCloseTo(0.999999, 4);
+    // derived fillPrice = pUSD / shares
+    expect(r.fillPrice).toBeCloseTo(0.13, 2);
+    expect(r.txHash).toBe('0xb3089b687c6b');
+  });
+
+  it('legacy: marks an order with makingAmount when no takingAmount (backwards-compat call site)', () => {
     const r = parsePolyFillResponse(
       { status: 'matched', orderID: 'abc', makingAmount: '5.5', price: '0.29' },
       2,
     );
     expect(r.status).toBe('filled');
     expect(r.orderId).toBe('abc');
+    // No takingAmount → falls back to makingAmount as shares
     expect(r.filledShares).toBeCloseTo(5.5);
     expect(r.fillPrice).toBeCloseTo(0.29);
-    expect(r.costUsdc).toBeCloseTo(5.5 * 0.29);
   });
 
   it('treats unknown status with shares as `partial`', () => {

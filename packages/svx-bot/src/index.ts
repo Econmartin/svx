@@ -710,7 +710,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           // the next signal evaluation may not match).
           let fill: ReturnType<typeof parsePolyFillResponse>;
           try {
-            fill = parsePolyFillResponse(resp, cfg.maxPolyPositionUsdc);
+            fill = parsePolyFillResponse(resp, { requestedUsdc: cfg.maxPolyPositionUsdc, side: 'buy' });
           } catch (parseErr) {
             log.error('svx.poly.parse_failed', {
               err: errMsg(parseErr),

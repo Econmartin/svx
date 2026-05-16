@@ -406,22 +406,44 @@ export interface PolyFillResult {
   raw: unknown;
 }
 
+/** Parse args — `side` lets us correctly map makingAmount vs takingAmount
+ *  to "shares" vs "pUSD". Defaults to 'buy' for backwards compatibility. */
+export interface PolyFillParseArgs {
+  requestedUsdc: number;
+  side?: 'buy' | 'sell';
+}
+
 /**
  * Parse the V2 SDK's market-order response into a normalized fill record.
  *
  * The response shape varies by SDK version, order type, and fill outcome.
- * Observed shapes in the wild:
- *   { status: 'matched', orderID: '0x...', makingAmount: '5.5', price: '0.29' }
- *   { status: 'unmatched', filled: 0 }
- *   { success: false, errorMsg: 'insufficient liquidity', status: false }
- *   { success: true, status: 200, orderHashes: ['0x...'] }
+ * Observed shapes in the wild (mainnet, May 2026, deposit-wallet account):
+ *   BUY filled:  { status: 'matched', orderID: '0x...',
+ *                  takingAmount: '7.692306' (shares received),
+ *                  makingAmount: '0.999999' (pUSD spent),
+ *                  transactionsHashes: ['0x...'], success: true }
+ *   miss:        { status: 'unmatched', filled: 0 }
+ *   error:       { success: false, errorMsg: '...', status: false }
+ *
+ * For a BUY order on Polymarket V2:
+ *   - takingAmount = outcome shares we received (what the maker gave up)
+ *   - makingAmount = pUSD we spent (what the maker took)
+ * For a SELL it's the opposite. We use `side` to map correctly.
  *
  * Defensive about every field — `r.status` has been seen as a string, a
  * boolean, AND a number depending on the path. Returns a normalized
  * PolyFillResult; throws only if `resp` itself is corrupt (caller catches
  * + logs as 'failed').
  */
-export function parsePolyFillResponse(resp: unknown, requestedUsdc: number): PolyFillResult {
+export function parsePolyFillResponse(
+  resp: unknown,
+  requestedUsdcOrArgs: number | PolyFillParseArgs,
+): PolyFillResult {
+  const args: PolyFillParseArgs =
+    typeof requestedUsdcOrArgs === 'number'
+      ? { requestedUsdc: requestedUsdcOrArgs }
+      : requestedUsdcOrArgs;
+  const side: 'buy' | 'sell' = args.side ?? 'buy';
   const r = (resp ?? {}) as Record<string, unknown>;
 
   // Status normalization — coerce whatever shape into a lowercase string
@@ -434,19 +456,26 @@ export function parsePolyFillResponse(resp: unknown, requestedUsdc: number): Pol
     r.orderID ?? r.orderId ?? r.id ?? r.orderHash ?? firstOf(r.orderHashes);
   const orderId = coerceString(orderIdRaw);
 
-  // Share count — successful market orders report filled size via one of
-  // several field names. All paths return string OR number.
-  const filledRaw = r.makingAmount ?? r.takingAmount ?? r.filled ?? r.size;
-  const filledShares = coerceNumber(filledRaw);
+  // Share count — for a BUY the shares are in `takingAmount`; for a SELL
+  // they're in `makingAmount`. Fallbacks `filled` / `size` cover older
+  // response shapes that don't follow the V2 maker/taker convention.
+  const sharesRaw = side === 'buy'
+    ? r.takingAmount ?? r.filled ?? r.size ?? r.makingAmount
+    : r.makingAmount ?? r.filled ?? r.size ?? r.takingAmount;
+  const filledShares = coerceNumber(sharesRaw);
 
-  // Fill price — directly reported, OR derivable from requestedUsdc/shares.
+  // pUSD spent (BUY) / received (SELL). Used to derive fillPrice + cost.
+  const pUsdRaw = side === 'buy' ? r.makingAmount : r.takingAmount;
+  const pUsdAmount = coerceNumber(pUsdRaw);
+
+  // Fill price — explicit field first, then derived from pUSD/shares.
   const fillPriceRaw = r.price ?? r.avgPrice;
   let fillPrice = coerceNumber(fillPriceRaw);
   if ((fillPrice == null || !isFinite(fillPrice)) && filledShares && filledShares > 0) {
-    fillPrice = requestedUsdc / filledShares;
+    fillPrice = (pUsdAmount ?? args.requestedUsdc) / filledShares;
   }
 
-  const txHash = coerceString(r.transactionHash ?? r.txHash);
+  const txHash = coerceString(r.transactionHash ?? r.txHash ?? firstOf(r.transactionsHashes));
 
   const success =
     statusRaw === 'matched' ||
@@ -464,8 +493,11 @@ export function parsePolyFillResponse(resp: unknown, requestedUsdc: number): Pol
     status = 'failed';
   }
 
-  const costUsdc =
-    fillPrice != null && filledShares != null ? fillPrice * filledShares : undefined;
+  // For BUY: cost = pUSD spent (preferred direct field; fallback to derived).
+  // For SELL: cost = pUSD received (sign convention is the same — caller flips).
+  const costUsdc = pUsdAmount != null
+    ? pUsdAmount
+    : (fillPrice != null && filledShares != null ? fillPrice * filledShares : undefined);
   return { orderId, status, filledShares, fillPrice, costUsdc, txHash, raw: resp };
 }
 

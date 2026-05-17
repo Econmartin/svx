@@ -52,7 +52,17 @@ export default function PositionsPage() {
   );
 
   const closedAll = isMainnet ? closedPoly ?? [] : closed ?? [];
-  const openAll = open ?? [];
+  // On mainnet the bot's ledger accumulates unsettled paper-Predict trade
+  // rows (Sui side is paper; Predict oracles should settle them eventually
+  // but some pile up). Those aren't real open positions — filter to rows
+  // that have a CURRENTLY-OPEN leg: either an unsettled Polymarket fill
+  // OR an open HL perp.
+  const openAll = isMainnet
+    ? (open ?? []).filter(
+        (t) =>
+          (t.polyStatus === 'filled' && !t.polySettled) || t.hlStatus === 'open',
+      )
+    : open ?? [];
 
   return (
     <div className="space-y-6">
@@ -262,62 +272,113 @@ function OpenTable({
   open: TradeRecord[];
   isMainnet: boolean;
 }) {
-  const rows = isMainnet ? open.filter((t) => !!t.polyStatus) : open;
-  if (rows.length === 0) {
+  // Pre-filtered upstream — rows here are all genuinely open. On testnet we
+  // get every settled=0 row; on mainnet we get rows with an unsettled Poly
+  // fill OR an open HL leg.
+  if (open.length === 0) {
     return <div className="text-muted text-sm py-8 text-center">No open positions.</div>;
   }
+  if (!isMainnet) {
+    // Testnet: simple Predict-side view.
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Time</TableHead>
+            <TableHead>Mode</TableHead>
+            <TableHead>Strike</TableHead>
+            <TableHead>Direction</TableHead>
+            <TableHead>Qty</TableHead>
+            <TableHead>Cost</TableHead>
+            <TableHead>Expiry</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {open.map((t) => (
+            <TableRow key={t.id}>
+              <TableCell className="text-muted text-xs">{formatTime(t.timestampMs)}</TableCell>
+              <TableCell className="text-xs">
+                <Badge variant={t.mode === 'live' ? 'live' : 'outline'}>{t.mode}</Badge>
+              </TableCell>
+              <TableCell>${t.strike.toFixed(0)}</TableCell>
+              <TableCell>{t.direction}</TableCell>
+              <TableCell>{formatUsdc(t.quantityDusdc)}</TableCell>
+              <TableCell>{formatUsdc(t.costUsdc)}</TableCell>
+              <TableCell className="text-muted text-xs">{formatTime(t.expiryMs)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    );
+  }
+  // Mainnet: show Polymarket leg + HL leg + strategy badge side-by-side.
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Time</TableHead>
-          <TableHead>Mode</TableHead>
+          <TableHead>Opened</TableHead>
+          <TableHead>Strategy</TableHead>
           <TableHead>Strike</TableHead>
-          <TableHead>{isMainnet ? 'Outcome' : 'Direction'}</TableHead>
-          <TableHead>{isMainnet ? 'Shares' : 'Qty'}</TableHead>
-          <TableHead>{isMainnet ? 'Cost (pUSD)' : 'Cost'}</TableHead>
-          {isMainnet && <TableHead>HL hedge</TableHead>}
+          <TableHead>Poly leg</TableHead>
+          <TableHead>HL leg</TableHead>
           <TableHead>Expiry</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((t) => (
-          <TableRow key={t.id}>
-            <TableCell className="text-muted text-xs">{formatTime(t.timestampMs)}</TableCell>
-            <TableCell className="text-xs">
-              <Badge variant={t.mode === 'live' ? 'live' : 'outline'}>{t.mode}</Badge>
-            </TableCell>
-            <TableCell>${t.strike.toFixed(0)}</TableCell>
-            <TableCell>
-              {isMainnet ? t.polyOutcome?.toUpperCase() ?? '—' : t.direction}
-            </TableCell>
-            <TableCell>
-              {isMainnet
-                ? t.polyFilledShares?.toFixed(2) ?? '—'
-                : formatUsdc(t.quantityDusdc)}
-            </TableCell>
-            <TableCell>
-              {isMainnet ? formatUsdc(t.polyCostUsdc) : formatUsdc(t.costUsdc)}
-            </TableCell>
-            {isMainnet && (
+        {open.map((t) => {
+          const strategy = t.strategy ?? 'poly_arb';
+          const hasPoly = t.polyStatus === 'filled' && !t.polySettled;
+          const hasHl = t.hlStatus === 'open';
+          return (
+            <TableRow key={t.id}>
+              <TableCell className="text-muted text-xs">
+                {formatTime(t.timestampMs)}
+              </TableCell>
               <TableCell>
-                {t.hlStatus === 'open' && t.hlSize != null ? (
-                  <span className="text-warn text-xs font-mono">
-                    {t.hlSide?.toUpperCase()} {t.hlSize.toFixed(5)} @ $
-                    {t.hlOpenPrice?.toFixed(0)}
+                <Badge variant={strategy === 'vol_arb' ? 'warn' : 'live'}>{strategy}</Badge>
+              </TableCell>
+              <TableCell>
+                {t.strike > 0 ? `$${t.strike.toFixed(0)}` : '—'}
+              </TableCell>
+              <TableCell className="text-xs">
+                {hasPoly ? (
+                  <span>
+                    <span className="font-mono">
+                      {t.polyOutcome?.toUpperCase()} {t.polyFilledShares?.toFixed(2)} @
+                      {' '}{t.polyFillPrice ? formatPct(t.polyFillPrice, 2) : '—'}
+                    </span>
+                    <span className="text-muted ml-1">({formatUsdc(t.polyCostUsdc)} pUSD)</span>
                   </span>
                 ) : (
-                  <span className="text-muted text-xs">none</span>
+                  <span className="text-muted">—</span>
                 )}
               </TableCell>
-            )}
-            <TableCell className="text-muted text-xs">{formatTime(t.expiryMs)}</TableCell>
-          </TableRow>
-        ))}
+              <TableCell className="text-xs">
+                {hasHl ? (
+                  <span>
+                    <span className="font-mono">
+                      {t.hlSide?.toUpperCase()} {t.hlSize?.toFixed(5)} @ $
+                      {t.hlOpenPrice?.toFixed(0)}
+                    </span>
+                    <span className="text-muted ml-1">
+                      ({formatUsdc((t.hlSize ?? 0) * (t.hlOpenPrice ?? 0))} USD)
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-muted">—</span>
+                )}
+              </TableCell>
+              <TableCell className="text-muted text-xs">
+                {t.expiryMs > 0 ? formatTime(t.expiryMs) : '—'}
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );
 }
+
 
 function ClosedTable({
   closed,

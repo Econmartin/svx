@@ -193,6 +193,7 @@ export function decide(input: {
     | 'volArbIvSpreadOpenThreshold'
     | 'volArbIvSpreadCloseThreshold'
     | 'volArbDirectionBiasThreshold'
+    | 'volArbBiasBypassSpread'
     | 'volArbTimeStopMinutes'
   >;
   nowMs: number;
@@ -244,7 +245,15 @@ export function decide(input: {
       reason: `spread_below_open_thresh:${(ivSpread * 100).toFixed(2)}%`,
     };
   }
-  if (Math.abs(predictUpAtSpot - 0.5) < cfg.volArbDirectionBiasThreshold) {
+  // Bias-gate bypass: when the IV-RV spread is extreme, skip the bias
+  // requirement. Rationale: at huge vol divergence (e.g. IV 34% vs RV 11%),
+  // the vol thesis dominates and direction is secondary — even a "wrong"
+  // direction trade still profits if expected vol arrives. Direction is
+  // still picked from whichever side Predict leans (even slightly).
+  const biasBypassActive =
+    cfg.volArbBiasBypassSpread > 0 && Math.abs(ivSpread) >= cfg.volArbBiasBypassSpread;
+  const directionalBias = Math.abs(predictUpAtSpot - 0.5);
+  if (!biasBypassActive && directionalBias < cfg.volArbDirectionBiasThreshold) {
     return {
       ...baseDecision,
       action: 'hold',
@@ -252,10 +261,13 @@ export function decide(input: {
     };
   }
   const direction = predictUpAtSpot > 0.5 ? 'open_long' : 'open_short';
+  const reasonSuffix = biasBypassActive
+    ? `_bias_bypassed:spread${(ivSpread * 100).toFixed(2)}%>=${(cfg.volArbBiasBypassSpread * 100).toFixed(0)}%`
+    : `_bias:${(predictUpAtSpot * 100).toFixed(2)}%`;
   return {
     ...baseDecision,
     action: direction,
-    reason: `vol_divergence:${(ivSpread * 100).toFixed(2)}%_bias:${(predictUpAtSpot * 100).toFixed(2)}%`,
+    reason: `vol_divergence:${(ivSpread * 100).toFixed(2)}%${reasonSuffix}`,
   };
 }
 

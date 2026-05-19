@@ -43,6 +43,8 @@ const baseCfg: SvxConfig = {
   maxPolyPositionUsdc: 2,
   maxOpenPolyPositions: 5,
   polyMinBookDepthShares: 20,
+  polyMinOrderUsdc: 0.5,
+  polyFillFailedCooldownMs: 5 * 60_000,
   dailyPolyLossLimitUsdc: 10,
   polyFillTimeoutMs: 30_000,
   polySignatureType: 'EOA' as const,

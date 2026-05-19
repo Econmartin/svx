@@ -67,6 +67,7 @@ const baseCfg: SvxConfig = {
   volArbIvSpreadOpenThreshold: 0.05,
   volArbIvSpreadCloseThreshold: 0.02,
   volArbDirectionBiasThreshold: 0.03,
+  volArbBiasBypassSpread: 0.15,
   maxVolArbPerTradeUsdc: 2,
   maxVolArbOpenUsdc: 10,
   dailyVolArbLossLimitUsdc: 5,
@@ -174,6 +175,7 @@ describe('decide', () => {
     volArbIvSpreadOpenThreshold: 0.05,
     volArbIvSpreadCloseThreshold: 0.02,
     volArbDirectionBiasThreshold: 0.03,
+    volArbBiasBypassSpread: 0.15,
     volArbTimeStopMinutes: 60,
   };
   const now = 1_700_000_000_000;
@@ -191,7 +193,7 @@ describe('decide', () => {
     expect(d.reason).toMatch(/spread_below_open_thresh/);
   });
 
-  it('holds when bias is too neutral despite vol divergence', () => {
+  it('holds when bias is too neutral despite vol divergence (modest spread)', () => {
     const d = decide({
       predictIv: 0.7,
       realizedVol: 0.6,
@@ -202,6 +204,48 @@ describe('decide', () => {
     });
     expect(d.action).toBe('hold');
     expect(d.reason).toMatch(/neutral_surface_bias/);
+  });
+
+  it('bypasses the bias gate when IV-RV spread exceeds the bypass threshold (regression case)', () => {
+    // Production scenario 2026-05-17: IV 34.2% vs RV 11.5%, P(↑) 49.46%.
+    // Spread = 22.7%, way above the 15% bypass default. Should fire short
+    // (since p_up < 0.5) despite p_up being inside the bias band.
+    const d = decide({
+      predictIv: 0.342,
+      realizedVol: 0.115,
+      predictUpAtSpot: 0.4946, // neutral — would normally block
+      hasOpenPosition: false,
+      cfg,
+      nowMs: now,
+    });
+    expect(d.action).toBe('open_short');
+    expect(d.reason).toMatch(/bias_bypassed/);
+  });
+
+  it('still holds when bypass is disabled even with extreme spread', () => {
+    const d = decide({
+      predictIv: 0.342,
+      realizedVol: 0.115,
+      predictUpAtSpot: 0.4946,
+      hasOpenPosition: false,
+      cfg: { ...cfg, volArbBiasBypassSpread: 1.0 }, // effectively disabled
+      nowMs: now,
+    });
+    expect(d.action).toBe('hold');
+    expect(d.reason).toMatch(/neutral_surface_bias/);
+  });
+
+  it('picks direction from p_up tilt even when bypass is active (p_up > 0.5 → long)', () => {
+    const d = decide({
+      predictIv: 0.4,
+      realizedVol: 0.15,
+      predictUpAtSpot: 0.501, // microscopically positive tilt
+      hasOpenPosition: false,
+      cfg,
+      nowMs: now,
+    });
+    expect(d.action).toBe('open_long');
+    expect(d.reason).toMatch(/bias_bypassed/);
   });
 
   it('opens long when vol diverges and surface bias is up', () => {

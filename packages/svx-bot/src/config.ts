@@ -176,6 +176,17 @@ const Schema = z.object({
    * `0.5 − volArbDirectionBiasThreshold` (short). Default 0.03.
    */
   volArbDirectionBiasThreshold: z.number().min(0).max(0.5).default(0.03),
+  /**
+   * Bias-gate bypass: when the IV-RV spread exceeds this magnitude, the
+   * surface-neutrality check is skipped. Rationale: at extreme vol
+   * divergences (e.g. IV 34% vs RV 11.5%), the vol thesis dominates and
+   * directional conviction is no longer required — even a "wrong
+   * direction" trade still profits if vol arrives.
+   *
+   * Default 0.15 (15 vol points). Set to a high value (e.g. 1.0) to
+   * effectively disable the bypass and always require directional bias.
+   */
+  volArbBiasBypassSpread: z.number().min(0).max(2).default(0.15),
   /** Per-trade USD-notional cap on vol-arb perp positions. */
   maxVolArbPerTradeUsdc: z.number().positive().default(2),
   /** Total open vol-arb exposure cap (USD). */
@@ -255,6 +266,7 @@ export function loadConfig(): SvxConfig {
     volArbIvSpreadOpenThreshold: parseNum(process.env.VOL_ARB_OPEN_THRESHOLD, 0.05),
     volArbIvSpreadCloseThreshold: parseNum(process.env.VOL_ARB_CLOSE_THRESHOLD, 0.02),
     volArbDirectionBiasThreshold: parseNum(process.env.VOL_ARB_DIRECTION_BIAS, 0.03),
+    volArbBiasBypassSpread: parseNum(process.env.VOL_ARB_BIAS_BYPASS_SPREAD, 0.15),
     maxVolArbPerTradeUsdc: parseNum(process.env.MAX_VOL_ARB_PER_TRADE_USDC, 2),
     maxVolArbOpenUsdc: parseNum(process.env.MAX_VOL_ARB_OPEN_USDC, 10),
     dailyVolArbLossLimitUsdc: parseNum(process.env.DAILY_VOL_ARB_LOSS_LIMIT_USDC, 5),

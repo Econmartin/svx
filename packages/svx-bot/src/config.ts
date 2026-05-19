@@ -103,6 +103,12 @@ const Schema = z.object({
   /** Refuse to fire if the best ask has fewer than this many shares available
    *  at our price level (we'd partial-fill at bad average prices otherwise). */
   polyMinBookDepthShares: z.number().int().positive().default(20),
+  /** Floor on the depth-clamped order size. Below this we skip rather than
+   *  submit a tiny order that's barely worth the gas / slippage. */
+  polyMinOrderUsdc: z.number().positive().default(0.5),
+  /** Cooldown after a Polymarket fill_failed before retrying the SAME tokenId.
+   *  Without this the bot hammers the same FOK-failing order every loop. */
+  polyFillFailedCooldownMs: z.number().int().positive().default(5 * 60_000),
   /** Daily pUSD loss limit on Polymarket leg — symmetric to dUSDC limit but
    *  separate because we're spending pUSD, not dUSDC. */
   dailyPolyLossLimitUsdc: z.number().positive().default(10),
@@ -249,6 +255,8 @@ export function loadConfig(): SvxConfig {
     maxPolyPositionUsdc: parseNum(process.env.MAX_POLY_POSITION_USDC, 2),
     maxOpenPolyPositions: parseNum(process.env.MAX_OPEN_POLY_POSITIONS, 5),
     polyMinBookDepthShares: parseNum(process.env.POLY_MIN_BOOK_DEPTH_SHARES, 20),
+    polyMinOrderUsdc: parseNum(process.env.POLY_MIN_ORDER_USDC, 0.5),
+    polyFillFailedCooldownMs: parseNum(process.env.POLY_FILL_FAILED_COOLDOWN_MS, 5 * 60_000),
     dailyPolyLossLimitUsdc: parseNum(process.env.DAILY_POLY_LOSS_LIMIT_USDC, 10),
     polyFillTimeoutMs: parseNum(process.env.POLY_FILL_TIMEOUT_MS, 30_000),
     polySignatureType:

@@ -64,6 +64,7 @@ const baseCfg: SvxConfig = {
   volArbIvSpreadOpenThreshold: 0.05,
   volArbIvSpreadCloseThreshold: 0.02,
   volArbDirectionBiasThreshold: 0.03,
+  volArbBiasBypassSpread: 0.15,
   maxVolArbPerTradeUsdc: 2,
   maxVolArbOpenUsdc: 10,
   dailyVolArbLossLimitUsdc: 5,

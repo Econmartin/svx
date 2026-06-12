@@ -7,6 +7,7 @@ import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
 import path from 'node:path';
 import fs from 'node:fs';
+import { TUNABLES } from './tunables.js';
 
 /**
  * Resolve the workspace root by walking up from cwd until we find
@@ -196,8 +197,21 @@ const Schema = z.object({
   /** Maximum time a vol-arb position stays open before time-stop close. */
   volArbTimeStopMinutes: z.number().positive().default(60),
   /** Min realized-vol samples in the rolling buffer before the strategy
-   *  fires. Below this we're still warming up. Default 30. */
+   *  fires. Below this we're still warming up. */
   volArbMinSamples: z.number().int().positive().default(30),
+  /** Vol-arb sampler/decision tick — runs on its OWN timer, decoupled from
+   *  the poly-arb 15s loop. See tunables.ts for the explanation. */
+  volArbTickMs: z.number().int().positive().default(2_000),
+  /** Predict ATM-IV cache TTL — the vol-arb fast ticker reuses the snapshot
+   *  for this many ms before re-fetching. */
+  volArbOracleCacheMs: z.number().int().positive().default(30_000),
+  /** Master switch for mid-life Polymarket exits. */
+  polyEarlyExitEnabled: z.boolean().default(true),
+  /** Profit-take fraction (vs cost) at which we sell the poly leg early. */
+  polyEarlyExitMinProfitFrac: z.number().positive().default(0.2),
+  /** When true, the bot clears any persisted pause on startup so a fresh
+   *  deploy boots into a trading state. */
+  autoResumeOnBoot: z.boolean().default(true),
 
   dataDir: z.string().default('./data'),
   apiHost: z.string().default('127.0.0.1'),
@@ -224,59 +238,74 @@ function parseNum(v: string | undefined, fallback: number): number {
 }
 
 export function loadConfig(): SvxConfig {
+  // Env-driven fields: secrets, network choices, execution gates, RPC URLs,
+  // and instance/infra identity. Everything else flows from TUNABLES so
+  // strategy params can be tweaked by editing tunables.ts directly.
   return Schema.parse({
+    // ── Execution gates (env — safety + per-deployment) ──
     paperTrading: parseBool(process.env.PAPER_TRADING, true),
-    spreadThreshold: parseNum(process.env.SPREAD_THRESHOLD, 0.03),
-    maxPositionDusdc: parseNum(process.env.MAX_POSITION_DUSDC, 15),
-    maxPositionPct: parseNum(process.env.MAX_POSITION_PCT, 0.05),
-    dailyLossLimitDusdc: parseNum(process.env.DAILY_LOSS_LIMIT_DUSDC, 150),
-    maxOpenPositions: parseNum(process.env.MAX_OPEN_POSITIONS, 10),
-    maxPositionsPerSignal: parseNum(process.env.MAX_POSITIONS_PER_SIGNAL, 2),
-    minPredictProb: parseNum(process.env.MIN_PREDICT_PROB, 0.05),
-    maxPredictProb: parseNum(process.env.MAX_PREDICT_PROB, 0.95),
-    signalLogMinSpreadFrac: parseNum(process.env.SIGNAL_LOG_MIN_SPREAD_FRAC, 0.3),
-    maxSviStalenessSec: parseNum(process.env.MAX_SVI_STALENESS_SEC, 300),
-    polyMaxBidaskVolPts: parseNum(process.env.POLY_MAX_BIDASK_VOL_PTS, 0.05),
-    polyMinVolume24hUsd: parseNum(process.env.POLY_MIN_24H_VOLUME_USD, 1000),
-    expiryToleranceSec: parseNum(process.env.EXPIRY_TOLERANCE_SEC, 14 * 24 * 3600),
-    circuitBreakerLosses: parseNum(process.env.CIRCUIT_BREAKER_LOSSES, 5),
-    polymarketGammaBase: process.env.POLYMARKET_API_BASE ?? 'https://gamma-api.polymarket.com',
-    polymarketClobBase: process.env.POLYMARKET_CLOB_BASE ?? 'https://clob.polymarket.com',
     polyExecutionEnabled: parseBool(process.env.POLY_EXECUTION_ENABLED, false),
+    hlExecutionEnabled: parseBool(process.env.HL_EXECUTION_ENABLED, false),
+    volArbEnabled: parseBool(process.env.VOL_ARB_ENABLED, false),
+
+    // ── Network choices (env — per-deployment) ──
     polyNetwork: (process.env.POLY_NETWORK as 'amoy' | 'polygon' | undefined) ?? 'amoy',
     polyClobHost: process.env.POLY_CLOB_HOST ?? '',
     polyRpcUrl: process.env.POLY_RPC_URL ?? '',
-    maxPolyPositionUsdc: parseNum(process.env.MAX_POLY_POSITION_USDC, 2),
-    maxOpenPolyPositions: parseNum(process.env.MAX_OPEN_POLY_POSITIONS, 5),
-    polyMinBookDepthShares: parseNum(process.env.POLY_MIN_BOOK_DEPTH_SHARES, 20),
-    dailyPolyLossLimitUsdc: parseNum(process.env.DAILY_POLY_LOSS_LIMIT_USDC, 10),
-    polyFillTimeoutMs: parseNum(process.env.POLY_FILL_TIMEOUT_MS, 30_000),
     polySignatureType:
       (process.env.POLY_SIGNATURE_TYPE as 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | undefined) ??
       'EOA',
     polyFunderAddress: process.env.POLY_FUNDER_ADDRESS ?? '',
-    hlExecutionEnabled: parseBool(process.env.HL_EXECUTION_ENABLED, false),
     hlNetwork: (process.env.HL_NETWORK as 'mainnet' | 'testnet' | undefined) ?? 'mainnet',
-    hlHedgeAsset: process.env.HL_HEDGE_ASSET ?? 'BTC',
-    maxHlPerTradeUsdc: parseNum(process.env.MAX_HL_PER_TRADE_USDC, 2),
-    maxHlOpenUsdc: parseNum(process.env.MAX_HL_OPEN_USDC, 10),
-    dailyHlLossLimitUsdc: parseNum(process.env.DAILY_HL_LOSS_LIMIT_USDC, 5),
-    hlRequiredForPoly: parseBool(process.env.HL_REQUIRED_FOR_POLY, false),
-    volArbEnabled: parseBool(process.env.VOL_ARB_ENABLED, false),
-    volArbIvSpreadOpenThreshold: parseNum(process.env.VOL_ARB_OPEN_THRESHOLD, 0.05),
-    volArbIvSpreadCloseThreshold: parseNum(process.env.VOL_ARB_CLOSE_THRESHOLD, 0.02),
-    volArbDirectionBiasThreshold: parseNum(process.env.VOL_ARB_DIRECTION_BIAS, 0.03),
-    volArbBiasBypassSpread: parseNum(process.env.VOL_ARB_BIAS_BYPASS_SPREAD, 0.15),
-    maxVolArbPerTradeUsdc: parseNum(process.env.MAX_VOL_ARB_PER_TRADE_USDC, 2),
-    maxVolArbOpenUsdc: parseNum(process.env.MAX_VOL_ARB_OPEN_USDC, 10),
-    dailyVolArbLossLimitUsdc: parseNum(process.env.DAILY_VOL_ARB_LOSS_LIMIT_USDC, 5),
-    volArbTimeStopMinutes: parseNum(process.env.VOL_ARB_TIME_STOP_MINUTES, 60),
-    volArbMinSamples: parseNum(process.env.VOL_ARB_MIN_SAMPLES, 30),
+
+    // ── Infra identity (env) ──
     dataDir: process.env.SVX_DATA_DIR ?? path.join(WORKSPACE_ROOT, 'data'),
     apiHost: process.env.SVX_API_HOST ?? '127.0.0.1',
     apiPort: parseNum(process.env.SVX_API_PORT, 4321),
-    loopIntervalMs: parseNum(process.env.SVX_LOOP_INTERVAL_MS, 15_000),
     instanceLabel: process.env.SVX_INSTANCE_LABEL ?? '',
+
+    // ── Strategy tunables (from tunables.ts) ──
+    spreadThreshold: TUNABLES.spreadThreshold,
+    maxPositionDusdc: TUNABLES.maxPositionDusdc,
+    maxPositionPct: TUNABLES.maxPositionPct,
+    dailyLossLimitDusdc: TUNABLES.dailyLossLimitDusdc,
+    maxOpenPositions: TUNABLES.maxOpenPositions,
+    maxPositionsPerSignal: TUNABLES.maxPositionsPerSignal,
+    minPredictProb: TUNABLES.minPredictProb,
+    maxPredictProb: TUNABLES.maxPredictProb,
+    signalLogMinSpreadFrac: TUNABLES.signalLogMinSpreadFrac,
+    maxSviStalenessSec: TUNABLES.maxSviStalenessSec,
+    polyMaxBidaskVolPts: TUNABLES.polyMaxBidaskVolPts,
+    polyMinVolume24hUsd: TUNABLES.polyMinVolume24hUsd,
+    expiryToleranceSec: TUNABLES.expiryToleranceSec,
+    circuitBreakerLosses: TUNABLES.circuitBreakerLosses,
+    polymarketGammaBase: TUNABLES.polymarketGammaBase,
+    polymarketClobBase: TUNABLES.polymarketClobBase,
+    maxPolyPositionUsdc: TUNABLES.maxPolyPositionUsdc,
+    maxOpenPolyPositions: TUNABLES.maxOpenPolyPositions,
+    polyMinBookDepthShares: TUNABLES.polyMinBookDepthShares,
+    dailyPolyLossLimitUsdc: TUNABLES.dailyPolyLossLimitUsdc,
+    polyFillTimeoutMs: TUNABLES.polyFillTimeoutMs,
+    hlHedgeAsset: TUNABLES.hlHedgeAsset,
+    maxHlPerTradeUsdc: TUNABLES.maxHlPerTradeUsdc,
+    maxHlOpenUsdc: TUNABLES.maxHlOpenUsdc,
+    dailyHlLossLimitUsdc: TUNABLES.dailyHlLossLimitUsdc,
+    hlRequiredForPoly: TUNABLES.hlRequiredForPoly,
+    volArbIvSpreadOpenThreshold: TUNABLES.volArbIvSpreadOpenThreshold,
+    volArbIvSpreadCloseThreshold: TUNABLES.volArbIvSpreadCloseThreshold,
+    volArbDirectionBiasThreshold: TUNABLES.volArbDirectionBiasThreshold,
+    volArbBiasBypassSpread: TUNABLES.volArbBiasBypassSpread,
+    maxVolArbPerTradeUsdc: TUNABLES.maxVolArbPerTradeUsdc,
+    maxVolArbOpenUsdc: TUNABLES.maxVolArbOpenUsdc,
+    dailyVolArbLossLimitUsdc: TUNABLES.dailyVolArbLossLimitUsdc,
+    volArbTimeStopMinutes: TUNABLES.volArbTimeStopMinutes,
+    volArbMinSamples: TUNABLES.volArbMinSamples,
+    volArbTickMs: TUNABLES.volArbTickMs,
+    volArbOracleCacheMs: TUNABLES.volArbOracleCacheMs,
+    polyEarlyExitEnabled: TUNABLES.polyEarlyExitEnabled,
+    polyEarlyExitMinProfitFrac: TUNABLES.polyEarlyExitMinProfitFrac,
+    autoResumeOnBoot: TUNABLES.autoResumeOnBoot,
+    loopIntervalMs: TUNABLES.loopIntervalMs,
   });
 }
 

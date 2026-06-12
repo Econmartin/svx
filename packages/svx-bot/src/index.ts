@@ -27,7 +27,7 @@ import type {
 } from 'svx-shared/types';
 import { loadConfig, type SvxConfig } from './config.js';
 import { LedgerStore } from './ledger/store.js';
-import { PredictClient, type PredictOracleSummary } from './pricing/predict.js';
+import { PredictClient } from './pricing/predict.js';
 import {
   PolymarketClient,
   type PolyOrderBook,
@@ -136,6 +136,13 @@ interface BotState {
   lastPolySettlementCheckMs: number;
   /** Vol-arb strategy state — in-memory rolling buffer + last decision. */
   volArb: VolArbState;
+  /**
+   * Cached shortest-expiry BTC oracle snapshot for the vol-arb fast ticker.
+   * Refreshed every `cfg.volArbOracleCacheMs` so a 2s ticker doesn't pay
+   * Predict's REST latency on every iteration — ATM IV moves slowly relative
+   * to HL mid, so this is essentially free signal.
+   */
+  cachedAtmIvSnapshot?: { snap: OracleSnapshot; computedAtMs: number };
 }
 
 const MANAGER_BALANCE_REFRESH_MS = 30_000;
@@ -167,6 +174,20 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   const risk = new RiskGate(ledger, cfg);
   const predict = new PredictClient();
   const poly = new PolymarketClient(cfg.polymarketGammaBase, cfg.polymarketClobBase);
+
+  // Clear any persisted pause flag if configured. Makes redeploys behave like
+  // "push and see it running" — a prior daily-loss / circuit-breaker trip
+  // from yesterday doesn't carry into today's process.
+  if (cfg.autoResumeOnBoot) {
+    const prior = risk.isPaused();
+    if (prior.paused) {
+      log.warn('svx.boot.auto_resume', {
+        priorReason: prior.reason ?? 'unknown',
+        note: 'autoResumeOnBoot=true in tunables.ts cleared a persisted pause',
+      });
+    }
+    risk.resume();
+  }
 
   const state: BotState = {
     startedAtMs: Date.now(),
@@ -303,7 +324,34 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     expiryToleranceSec: cfg.expiryToleranceSec,
     addressesPinned: isAddressPinned(ADDRESSES.packageId),
     apiAt: `http://${cfg.apiHost}:${cfg.apiPort}`,
+    volArbTickMs: cfg.volArbTickMs,
   });
+
+  // Vol-arb fast ticker — decoupled from the poly-arb loop below. Runs every
+  // cfg.volArbTickMs (default 2s) so signal detection and order submission
+  // aren't gated by Polymarket HTTP latency. Only spawned when HL credentials
+  // are present (read-only or live); skipped in --once mode.
+  let volArbTimer: NodeJS.Timeout | undefined;
+  if (!opts.onceOnly && hlExec) {
+    let volArbInFlight = false;
+    volArbTimer = setInterval(() => {
+      // Skip if the prior tick is still running — happens if a Predict call
+      // stalls past the 2s cadence. Better to drop a tick than queue.
+      if (volArbInFlight) return;
+      volArbInFlight = true;
+      runVolArbStep({ cfg, state, ledger, risk, hlExec, predict })
+        .catch((e) => log.warn('svx.vol_arb.step_error', { err: errMsg(e) }))
+        .finally(() => {
+          volArbInFlight = false;
+        });
+    }, cfg.volArbTickMs);
+    log.info('svx.vol_arb.ticker_started', {
+      tickMs: cfg.volArbTickMs,
+      minSamples: cfg.volArbMinSamples,
+      oracleCacheMs: cfg.volArbOracleCacheMs,
+      enabled: cfg.volArbEnabled,
+    });
+  }
 
   while (true) {
     const t0 = Date.now();
@@ -323,6 +371,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       log.error('svx.loop.error', { err: errMsg(e), stack: errStack(e) });
     }
     if (opts.onceOnly) {
+      if (volArbTimer) clearInterval(volArbTimer);
       stopApi?.();
       ledger.close();
       return;
@@ -400,6 +449,19 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       log.warn('svx.poly.settlement_loop_error', { err: errMsg(e) });
     }
     state.lastPolySettlementCheckMs = Date.now();
+  }
+
+  // 2c. Mid-life Polymarket exits — walk open poly positions, sell back via
+  // marketSell when mark-to-market P&L crosses the profit-take threshold.
+  // Predict's leg has no exit primitive so it still waits for settlement,
+  // but the poly leg can be cashed any time — turns "hold for hours until
+  // UMA resolves" into "lock in poly gains the moment they appear."
+  if (polyExec && cfg.polyEarlyExitEnabled && cfg.polyExecutionEnabled) {
+    try {
+      await walkPolyEarlyExits({ poly, polyExec, hlExec, ledger, cfg });
+    } catch (e) {
+      log.warn('svx.poly.early_exit_loop_error', { err: errMsg(e) });
+    }
   }
 
   // 3. Match by strike grid only — the expiry filter runs in step 4 and is
@@ -937,18 +999,10 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     }
   }
 
-  // === Vol-arb strategy loop ===
-  // Runs every iteration regardless of poly-arb state. Records BTC mid into
-  // the rolling buffer; once enough samples accumulate, evaluates the
-  // IV-vs-RV signal and opens/closes HL perp positions accordingly.
-  // Always-on for telemetry; only fires real trades when volArbEnabled=true.
-  if (hlExec) {
-    try {
-      await runVolArbStep({ cfg, state, ledger, risk, hlExec, predict, oracleSummaries: oracles });
-    } catch (e) {
-      log.warn('svx.vol_arb.step_error', { err: errMsg(e) });
-    }
-  }
+  // NOTE: vol-arb runs on its OWN fast ticker (see runBot), decoupled from
+  // this 15s poly-arb loop. Decoupling is the whole point — a slow
+  // Polymarket HTTP call here used to delay every vol-arb decision by up to
+  // 15s, which is forever when IV-RV diverges and you want to be IN.
 
   // Periodic NAV snapshot for the dashboard chart.
   ledger.recordNav(
@@ -966,6 +1020,180 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       ledger.vacuum();
     }
     state.lastPruneAtMs = Date.now();
+  }
+}
+
+/**
+ * Walk open Polymarket positions and sell back via marketSell when the
+ * mark-to-market P&L crosses the profit-take threshold.
+ *
+ * Why this exists: a "buy on one side, sell on the other" arbitrage is only
+ * truly captured when you can exit either leg. Predict has no sell primitive
+ * (only `mint` + `redeem` at settlement), so that leg is locked. But the
+ * Polymarket CLOB has both sides — so when the poly mark has moved enough
+ * to lock in a profit, we sell instead of waiting hours for UMA.
+ *
+ *   1. List open poly trades (filled, not yet settled).
+ *   2. For each: fetch the current order book, compute mark = bid × shares.
+ *   3. If (mark − cost) / cost ≥ `polyEarlyExitMinProfitFrac`, submit a
+ *      market-sell for the full position via FOK.
+ *   4. On a successful fill: mark the trade as exited (settled-early), and
+ *      close any open HL hedge attached to the same trade row.
+ *
+ * No stop-loss — by design. The user asked for take-profit only; cutting
+ * losses early on a binary that resolves binary at expiry just locks in
+ * mark-noise losses. Hold to settlement on the way down; exit on the way up.
+ */
+export async function walkPolyEarlyExits(args: {
+  poly: PolymarketClient;
+  polyExec: PolymarketExecClient;
+  hlExec: HyperliquidExecClient | undefined;
+  ledger: LedgerStore;
+  cfg: SvxConfig;
+}): Promise<void> {
+  const { poly, polyExec, hlExec, ledger, cfg } = args;
+  const open = ledger.unsettledPolyTrades();
+  if (open.length === 0) return;
+
+  for (const trade of open) {
+    if (
+      !trade.polyTokenId ||
+      !trade.polyConditionId ||
+      !trade.polyFilledShares ||
+      trade.polyCostUsdc == null ||
+      trade.polyFilledShares <= 0
+    ) {
+      continue;
+    }
+
+    let book;
+    try {
+      book = await poly.orderBook(trade.polyConditionId, trade.polyTokenId);
+    } catch (e) {
+      log.debug('svx.poly.early_exit.book_failed', {
+        tradeId: trade.id,
+        err: errMsg(e),
+      });
+      continue;
+    }
+    if (!book?.bid?.bestPrice) continue;
+
+    const bestBid = book.bid.bestPrice;
+    const markUsdc = bestBid * trade.polyFilledShares;
+    const pnlUsdc = markUsdc - trade.polyCostUsdc;
+    const pnlFrac = pnlUsdc / trade.polyCostUsdc;
+
+    if (pnlFrac < cfg.polyEarlyExitMinProfitFrac) {
+      continue;
+    }
+
+    log.info('svx.poly.early_exit.submit', {
+      tradeId: trade.id,
+      tokenId: trade.polyTokenId.slice(0, 12) + '…',
+      shares: trade.polyFilledShares,
+      bestBid,
+      markUsdc: markUsdc.toFixed(4),
+      costUsdc: trade.polyCostUsdc.toFixed(4),
+      pnlUsdc: pnlUsdc.toFixed(4),
+      pnlPct: (pnlFrac * 100).toFixed(1),
+      threshPct: (cfg.polyEarlyExitMinProfitFrac * 100).toFixed(0),
+    });
+
+    let resp: unknown;
+    try {
+      resp = await polyExec.marketSell({
+        tokenId: trade.polyTokenId,
+        shares: trade.polyFilledShares,
+      });
+    } catch (e) {
+      log.warn('svx.poly.early_exit.sell_error', {
+        tradeId: trade.id,
+        err: errMsg(e),
+      });
+      continue;
+    }
+
+    let fill;
+    try {
+      fill = parsePolyFillResponse(resp, {
+        requestedUsdc: trade.polyFilledShares,
+        side: 'sell',
+      });
+    } catch (parseErr) {
+      log.error('svx.poly.early_exit.parse_failed', {
+        tradeId: trade.id,
+        err: errMsg(parseErr),
+        rawResponse: resp,
+        note: 'Order MAY have submitted on-chain — check the wallet.',
+      });
+      continue;
+    }
+    if (fill.status === 'failed' || !fill.costUsdc || fill.costUsdc <= 0) {
+      log.warn('svx.poly.early_exit.fill_failed', {
+        tradeId: trade.id,
+        rawStatus: fill.status,
+        raw: fill.raw,
+      });
+      continue;
+    }
+
+    const proceedsUsdc = fill.costUsdc;
+    const realizedPnl = proceedsUsdc - trade.polyCostUsdc;
+    const nowMs = Date.now();
+    ledger.markPolyExited(trade.id, fill.orderId ?? null, proceedsUsdc, realizedPnl, nowMs);
+    log.info('svx.poly.early_exit.done', {
+      tradeId: trade.id,
+      proceedsUsdc: proceedsUsdc.toFixed(4),
+      pnlUsdc: realizedPnl.toFixed(4),
+      orderId: fill.orderId,
+    });
+
+    // Close the matching HL hedge so the strategy's exposure goes flat the
+    // moment we lock in the poly side. Mirrors what reconcilePolySettlements
+    // does on UMA-resolved trades.
+    if (
+      hlExec &&
+      trade.hlStatus === 'open' &&
+      trade.hlSize != null &&
+      trade.hlSide &&
+      trade.hlOpenPrice != null
+    ) {
+      try {
+        const closeFill = await hlExec.closeMarketPerp({
+          asset: trade.hlAsset ?? 'BTC',
+          originalSide: trade.hlSide,
+          size: trade.hlSize,
+        });
+        if (closeFill.status !== 'rejected' && closeFill.fillPrice > 0) {
+          const closePx = closeFill.fillPrice;
+          const hlPnl =
+            trade.hlSide === 'short'
+              ? (trade.hlOpenPrice - closePx) * trade.hlSize
+              : (closePx - trade.hlOpenPrice) * trade.hlSize;
+          ledger.closeHlLeg(trade.id, {
+            closePrice: closePx,
+            pnlUsdc: hlPnl,
+            fundingPaidUsdc: 0,
+            closedAtMs: nowMs,
+          });
+          log.info('svx.poly.early_exit.hl_closed', {
+            tradeId: trade.id,
+            closePx,
+            hlPnlUsdc: hlPnl.toFixed(4),
+          });
+        } else {
+          log.warn('svx.poly.early_exit.hl_close_rejected', {
+            tradeId: trade.id,
+            raw: closeFill.raw,
+          });
+        }
+      } catch (e) {
+        log.error('svx.poly.early_exit.hl_close_failed', {
+          tradeId: trade.id,
+          err: errMsg(e),
+        });
+      }
+    }
   }
 }
 
@@ -1126,9 +1354,17 @@ export async function reconcilePolySettlements(
 }
 
 /**
- * Vol-arb strategy step. Always-on for telemetry (records BTC mids,
- * computes IV / RV / decisions). Only fires HL orders when
- * `cfg.volArbEnabled === true` AND `cfg.hlExecutionEnabled === true`.
+ * Vol-arb strategy step. Runs on its own fast ticker (`cfg.volArbTickMs`,
+ * default 2s) — decoupled from the 15s poly-arb loop so a slow Polymarket
+ * HTTP call can't starve the signal.
+ *
+ * Always-on for telemetry (records BTC mids, computes IV / RV / decisions).
+ * Only fires HL orders when `cfg.volArbEnabled === true` AND
+ * `cfg.hlExecutionEnabled === true`.
+ *
+ * Predict ATM-IV is cached for `cfg.volArbOracleCacheMs` (default 30s) — at
+ * 2s ticks we'd otherwise hit Predict 30× more often than needed, and IV
+ * doesn't move tick-to-tick.
  *
  * Position lifecycle:
  *   - Open: |IV − RV| > openThresh AND surface bias clear
@@ -1141,9 +1377,8 @@ async function runVolArbStep(args: {
   risk: RiskGate;
   hlExec: HyperliquidExecClient;
   predict: PredictClient;
-  oracleSummaries: PredictOracleSummary[];
 }): Promise<void> {
-  const { cfg, state, ledger, risk, hlExec, predict, oracleSummaries } = args;
+  const { cfg, state, ledger, risk, hlExec, predict } = args;
   const nowMs = Date.now();
 
   // 1. Sample current BTC mid from HL and append to the rolling buffer.
@@ -1163,12 +1398,28 @@ async function runVolArbStep(args: {
     return;
   }
 
-  // 3. Snapshot the shortest-expiry BTC oracle (just what we need for ATM IV).
-  const btcOracles = oracleSummaries
-    .filter((o) => o.underlyingAsset === 'BTC' && o.status === 'active' && o.expiryMs > nowMs)
-    .sort((a, b) => a.expiryMs - b.expiryMs);
-  if (btcOracles.length === 0) return;
-  const snap = await predict.snapshotOracle(btcOracles[0]!.oracleId);
+  // 3. Get the shortest-expiry BTC oracle snapshot. Cached: at 2s ticks we
+  //    would otherwise hammer Predict; ATM IV barely moves in 30s.
+  const cache = state.cachedAtmIvSnapshot;
+  let snap: OracleSnapshot | undefined = cache?.snap;
+  if (!cache || nowMs - cache.computedAtMs > cfg.volArbOracleCacheMs) {
+    try {
+      const oracleSummaries = await predict.listActiveOracles('BTC');
+      const btcOracles = oracleSummaries
+        .filter((o) => o.underlyingAsset === 'BTC' && o.status === 'active' && o.expiryMs > nowMs)
+        .sort((a, b) => a.expiryMs - b.expiryMs);
+      if (btcOracles.length === 0) return;
+      const fresh = await predict.snapshotOracle(btcOracles[0]!.oracleId);
+      if (fresh) {
+        snap = fresh;
+        state.cachedAtmIvSnapshot = { snap: fresh, computedAtMs: nowMs };
+      }
+    } catch (e) {
+      log.debug('svx.vol_arb.oracle_refresh_failed', { err: errMsg(e) });
+      // Fall through with stale snap if we have one; else bail.
+      if (!snap) return;
+    }
+  }
   if (!snap) return;
 
   // 4. Compute IV / RV / surface bias.

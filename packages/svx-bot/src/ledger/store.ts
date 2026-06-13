@@ -574,6 +574,32 @@ export class LedgerStore {
   }
 
   /**
+   * Mark a Poly leg as closed via mid-life sell-back (not via UMA resolution).
+   * Mirrors markPolySettled but stamps `poly_settlement_outcome = 'early_exit'`
+   * and a redeem-tx sentinel so the UMA-resolution loop + redeem queue skip
+   * this row. `proceedsUsdc` is what we got back from selling; PnL =
+   * proceeds - poly_cost_usdc and feeds the same realizedPolyPnlSince query
+   * as a normal settlement.
+   */
+  markPolyExited(
+    tradeId: string,
+    exitOrderId: string | null,
+    proceedsUsdc: number,
+    pnlUsdc: number,
+    exitedAtMs: number,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE trades SET poly_settled = 1, poly_settled_at_ms = ?,
+                            poly_settlement_outcome = 'early_exit',
+                            poly_payout_usdc = ?, poly_pnl_usdc = ?,
+                            poly_redeem_tx_hash = ?, poly_redeem_status = 'success'
+         WHERE id = ?`,
+      )
+      .run(exitedAtMs, proceedsUsdc, pnlUsdc, exitOrderId ?? 'early-exit', tradeId);
+  }
+
+  /**
    * Winning Polymarket positions that haven't been redeemed on-chain yet.
    * Losing positions (`poly_payout_usdc = 0`) are skipped — redeeming them
    * just burns gas. Failed redeems (`poly_redeem_status='failed'`) are also

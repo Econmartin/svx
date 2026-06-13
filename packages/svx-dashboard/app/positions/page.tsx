@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { StatRow } from '@/components/StatRow';
+import { PageIntro } from '@/components/PageIntro';
 
 type View = 'open' | 'closed';
 
@@ -86,6 +87,38 @@ export default function PositionsPage() {
           </TabsList>
         </Tabs>
       </header>
+
+      <PageIntro
+        summary={
+          isMainnet ? (
+            <>
+              Each row is one round-trip on Polymarket, optionally paired with a Hyperliquid hedge.
+              Open positions show mark-to-market against the latest book; closed positions show
+              <strong> realized PnL</strong> after UMA settlement <em>or</em> after the mid-life
+              exit watcher captured the spread.
+            </>
+          ) : (
+            <>
+              Each row is one Predict mint on Sui testnet. Open rows wait for oracle settlement;
+              closed rows show <strong>realized PnL</strong> after auto-redemption via{' '}
+              <code className="font-mono text-[10px]">predict::redeem_permissionless</code>.
+            </>
+          )
+        }
+        hints={
+          isMainnet
+            ? [
+                <>Mid-life exits show <code className="font-mono text-[10px]">poly_settlement_outcome = early_exit</code> — the spread compressed in our favor and we sold before waiting for UMA.</>,
+                <>Combined PnL = Polymarket leg + HL hedge leg, summed. If the hedge worked, total variance is lower than poly-only.</>,
+                <>PnL distribution below tells you scale-up safety — tight = predictable, fat tails = risky to size up.</>,
+              ]
+            : [
+                <>Direction is <em>UP</em> if betting BTC ≥ strike at expiry, <em>DOWN</em> otherwise.</>,
+                <>Cost = what we paid Predict for the binary share; payout = $1 per share if right, $0 if wrong.</>,
+                <>Win/loss ratio depends on whether oracle-settlement spot crossed the strike — see the calibration scatter on Signals.</>,
+              ]
+        }
+      />
 
       <SummaryCards closed={closedAll} isMainnet={isMainnet} />
 

@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
 import { ExternalLink, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { PageIntro } from '@/components/PageIntro';
 
 export default function WalletsPage() {
   const client = useApiClient();
@@ -53,6 +54,21 @@ export default function WalletsPage() {
           {error}
         </div>
       )}
+
+      <PageIntro
+        summary={
+          <>
+            Every wallet the bot touches, read <strong>directly from chain</strong> — not from the
+            bot's local ledger. If the bot crashed mid-fill or a hedge orphaned, this page is where
+            the truth lives. Cross-check against the Positions page to spot ledger drift.
+          </>
+        }
+        hints={[
+          <>Sui card shows the operator's dUSDC balance + the PredictManager's internal balance. <em>Mints draw from the manager, redeems land in the manager.</em></>,
+          <>Polygon card shows two addresses: the <strong>EOA</strong> (signer, only needs POL gas) and the <strong>funder / Deposit Wallet</strong> (holds pUSD, is where the CLOB reads balances from in POLY_1271 mode).</>,
+          <>Hyperliquid card shows margin balance + open perp positions. Withdrawable = free margin. Funding paid is small but tracked.</>,
+        ]}
+      />
 
       {data ? (
         <>

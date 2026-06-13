@@ -7,6 +7,7 @@ import { usePolling } from '@/lib/usePolling';
 import { StatRow } from '@/components/StatRow';
 import { StatusBadge } from '@/components/StatusBadge';
 import { HealthPanel } from '@/components/HealthPanel';
+import { PageIntro } from '@/components/PageIntro';
 import { PnlChart } from '@/components/PnlChart';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -84,6 +85,19 @@ export default function OverviewPage() {
           </CardContent>
         </Card>
       )}
+
+      <PageIntro
+        summary={
+          isMainnet
+            ? 'Live mainnet snapshot — real money on Polymarket (Polygon CLOB) with a delta-sized Hyperliquid perp hedge on every fill. The Predict leg stays paper-only until Predict ships on Sui mainnet; we use its SVI surface as our pricing brain.'
+            : "Testnet snapshot — the bot mints binary positions on DeepBook Predict with dUSDC, paired with paper Polymarket signals. Useful for watching the full end-to-end loop without spending real money."
+        }
+        hints={[
+          <>The <strong>health panel</strong> below is the at-a-glance state: paused / live, wallet balances, last fill, NAV.</>,
+          <>Realized PnL on the chart is locked-in only — it excludes any open mark-to-market position.</>,
+          <>Use the network toggle in the header to flip between this view and the {isMainnet ? 'testnet' : 'mainnet'} bot.</>,
+        ]}
+      />
 
       <HealthPanel status={status} showAllLegs={isMainnet} />
 

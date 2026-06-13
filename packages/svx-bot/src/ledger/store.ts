@@ -542,6 +542,28 @@ export class LedgerStore {
   }
 
   /**
+   * True if there's an open (unsettled) trade on the same (oracleId, strike)
+   * but in the OPPOSITE direction. Used to refuse signals that would stack
+   * UP + DOWN on the same strike — only one can win at settlement, so the
+   * combined position guarantees paying the Predict spread (UP_price +
+   * DOWN_price > 1 because of the protocol's fee).
+   */
+  hasOppositeOpenForSignal(
+    oracleId: string,
+    strike: number,
+    direction: 'up' | 'down',
+  ): boolean {
+    const opposite = direction === 'up' ? 'down' : 'up';
+    const r = this.db
+      .prepare<[string, number, string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM trades
+         WHERE settled = 0 AND oracle_id = ? AND strike = ? AND direction = ?`,
+      )
+      .get(oracleId, strike, opposite);
+    return (r?.c ?? 0) > 0;
+  }
+
+  /**
    * Count of OPEN Polymarket-leg positions — trades where the Poly fill went
    * through but the underlying market hasn't yet resolved on UMA. Read by the
    * Poly risk gate to enforce `maxOpenPolyPositions`.

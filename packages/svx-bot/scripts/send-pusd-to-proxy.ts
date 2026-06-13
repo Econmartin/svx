@@ -3,8 +3,8 @@
  *
  * When Polymarket's CLOB rejects orders with "maker address not allowed,
  * please use the deposit wallet flow", the fix is:
- *   1. Visit polymarket.com behind Ireland VPN with the EOA connected.
- *      This auto-deploys a Gnosis Safe proxy + tells you its address.
+ *   1. Visit polymarket.com with the EOA connected. This auto-deploys a
+ *      Gnosis Safe proxy and tells you its address.
  *   2. Move pUSD from the EOA into the proxy (this script).
  *   3. Update Coolify env:
  *        MAINNET_POLY_FUNDER_ADDRESS=<proxy_address>

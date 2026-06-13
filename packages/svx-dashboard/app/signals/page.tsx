@@ -26,6 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { PageIntro } from '@/components/PageIntro';
 
 const ACTIONS = ['all', 'executed', 'sub_threshold', 'filtered'] as const;
 type Filter = (typeof ACTIONS)[number];
@@ -83,6 +84,22 @@ export default function SignalsPage() {
           {error}
         </div>
       )}
+
+      <PageIntro
+        summary={
+          <>
+            Every 15s the bot prices each matched (oracle, strike) pair on both venues and records the
+            disagreement here. <strong>Each row is a decision the bot made</strong>: filtered (didn't qualify),
+            sub-threshold (spread too small), executed (placed a trade), or failed (tried to execute but the
+            venue rejected). It's the strategy's audit trail.
+          </>
+        }
+        hints={[
+          <>The <strong>scatter</strong> below plots Polymarket probability (x) vs Predict probability (y). Points on the y=x line are venues in agreement; points off the line are where the spread lives.</>,
+          <>Use the <strong>tabs</strong> top-right to filter to executed-only when checking what actually fired.</>,
+          <>Failed rows carry a <code className="font-mono text-[10px]">filter_reason</code> like <code className="font-mono text-[10px]">poly_thin_book</code> or <code className="font-mono text-[10px]">poly_maker_not_allowed</code> — useful for debugging mainnet config.</>,
+        ]}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2">

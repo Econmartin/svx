@@ -39,6 +39,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { CheckCircle2, AlertTriangle, Activity, Clock } from 'lucide-react';
+import { PageIntro } from '@/components/PageIntro';
 
 export default function VolArbPage() {
   const client = useApiClient();
@@ -97,6 +98,23 @@ export default function VolArbPage() {
           </Badge>
         )}
       </header>
+
+      <PageIntro
+        summary={
+          <>
+            Standalone Hyperliquid perp strategy keyed to <strong>volatility divergence</strong>:
+            when Predict's implied vol (from the SVI surface) drifts away from Hyperliquid's
+            realized vol (measured tick-by-tick), AND the surface skew points one way, the bot
+            takes a directional perp position. Independent of the Predict×Polymarket arb shown
+            on Overview.
+          </>
+        }
+        hints={[
+          <>The strategy runs on its <strong>own 2s ticker</strong>, decoupled from the 15s poly-arb loop, so signals don't get starved by HTTP latency.</>,
+          <>Open trigger: <code className="font-mono text-[10px]">|IV − RV| ≥ open threshold</code> AND <code className="font-mono text-[10px]">|P(↑) − 50%| ≥ bias threshold</code>. Close trigger: signal weakens below close threshold OR time-stop.</>,
+          <>This is a <strong>perp-only directional play</strong>, not classical vol-arb — capturing a vol mispricing requires gamma (options). PnL comes from being right on direction when vol signals say a move is overdue.</>,
+        ]}
+      />
 
       <StatRow
         cols={5}

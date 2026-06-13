@@ -19,6 +19,7 @@ import { usePolling } from '@/lib/usePolling';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { PageIntro } from '@/components/PageIntro';
 
 export default function SurfacePage() {
   const client = useApiClient();
@@ -65,6 +66,23 @@ export default function SurfacePage() {
           })}
         </div>
       </header>
+
+      <PageIntro
+        summary={
+          <>
+            DeepBook Predict prices every binary option from a single live{' '}
+            <strong>SVI volatility surface</strong>. The chart below plots that surface for the
+            selected oracle expiry: total variance <code className="font-mono text-[10px]">w(k)</code>{' '}
+            and implied vol per log-strike <code className="font-mono text-[10px]">k = ln(K/F)</code>.
+            This is the pricing brain — every signal the bot fires starts here.
+          </>
+        }
+        hints={[
+          <>Pick a different expiry above to flip between the active oracles. Shorter expiries usually show steeper smiles.</>,
+          <>The shape of the smile matters: a clear skew tilts the directional bias gate on Vol-arb; a flat smile means neutral.</>,
+          <>If the SVI parameters age past <code className="font-mono text-[10px]">maxSviStalenessSec</code>, the bot refuses to trade off that oracle (visible as <code className="font-mono text-[10px]">filter_reason: svi_stale</code> on Signals).</>,
+        ]}
+      />
 
       {surface ? (
         <>

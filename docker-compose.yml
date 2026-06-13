@@ -9,12 +9,10 @@
 #   OPERATOR_JSON            — JSON string of {operatorAddress, managerId, ...}
 #                              (only needed for live mode; paper mode ignores it)
 #
-# Optional overrides (sensible defaults if unset):
-#   PAPER_TRADING            — true | false (default true)
-#   MAX_POSITION_DUSDC       — default 0.5
-#   DAILY_LOSS_LIMIT_DUSDC   — default 5
-#   SPREAD_THRESHOLD         — default 0.03
-#   EXPIRY_TOLERANCE_SEC     — default 1209600 (14d — sanity cap after cross-expiry reprice landed)
+# Strategy tunables (thresholds, position caps, daily limits, intervals)
+# live in packages/svx-bot/src/tunables.ts. Edit them there and redeploy —
+# they are NOT passed via env any more. Env only carries secrets, network
+# choices, kill-switches, and instance identity.
 #
 # NOTE: `environment` uses MAP syntax (not list) because Coolify's env
 # substitution can leave empty entries with list syntax for unset passthrough
@@ -33,16 +31,11 @@ services:
       SUI_NETWORK: testnet
       SUI_RPC_URL: "${SUI_RPC_URL:-https://fullnode.testnet.sui.io:443}"
       PREDICT_SERVER_URL: "${PREDICT_SERVER_URL:-https://predict-server.testnet.mystenlabs.com}"
+      # Execution kill-switches (kept in env so a Coolify panel toggle can
+      # halt live trading without a code change).
       PAPER_TRADING: "${PAPER_TRADING:-true}"
-      SPREAD_THRESHOLD: "${SPREAD_THRESHOLD:-0.03}"
-      MAX_POSITION_DUSDC: "${MAX_POSITION_DUSDC:-0.5}"
-      MAX_POSITION_PCT: "${MAX_POSITION_PCT:-0.05}"
-      DAILY_LOSS_LIMIT_DUSDC: "${DAILY_LOSS_LIMIT_DUSDC:-5}"
-      MAX_OPEN_POSITIONS: "${MAX_OPEN_POSITIONS:-5}"
-      MAX_SVI_STALENESS_SEC: "${MAX_SVI_STALENESS_SEC:-300}"
-      EXPIRY_TOLERANCE_SEC: "${EXPIRY_TOLERANCE_SEC:-1209600}"
+      # Infra identity.
       SVX_LOG_LEVEL: "${SVX_LOG_LEVEL:-info}"
-      SVX_LOOP_INTERVAL_MS: "${SVX_LOOP_INTERVAL_MS:-15000}"
       SVX_INSTANCE_LABEL: "${SVX_INSTANCE_LABEL:-testnet}"
       # Secrets — set these in the Coolify env panel. Defaults to empty so
       # paper mode runs cleanly without them.
@@ -121,47 +114,21 @@ services:
       SUI_NETWORK: testnet
       SUI_RPC_URL: "${MAINNET_SUI_RPC_URL:-https://fullnode.testnet.sui.io:443}"
       PREDICT_SERVER_URL: "${MAINNET_PREDICT_SERVER_URL:-https://predict-server.testnet.mystenlabs.com}"
+      # Execution kill-switches.
       PAPER_TRADING: "${MAINNET_PAPER_TRADING:-true}"
-      SPREAD_THRESHOLD: "${MAINNET_SPREAD_THRESHOLD:-0.03}"
-      MAX_POSITION_DUSDC: "${MAINNET_MAX_POSITION_DUSDC:-0.5}"
-      MAX_POSITION_PCT: "${MAINNET_MAX_POSITION_PCT:-0.05}"
-      DAILY_LOSS_LIMIT_DUSDC: "${MAINNET_DAILY_LOSS_LIMIT_DUSDC:-5}"
-      MAX_OPEN_POSITIONS: "${MAINNET_MAX_OPEN_POSITIONS:-5}"
-      MAX_SVI_STALENESS_SEC: "${MAINNET_MAX_SVI_STALENESS_SEC:-300}"
-      EXPIRY_TOLERANCE_SEC: "${MAINNET_EXPIRY_TOLERANCE_SEC:-1209600}"
-      SVX_LOG_LEVEL: "${MAINNET_SVX_LOG_LEVEL:-info}"
-      SVX_LOOP_INTERVAL_MS: "${MAINNET_SVX_LOOP_INTERVAL_MS:-15000}"
-      SVX_INSTANCE_LABEL: "${MAINNET_SVX_INSTANCE_LABEL:-mainnet}"
-      # Polymarket execution — the whole point of this instance.
       POLY_EXECUTION_ENABLED: "${MAINNET_POLY_EXECUTION_ENABLED:-false}"
+      HL_EXECUTION_ENABLED: "${MAINNET_HL_EXECUTION_ENABLED:-false}"
+      VOL_ARB_ENABLED: "${MAINNET_VOL_ARB_ENABLED:-false}"
+      # Network choices (per-deployment).
       POLY_NETWORK: "${MAINNET_POLY_NETWORK:-polygon}"
       POLY_RPC_URL: "${MAINNET_POLY_RPC_URL:-}"
       POLY_CLOB_HOST: "${MAINNET_POLY_CLOB_HOST:-}"
-      MAX_POLY_POSITION_USDC: "${MAINNET_MAX_POLY_POSITION_USDC:-2}"
-      MAX_OPEN_POLY_POSITIONS: "${MAINNET_MAX_OPEN_POLY_POSITIONS:-5}"
-      POLY_MIN_BOOK_DEPTH_SHARES: "${MAINNET_POLY_MIN_BOOK_DEPTH_SHARES:-20}"
-      DAILY_POLY_LOSS_LIMIT_USDC: "${MAINNET_DAILY_POLY_LOSS_LIMIT_USDC:-10}"
       POLY_SIGNATURE_TYPE: "${MAINNET_POLY_SIGNATURE_TYPE:-EOA}"
       POLY_FUNDER_ADDRESS: "${MAINNET_POLY_FUNDER_ADDRESS:-}"
-      # Hyperliquid delta hedge (Part 2 — OFF by default until operator
-      # bridges USDC into HL from Arbitrum).
-      HL_EXECUTION_ENABLED: "${MAINNET_HL_EXECUTION_ENABLED:-false}"
       HL_NETWORK: "${MAINNET_HL_NETWORK:-mainnet}"
-      HL_HEDGE_ASSET: "${MAINNET_HL_HEDGE_ASSET:-BTC}"
-      MAX_HL_PER_TRADE_USDC: "${MAINNET_MAX_HL_PER_TRADE_USDC:-2}"
-      MAX_HL_OPEN_USDC: "${MAINNET_MAX_HL_OPEN_USDC:-10}"
-      DAILY_HL_LOSS_LIMIT_USDC: "${MAINNET_DAILY_HL_LOSS_LIMIT_USDC:-5}"
-      HL_REQUIRED_FOR_POLY: "${MAINNET_HL_REQUIRED_FOR_POLY:-false}"
-      VOL_ARB_ENABLED: "${MAINNET_VOL_ARB_ENABLED:-false}"
-      VOL_ARB_OPEN_THRESHOLD: "${MAINNET_VOL_ARB_OPEN_THRESHOLD:-0.05}"
-      VOL_ARB_CLOSE_THRESHOLD: "${MAINNET_VOL_ARB_CLOSE_THRESHOLD:-0.02}"
-      VOL_ARB_DIRECTION_BIAS: "${MAINNET_VOL_ARB_DIRECTION_BIAS:-0.03}"
-      VOL_ARB_BIAS_BYPASS_SPREAD: "${MAINNET_VOL_ARB_BIAS_BYPASS_SPREAD:-0.15}"
-      MAX_VOL_ARB_PER_TRADE_USDC: "${MAINNET_MAX_VOL_ARB_PER_TRADE_USDC:-2}"
-      MAX_VOL_ARB_OPEN_USDC: "${MAINNET_MAX_VOL_ARB_OPEN_USDC:-10}"
-      DAILY_VOL_ARB_LOSS_LIMIT_USDC: "${MAINNET_DAILY_VOL_ARB_LOSS_LIMIT_USDC:-5}"
-      VOL_ARB_TIME_STOP_MINUTES: "${MAINNET_VOL_ARB_TIME_STOP_MINUTES:-60}"
-      VOL_ARB_MIN_SAMPLES: "${MAINNET_VOL_ARB_MIN_SAMPLES:-30}"
+      # Infra identity.
+      SVX_LOG_LEVEL: "${MAINNET_SVX_LOG_LEVEL:-info}"
+      SVX_INSTANCE_LABEL: "${MAINNET_SVX_INSTANCE_LABEL:-mainnet}"
       # Secrets — set in Coolify panel.
       SUI_PRIVATE_KEY_BECH32: "${MAINNET_SUI_PRIVATE_KEY_BECH32:-}"
       OPERATOR_JSON: "${MAINNET_OPERATOR_JSON:-}"

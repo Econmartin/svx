@@ -103,8 +103,12 @@ export const TUNABLES = {
   /** |P_up − 0.5| must exceed this to clear the directional-bias gate. */
   volArbDirectionBiasThreshold: 0.03,
   /** When |IV − RV| ≥ this, skip the directional-bias gate (vol thesis
-   *  dominates). 0.15 = 15 vol points. */
-  volArbBiasBypassSpread: 0.15,
+   *  dominates). EFFECTIVELY DISABLED at 1.0 — perp positions can only
+   *  capture vol via direction, so trading without bias on a 17%-spread
+   *  neutral surface (P_up ≈ 50%) is a coin flip eaten by HL fees. The
+   *  bypass logic makes sense for options (long gamma), not for linear
+   *  perps. Set to 0.5 or lower to re-enable in extreme regimes. */
+  volArbBiasBypassSpread: 1.0,
   /** Per-trade USD cap on vol-arb perp positions. Must be ≥ hlMinOrderUsdc
    *  (Hyperliquid's $10 floor) or every open is rejected — was 2, bumped
    *  to 12. */

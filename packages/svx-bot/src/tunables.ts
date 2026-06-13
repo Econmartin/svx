@@ -56,7 +56,10 @@ export const TUNABLES = {
   // Risk caps — Polymarket leg
   // ─────────────────────────────────────────────────────────────────────────
   maxPolyPositionUsdc: 2,
-  maxOpenPolyPositions: 5,
+  /** Hard cap on concurrent open Polymarket positions. Was 5 — the bot
+   *  saturated immediately and got stuck spamming risk_blocked every 15s
+   *  loop because every match wanted to open while all 5 slots were full. */
+  maxOpenPolyPositions: 20,
   /** Min shares at top-of-book before we'll fill — avoids partial-fill drift. */
   polyMinBookDepthShares: 20,
   /** Floor on a sized poly order. The depth-clamp can shrink an order below
@@ -74,9 +77,19 @@ export const TUNABLES = {
   // ─────────────────────────────────────────────────────────────────────────
   /** What asset to hedge (must match Hyperliquid's perp universe). */
   hlHedgeAsset: 'BTC',
-  maxHlPerTradeUsdc: 2,
-  maxHlOpenUsdc: 10,
-  dailyHlLossLimitUsdc: 5,
+  /** Hyperliquid enforces a $10 minimum order value protocol-side. Any HL
+   *  submission below this is rejected with "Order must have minimum value
+   *  of $10". The bot pre-checks `usdNotional < hlMinOrderUsdc` and skips
+   *  the submission cleanly so we don't error-spam every 2s. */
+  hlMinOrderUsdc: 10,
+  /** Per-trade USD cap on HL hedge legs. Must be ≥ hlMinOrderUsdc or every
+   *  hedge attempt gets rejected; was 2 (below HL min), bumped to 12. */
+  maxHlPerTradeUsdc: 12,
+  /** Total open HL exposure cap (sum of all hedge legs' notionals). */
+  maxHlOpenUsdc: 50,
+  /** Daily HL loss limit. Sized to absorb 2-3 losing trades at the new
+   *  per-trade cap before tripping. */
+  dailyHlLossLimitUsdc: 30,
   /** If true, skip a Poly fill when HL hedge can't be opened. */
   hlRequiredForPoly: false,
 
@@ -92,9 +105,15 @@ export const TUNABLES = {
   /** When |IV − RV| ≥ this, skip the directional-bias gate (vol thesis
    *  dominates). 0.15 = 15 vol points. */
   volArbBiasBypassSpread: 0.15,
-  maxVolArbPerTradeUsdc: 2,
-  maxVolArbOpenUsdc: 10,
-  dailyVolArbLossLimitUsdc: 5,
+  /** Per-trade USD cap on vol-arb perp positions. Must be ≥ hlMinOrderUsdc
+   *  (Hyperliquid's $10 floor) or every open is rejected — was 2, bumped
+   *  to 12. */
+  maxVolArbPerTradeUsdc: 12,
+  /** Total open vol-arb exposure cap. */
+  maxVolArbOpenUsdc: 50,
+  /** Daily vol-arb loss limit. Sized to absorb 2-3 losing trades at the new
+   *  per-trade cap before tripping. */
+  dailyVolArbLossLimitUsdc: 30,
   /** Max minutes a vol-arb position stays open before time-stop. */
   volArbTimeStopMinutes: 60,
   /**

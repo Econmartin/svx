@@ -64,9 +64,6 @@ capital to work for the same risk budget. Also lets us truthfully claim
   Onramp at `0x93070a847efEf7F70739046A929D47a521F5B8ee`).
 - Live caps right now: `MAX_POLY_POSITION_USDC=2`, `MAX_OPEN_POLY_POSITIONS=5`,
   `DAILY_POLY_LOSS_LIMIT_USDC=10` (configured but inert until this task).
-- The user is in a Polymarket-restricted jurisdiction; only the operator's
-  *browser* needs Ireland-VPN. The Coolify outbound IP is German/Finnish (no
-  VPN required for the bot).
 - `addresses.ts` says Predict is testnet-only — when it goes mainnet (timeline
   unknown), the mainnet bot can flip to PAPER_TRADING=false and the existing
   Polymarket-first execution path becomes the true 2-leg arb. Don't refactor
@@ -356,7 +353,7 @@ ruin risk.
 
 1. Buy ~$10 USDC on Kraken.
 2. Withdraw on Arbitrum One network.
-3. Open https://app.hyperliquid.xyz/bridge behind Ireland VPN. Connect a
+3. Open https://app.hyperliquid.xyz Portfolio → Deposit. Connect a
    freshly-generated EVM wallet (run `generate-hl-wallet` first — see 2.2).
 4. Bridge the USDC into Hyperliquid.
 5. Sign once on https://app.hyperliquid.xyz to register the master account.

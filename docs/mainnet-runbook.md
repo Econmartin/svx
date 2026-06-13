@@ -121,10 +121,10 @@ itself for this reason. Fix:
 
 #### Step 1 — Deploy the Deposit Wallet via polymarket.com
 
-Behind Ireland VPN, open https://polymarket.com → **Log in** → connect
-the operator EOA (Brave Wallet / Rabby / MetaMask with the operator key
-imported). On first login the UI deploys a smart-contract Deposit Wallet
-for you. Find its address:
+Open https://polymarket.com → **Log in** → connect the operator EOA
+(Brave Wallet / Rabby / MetaMask with the operator key imported). On
+first login the UI deploys a smart-contract Deposit Wallet for you.
+Find its address:
 
 - Profile page → "Wallet" tab usually shows it
 - Or inspect page HTML: it appears under `proxyAddress` / `proxyWallet` /
@@ -287,7 +287,7 @@ position with a reduce-only IOC and records the realized PnL.
 | 2 | Add `MAINNET_HL_PRIVATE_KEY=0x...` to Coolify | Don't commit. Never log. |
 | 3 | Buy ~$20 USDC on Kraken | More if you plan to scale up trade sizes |
 | 4 | Withdraw to Arbitrum (NOT Polygon) | Use the operator's HL address |
-| 5 | Open https://app.hyperliquid.xyz/bridge behind Ireland VPN | Only this step needs the VPN — the bot operates without one |
+| 5 | Open https://app.hyperliquid.xyz Portfolio → Deposit | Use the in-app bridge widget |
 | 6 | Bridge USDC into HL | One-time, takes ~30s |
 | 7 | Sign once on https://app.hyperliquid.xyz | Activates the master account |
 | 8 | `pnpm --filter svx-bot setup-hl-account` | Verifies the account, persists `data/hl-operator.json` |

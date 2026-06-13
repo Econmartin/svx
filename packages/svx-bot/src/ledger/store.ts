@@ -156,7 +156,11 @@ CREATE TABLE IF NOT EXISTS pause_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   paused INTEGER NOT NULL,
   reason TEXT,
-  ts_ms INTEGER NOT NULL
+  ts_ms INTEGER NOT NULL,
+  /* Watermark used by consecutiveLosses — only count losses whose ts_ms is
+     greater than this. resume() bumps it to NOW so the breaker gets a clean
+     slate; without this the breaker re-trips off the same prior streak. */
+  circuit_breaker_reset_at_ms INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO pause_state(id, paused, ts_ms) VALUES (1, 0, 0);
 `;
@@ -235,6 +239,18 @@ export class LedgerStore {
              settled_at_ms = COALESCE(settled_at_ms, hl_closed_at_ms)
        WHERE strategy = 'vol_arb' AND hl_status = 'closed' AND settled = 0`,
     );
+
+    // Backwards-compat migration for the circuit-breaker watermark column on
+    // pause_state. Existing DBs created before 2026-06-13 don't have this.
+    const pauseCols = this.db
+      .prepare<[], { name: string }>(`PRAGMA table_info(pause_state)`)
+      .all()
+      .map((r) => r.name);
+    if (!pauseCols.includes('circuit_breaker_reset_at_ms')) {
+      this.db.exec(
+        `ALTER TABLE pause_state ADD COLUMN circuit_breaker_reset_at_ms INTEGER NOT NULL DEFAULT 0`,
+      );
+    }
   }
 
   close(): void {
@@ -928,17 +944,41 @@ export class LedgerStore {
   }
 
   consecutiveLosses(): number {
+    // Only count losses since the last circuit-breaker reset. resume() bumps
+    // the watermark to NOW so a deliberate resume actually clears the breaker
+    // state — otherwise the count just rebuilds on the next risk check and
+    // re-pauses the bot before any new trade can clear it.
+    const watermark = this.getCircuitBreakerResetAtMs();
     const rows = this.db
-      .prepare<[], { pnl: number }>(
-        `SELECT pnl_usdc as pnl FROM trades WHERE settled = 1 ORDER BY ts_ms DESC LIMIT 50`,
+      .prepare<[number], { pnl: number }>(
+        `SELECT pnl_usdc as pnl FROM trades
+         WHERE settled = 1 AND ts_ms > ?
+         ORDER BY ts_ms DESC LIMIT 50`,
       )
-      .all();
+      .all(watermark);
     let n = 0;
     for (const r of rows) {
       if (r.pnl < 0) n++;
       else break;
     }
     return n;
+  }
+
+  /** Bump the watermark so consecutiveLosses() ignores anything before now.
+   *  Called by RiskGate.resume() — gives the breaker a clean slate. */
+  resetCircuitBreaker(nowMs: number): void {
+    this.db
+      .prepare(`UPDATE pause_state SET circuit_breaker_reset_at_ms = ? WHERE id = 1`)
+      .run(nowMs);
+  }
+
+  getCircuitBreakerResetAtMs(): number {
+    const row = this.db
+      .prepare<[], { v: number }>(
+        `SELECT circuit_breaker_reset_at_ms AS v FROM pause_state WHERE id = 1`,
+      )
+      .get();
+    return row?.v ?? 0;
   }
 
   private tradeRows(suffix: string, params: unknown[] = []): TradeRecord[] {

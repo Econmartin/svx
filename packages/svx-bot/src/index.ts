@@ -606,6 +606,17 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         cfg,
       });
 
+      // Opposing-side block: refuse when we already hold a trade on the same
+      // (oracle, strike) but the OPPOSITE direction. Only one of UP/DOWN can
+      // win at expiry, so stacking both guarantees paying the Predict spread
+      // (UP_ask + DOWN_ask > 1) on the combined position — net negative
+      // regardless of where spot lands. The poly hedge legs would also
+      // cancel out, paying their own spread on top.
+      const hasOpposite = ledger.hasOppositeOpenForSignal(
+        oracleSnap.oracleId,
+        polySnap.strike,
+        predictDirection,
+      );
       // Concentration check: don't pyramid into the same (oracle, strike,
       // direction) beyond the per-signal cap. Forces diversification across
       // distinct settlement events.
@@ -614,7 +625,15 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         polySnap.strike,
         predictDirection,
       );
-      if (sameSignalOpen >= cfg.maxPositionsPerSignal) {
+      if (hasOpposite) {
+        action = 'filtered';
+        log.info('svx.signal.opposite_blocked', {
+          oracleId: oracleSnap.oracleId.slice(0, 10),
+          strike: polySnap.strike,
+          wantDirection: predictDirection,
+          reason: 'open trade exists on opposite direction',
+        });
+      } else if (sameSignalOpen >= cfg.maxPositionsPerSignal) {
         action = 'filtered';
         log.info('svx.signal.concentration_blocked', {
           oracleId: oracleSnap.oracleId.slice(0, 10),

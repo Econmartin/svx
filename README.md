@@ -15,6 +15,26 @@ The DeepBook Predict problem statement explicitly names cross-venue vol-arb betw
 - **Live on mainnet (Polymarket leg).** Trades on the Polygon mainnet Polymarket CLOB through the operator's own wallet, with auto-redeem of winning shares once UMA resolves. Predict leg stays paper until Sui mainnet ships — that's a single config change.
 - **Delta-neutral by construction (Hyperliquid hedge).** Every Polymarket fill opens a delta-sized BTC perp hedge on Hyperliquid. The hedge closes on the same poll loop that detects settlement. Three venues, one bot, pure-vol PnL.
 
+## Why two networks?
+
+The dashboard shows a **testnet** bot and a **mainnet** bot side-by-side. They're not redundant — each demonstrates a piece the other can't.
+
+- **Testnet bot.** DeepBook Predict has no Sui mainnet deployment yet — testnet is the only place the protocol exists today. The testnet bot mints, settles, and redeems via real Move calls with faucet dUSDC. It's the on-chain proof that the entire Predict integration works end-to-end (the spec's minimum requirement: *"Work end-to-end if you are building a product, we will test the entire flow."*).
+- **Mainnet bot.** Uses testnet Predict as the **pricing brain** — reads the SVI surface live — while executing trades on **Polymarket (Polygon mainnet)** and hedging on **Hyperliquid (mainnet)**. The PnL on this bot is real money. The day Predict ships on Sui mainnet, `MAINNET_PAPER_TRADING=false` flips the Sui-mint leg from paper to live; no code change.
+
+This is what "mainnet-day-one" concretely means: the cross-venue spread logic, SVI-driven signal generation, order submission, settlement reconciliation, and delta-hedge are all running against real liquidity today.
+
+## Limitations & honest tradeoffs
+
+A few things we knowingly cut or accepted as structural constraints — better to say them out loud than paper over:
+
+- **Vol-arb on perps isn't classical vol-arb.** True vol-arb captures vol mispricing via gamma (options). Perps are linear, so the standalone Hyperliquid vol-arb strategy is more accurately "directional perp triggered by IV-RV divergence." The Polymarket leg DOES capture vol edge (binaries have curvature); the standalone HL strategy needs directional conviction.
+- **Predict positions can't exit before settlement.** Protocol exposes `mint` and `redeem_permissionless` only — no `burn`, no secondary market. We compensate by adding mid-life exit on the Polymarket leg (sells back when mark P&L crosses +20% of cost). The Predict side still rides to expiry — protocol property, not bot bug.
+- **Cross-expiry reprice assumes flat-vol.** Predict expiries are sub-hour; Polymarket is daily/weekly. We treat Predict's IV as expiry-invariant and reprice the binary at the Polymarket expiry. Exact under the assumption, approximate with a sloped term structure. Adding a real term-structure model is future work.
+- **POLY_1271 Deposit-Wallet setup is manual.** New Polymarket accounts require a smart-contract Deposit Wallet. The bot supports the POLY_1271 signature mode, but deploying the DW + re-deriving the L2 API key against it is a one-time manual step at polymarket.com. Documented in the runbook; not automatable today.
+- **No Move package shipped.** Deliberate — every line of Move ships an audit surface. SVX composes with `predict::*` and `predict_manager::*` via Sui RPC only. Trade-off: we can't ship tokenized vault shares or pool-with-others primitives. For a hackathon bot that's the right call; for a full vault product it'd be a future iteration with proper audit.
+- **Edge decays as more bots run this.** Cross-venue convergence trades have finite edge by construction — every additional bot tightens the spread. Building this strategy now is about being one of the first feeders calibrating Predict's surface against external venues, not about long-term cash-printing.
+
 ## Architecture
 
 ```
@@ -112,7 +132,7 @@ pnpm --filter svx-bot generate-hl-wallet
 Polymarket's May 2026 rollout requires a smart-contract Deposit Wallet that verifies signatures via EIP-1271. EOA-direct orders are rejected with `maker address not allowed`.
 
 ```bash
-# 1. Log in to polymarket.com (Ireland VPN) with the EOA from step 1.
+# 1. Log in to polymarket.com with the EOA from step 1.
 #    Make ONE tiny manual trade (e.g. $5) to deploy the Deposit Wallet.
 # 2. Find the DW address on your Profile → Wallet page (or in the page HTML
 #    as proxyAddress). Set it as POLY_FUNDER_ADDRESS in env.
@@ -143,7 +163,7 @@ pnpm --filter svx-bot send-pusd-to-proxy -- --to=<funder-addr> --amount=50 --con
 pnpm --filter svx-bot verify-poly-wallet
 ```
 
-Hyperliquid bridge: log in at app.hyperliquid.xyz with the HL EOA (Ireland VPN), Portfolio → Deposit. Then:
+Hyperliquid bridge: log in at app.hyperliquid.xyz with the HL EOA, Portfolio → Deposit. Then:
 
 ```bash
 pnpm --filter svx-bot verify-hl-wallet

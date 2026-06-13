@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ExternalLink, Workflow, ShieldCheck, GitBranch, Target, Trophy, Code2, Wrench } from 'lucide-react';
+import { ExternalLink, Workflow, ShieldCheck, GitBranch, Target, Trophy, Code2, Wrench, Network, AlertOctagon } from 'lucide-react';
 
 export default function AboutPage() {
   return (
@@ -210,6 +210,156 @@ export default function AboutPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
+            <Network className="h-4 w-4 text-accent" /> Why two networks?
+          </CardTitle>
+          <p className="text-xs text-muted mt-1 leading-relaxed">
+            The dashboard shows a <strong>testnet</strong> bot and a <strong>mainnet</strong> bot
+            side-by-side. They're not redundant — each demonstrates a piece the other can't.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm leading-relaxed">
+          <div>
+            <div className="font-medium flex items-center gap-2">
+              <Badge variant="testnet" className="text-[10px]">testnet bot</Badge>
+              Full Predict integration — the on-chain proof
+            </div>
+            <p className="text-muted mt-1.5">
+              DeepBook Predict has no mainnet deployment yet — testnet is the <em>only</em> place
+              the protocol lives today. The testnet bot mints binary positions with{' '}
+              <code className="code">predict::mint</code>, settles via{' '}
+              <code className="code">predict::redeem_permissionless</code>, and reads the SVI
+              surface from the live oracle feed. It exists to prove the entire Predict integration
+              path works end-to-end on real Move calls, with real (faucet) dUSDC. That's the
+              minimum-requirement bar from the spec: <em>"Work end-to-end if you are building a
+              product, we will test the entire flow."</em>
+            </p>
+          </div>
+          <div>
+            <div className="font-medium flex items-center gap-2">
+              <Badge variant="mainnet" className="text-[10px]">mainnet bot</Badge>
+              Real-money cross-venue arb — the strategy proof
+            </div>
+            <p className="text-muted mt-1.5">
+              The mainnet bot uses Predict (testnet) as its <strong>pricing brain</strong> — the
+              SVI surface drives every signal — while executing the resulting trades on{' '}
+              <strong>Polymarket (Polygon mainnet)</strong> and hedging on{' '}
+              <strong>Hyperliquid (mainnet)</strong>. PnL on this bot is real money. This is what
+              <em> "mainnet-day-one"</em> actually means: the cross-venue logic, the SVI-driven
+              spread detection, the order submission, the settlement reconciliation, and the
+              delta-hedge are all <strong>live today</strong> against real liquidity. The only
+              piece waiting on Predict's Sui-mainnet launch is the on-chain Sui mint — that's a
+              single config flip (<code className="code">MAINNET_PAPER_TRADING=false</code>), not
+              a code change.
+            </p>
+          </div>
+          <div className="rounded border border-border-strong bg-surface-elevated/40 p-3 text-xs">
+            <strong className="text-fg">Why this matters for judging:</strong> shipping a
+            mainnet-only project would mean either (a) faking the Predict leg, or (b) waiting for
+            Predict mainnet and missing the deadline. The testnet/mainnet split lets us run the
+            full Predict integration in production today AND have a real-money signal-execution
+            loop running in parallel. The day Predict ships mainnet, the bot is already trading.
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-l-4 border-l-warn">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertOctagon className="h-4 w-4 text-warn" /> Limitations &amp; honest tradeoffs
+          </CardTitle>
+          <p className="text-xs text-muted mt-1">
+            Where we knowingly cut scope or accepted a structural constraint. Worth saying out
+            loud rather than papering over.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-3 text-sm leading-relaxed">
+            <Limitation
+              title="Vol-arb on perps isn't classical vol-arb"
+              body={
+                <>
+                  Classical vol-arb captures vol mispricing via <strong>gamma</strong>{' '}
+                  (long/short options). Perps are linear — they only profit on direction. So the
+                  Hyperliquid vol-arb strategy is more accurately "directional perp triggered by
+                  IV-RV divergence + surface skew." On the Polymarket leg we DO capture vol edge
+                  (binaries have curvature), but the standalone HL vol-arb relies on directional
+                  conviction. Calling it out so judges read the strategy correctly.
+                </>
+              }
+            />
+            <Limitation
+              title="Predict positions can't exit before settlement"
+              body={
+                <>
+                  The protocol exposes <code className="code">mint</code> and{' '}
+                  <code className="code">redeem_permissionless</code> only — no{' '}
+                  <code className="code">burn</code> or secondary market. Once minted, a position
+                  is locked until the oracle settles. We compensate by adding mid-life exit on
+                  the Polymarket leg (sells back when mark P&amp;L crosses +20% of cost), so we
+                  capture the spread the moment the markets converge instead of waiting hours
+                  for UMA. The Predict leg still rides to expiry — that's a protocol property,
+                  not a bot bug.
+                </>
+              }
+            />
+            <Limitation
+              title="Cross-expiry reprice assumes flat-vol"
+              body={
+                <>
+                  Predict oracles have short expiries (sub-hour); Polymarket markets are typically
+                  end-of-day or end-of-week. To compare them we treat Predict's IV as
+                  expiry-invariant (flat-vol assumption) and reprice the binary at the Polymarket
+                  expiry. This is exact under the assumption and approximate when the term
+                  structure has slope. Accepted as a simplification — adding a full term-structure
+                  model is future work.
+                </>
+              }
+            />
+            <Limitation
+              title="POLY_1271 Deposit-Wallet setup is manual"
+              body={
+                <>
+                  Polymarket's May 2026 rollout requires a smart-contract Deposit Wallet for new
+                  accounts. The bot supports POLY_1271 mode (the only mode that works for new
+                  signups), but deploying the DW + re-deriving the L2 API key against it is a
+                  one-time manual step at polymarket.com. Documented in the runbook; not
+                  automatable today.
+                </>
+              }
+            />
+            <Limitation
+              title="No Move package shipped by SVX"
+              body={
+                <>
+                  Deliberate — every line of Move ships an audit surface. SVX composes with{' '}
+                  <code className="code">predict::*</code> and{' '}
+                  <code className="code">predict_manager::*</code> via Sui RPC only, no custom
+                  contracts. Trade-off: we can't ship tokenized vault shares or pool-with-others
+                  primitives. For the hackathon-bot category that's the right call; for a
+                  full-vault product it'd be a future iteration with proper audit.
+                </>
+              }
+            />
+            <Limitation
+              title="Edge decays as more bots run this"
+              body={
+                <>
+                  Cross-venue convergence trades have finite edge by construction — every
+                  additional bot tightens the spread. The spec acknowledges this. Once Predict
+                  has full mainnet deployment, the bot's per-trade PnL will compress as other
+                  arbs enter. Building this strategy now is about being one of the first feeders
+                  helping calibrate Predict's surface against external venues, not about long-term
+                  cash-printing.
+                </>
+              }
+            />
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
             <Trophy className="h-4 w-4 text-warn" /> Judging criteria mapping
           </CardTitle>
         </CardHeader>
@@ -292,8 +442,7 @@ export default function AboutPage() {
                   Kraken USDC → Polygon → wrap via{' '}
                   <code className="code">wrap-usdce-to-pusd</code> →{' '}
                   <code className="code">send-pusd-to-proxy</code>. HL USDC: Kraken USDC → Arbitrum
-                  → bridge into HL via app.hyperliquid.xyz Portfolio → Deposit (geofenced — VPN
-                  needed for the bridge step only).
+                  → bridge into HL via app.hyperliquid.xyz Portfolio → Deposit.
                 </>
               }
             />
@@ -447,6 +596,24 @@ function SpecRow({
       </td>
       <td className="py-2.5 text-sm text-muted">{built}</td>
     </tr>
+  );
+}
+
+function Limitation({
+  title,
+  body,
+}: {
+  title: string;
+  body: React.ReactNode;
+}) {
+  return (
+    <li className="flex gap-3">
+      <span className="flex-shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full bg-warn/70" />
+      <div className="flex-1">
+        <div className="font-medium">{title}</div>
+        <div className="text-muted mt-0.5">{body}</div>
+      </div>
+    </li>
   );
 }
 

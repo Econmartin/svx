@@ -924,6 +924,14 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
               polyOrderId: polyLeg.fillResult.orderId,
             });
           }
+        } else if (hedge.btcSize > 0 && hedge.usdNotional < cfg.hlMinOrderUsdc) {
+          // Hyperliquid rejects orders under $10. Below the minimum we leave
+          // the poly leg naked (already filled) rather than error-spamming.
+          log.info('svx.hl.below_min_order', {
+            usdNotional: hedge.usdNotional.toFixed(2),
+            min: cfg.hlMinOrderUsdc,
+            polyOrderId: polyLeg.fillResult.orderId,
+          });
         } else if (hedge.btcSize > 0) {
           state.lastHlAttemptAtMs = Date.now();
           try {
@@ -1530,6 +1538,14 @@ async function runVolArbStep(args: {
       });
       if (!riskCheck.ok) {
         log.info('svx.vol_arb.risk_blocked', { reason: riskCheck.reason });
+      } else if (usdNotional < cfg.hlMinOrderUsdc) {
+        // Hyperliquid rejects orders < $10. Bumping maxVolArbPerTradeUsdc
+        // above the minimum is the real fix; this guard keeps us from
+        // spamming the API every 2s if it's misconfigured.
+        log.info('svx.vol_arb.below_min_order', {
+          usdNotional: usdNotional.toFixed(2),
+          min: cfg.hlMinOrderUsdc,
+        });
       } else {
         const btcSize = btcSizeForUsdNotional(usdNotional, btcMid ?? ivResult.oracle.spot);
         const side: 'long' | 'short' = decision.action === 'open_long' ? 'long' : 'short';

@@ -146,6 +146,9 @@ const Schema = z.object({
   hlNetwork: z.enum(['mainnet', 'testnet']).default('mainnet'),
   /** Asset to hedge (must match Hyperliquid's perp universe). */
   hlHedgeAsset: z.string().default('BTC'),
+  /** Hyperliquid minimum order value (USD). Pre-check that skips HL
+   *  submissions below this so the bot doesn't error-spam every loop. */
+  hlMinOrderUsdc: z.number().positive().default(10),
   /** Per-trade USD notional cap on the HL leg. Bounds the hedge size so a
    *  short-expiry gamma blow-up can't size a hedge bigger than we want. */
   maxHlPerTradeUsdc: z.number().positive().default(2),
@@ -295,6 +298,7 @@ export function loadConfig(): SvxConfig {
     dailyPolyLossLimitUsdc: TUNABLES.dailyPolyLossLimitUsdc,
     polyFillTimeoutMs: TUNABLES.polyFillTimeoutMs,
     hlHedgeAsset: TUNABLES.hlHedgeAsset,
+    hlMinOrderUsdc: TUNABLES.hlMinOrderUsdc,
     maxHlPerTradeUsdc: TUNABLES.maxHlPerTradeUsdc,
     maxHlOpenUsdc: TUNABLES.maxHlOpenUsdc,
     dailyHlLossLimitUsdc: TUNABLES.dailyHlLossLimitUsdc,

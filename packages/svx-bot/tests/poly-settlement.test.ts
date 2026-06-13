@@ -53,6 +53,7 @@ const baseCfg: SvxConfig = {
   hlExecutionEnabled: false,
   hlNetwork: 'mainnet',
   hlHedgeAsset: 'BTC',
+  hlMinOrderUsdc: 10,
   maxHlPerTradeUsdc: 2,
   maxHlOpenUsdc: 10,
   dailyHlLossLimitUsdc: 5,

@@ -745,6 +745,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         });
         if (!polyRisk.ok) {
           log.info('svx.poly.risk_blocked', { reason: polyRisk.reason });
+          ledger.updateSignalAction(sigId, 'failed', `poly_risk:${polyRisk.reason}`);
           continue;
         }
 
@@ -760,6 +761,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
               (cfg.polyFillFailedCooldownMs - (Date.now() - lastFailedAt)) / 1000,
             ),
           });
+          ledger.updateSignalAction(sigId, 'failed', 'poly_cooldown');
           continue;
         }
 
@@ -770,6 +772,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             min: cfg.polyMinBookDepthShares,
             entryPrice: polyEntryPrice,
           });
+          ledger.updateSignalAction(sigId, 'failed', 'poly_thin_book');
           continue;
         }
 
@@ -791,6 +794,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             entryPrice: polyEntryPrice,
             minOrderUsdc: cfg.polyMinOrderUsdc,
           });
+          ledger.updateSignalAction(sigId, 'failed', `poly_size:${sized.reason}`);
           continue;
         }
 
@@ -822,6 +826,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             risk.pause(
               'Polymarket maker-address rejected — Deposit Wallet (POLY_1271) setup required (runbook §1.4.5)',
             );
+            ledger.updateSignalAction(sigId, 'failed', 'poly_maker_not_allowed');
             continue;
           }
 
@@ -840,6 +845,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
               rawResponse: resp,
               note: 'Order MAY have been submitted on-chain — check the wallet history.',
             });
+            ledger.updateSignalAction(sigId, 'failed', 'poly_parse_failed');
             continue;
           }
           if (fill.status === 'failed') {
@@ -847,6 +853,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             // FOK-failing order every loop.
             state.polyFillFailedAt.set(polyTokenId, Date.now());
             log.warn('svx.poly.fill_failed', { resp: fill.raw });
+            ledger.updateSignalAction(sigId, 'failed', 'poly_fill_failed');
             continue;
           }
           // Successful fill — clear any prior cooldown for this token.
@@ -867,6 +874,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           };
         } catch (e) {
           log.warn('svx.poly.order_error', { err: errMsg(e), stack: errStack(e) });
+          ledger.updateSignalAction(sigId, 'failed', 'poly_order_error');
           continue;
         }
       }
@@ -974,8 +982,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             error: result.error,
             status: result.status,
           });
-          // Demote to a 'failed' signal record by reinserting; original signal
-          // is already in the ledger.
+          ledger.updateSignalAction(sigId, 'failed', `predict_tx:${result.status ?? 'unknown'}`);
           continue;
         }
         txDigest = result.digest;

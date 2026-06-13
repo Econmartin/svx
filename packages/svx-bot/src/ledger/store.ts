@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   OracleSnapshot,
   PolymarketSnapshot,
+  SignalAction,
   SignalRecord,
   TradeRecord,
 } from 'svx-shared/types';
@@ -288,6 +289,22 @@ export class LedgerStore {
         cost: s.costUsdc ?? null,
       });
     return id;
+  }
+
+  /**
+   * Demote an already-inserted signal row to a new action (typically 'failed'
+   * after the bot decided to execute but an upstream venue rejected the
+   * order). Used so the dashboard stops showing exec rows that never produced
+   * a trade — otherwise the signals page shows live_executed but
+   * /positions/open is empty, which reads as "lost trade."
+   */
+  updateSignalAction(sigId: string, action: SignalAction, filterReason?: string): void {
+    this.db
+      .prepare(
+        `UPDATE signals SET action = ?, filter_reason = COALESCE(?, filter_reason)
+         WHERE id = ?`,
+      )
+      .run(action, filterReason ?? null, sigId);
   }
 
   insertTrade(

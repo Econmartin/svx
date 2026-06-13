@@ -52,6 +52,7 @@ import {
   HyperliquidExecClient,
   tryCreateHyperliquidExecClient,
 } from './exec/hyperliquid-client.js';
+import { sizePolyOrder } from './exec/poly-order-sizer.js';
 import { hedgeSizeForPolyFill } from './pricing/binary-delta.js';
 import {
   appendMid as appendVolArbMid,
@@ -129,6 +130,9 @@ interface BotState {
   lastHlBalanceAtMs: number;
   /** Last time the bot attempted a Polymarket fill (success or fail). 0 if never. */
   lastPolyAttemptAtMs: number;
+  /** tokenId → ms of last fill_failed. Used to skip retries during the
+   *  cooldown window so a stuck-on-thin-book signal doesn't spam the CLOB. */
+  polyFillFailedAt: Map<string, number>;
   /** Last time the bot attempted an HL hedge (success or fail). 0 if never. */
   lastHlAttemptAtMs: number;
   /** Last time we polled gamma for Polymarket settlement / ran auto-redeem.
@@ -200,6 +204,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastPolyAttemptAtMs: 0,
     lastHlAttemptAtMs: 0,
     lastPolySettlementCheckMs: 0,
+    polyFillFailedAt: new Map(),
     volArb: freshVolArbState(),
   };
 
@@ -724,6 +729,21 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           continue;
         }
 
+        // Per-token cooldown after fill_failed — prevents the bot from
+        // hammering the same FOK-failing order every 15s loop while the
+        // book stays thin.
+        const lastFailedAt = state.polyFillFailedAt.get(polyTokenId);
+        if (lastFailedAt && Date.now() - lastFailedAt < cfg.polyFillFailedCooldownMs) {
+          log.info('svx.poly.cooldown', {
+            outcome,
+            tokenId: polyTokenId.slice(0, 12) + '…',
+            secondsRemaining: Math.ceil(
+              (cfg.polyFillFailedCooldownMs - (Date.now() - lastFailedAt)) / 1000,
+            ),
+          });
+          continue;
+        }
+
         if (polyDepth < cfg.polyMinBookDepthShares) {
           log.info('svx.poly.thin_book', {
             outcome,
@@ -734,17 +754,39 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           continue;
         }
 
+        // Size the order to what the visible book can actually fill.
+        // Polymarket FOK kills the order if usdcAmount can't be fully matched,
+        // so submitting `maxPolyPositionUsdc` blindly on a thin book wastes
+        // an attempt. The sizer clamps to depth × ask × safety_factor.
+        const sized = sizePolyOrder({
+          maxOrderUsdc: cfg.maxPolyPositionUsdc,
+          minOrderUsdc: cfg.polyMinOrderUsdc,
+          bookDepthShares: polyDepth,
+          ask: polyEntryPrice,
+        });
+        if (!sized.ok) {
+          log.info('svx.poly.size_skipped', {
+            reason: sized.reason,
+            outcome,
+            depth: polyDepth,
+            entryPrice: polyEntryPrice,
+            minOrderUsdc: cfg.polyMinOrderUsdc,
+          });
+          continue;
+        }
+
         state.lastPolyAttemptAtMs = Date.now();
         try {
           log.info('svx.poly.submit', {
             outcome,
             tokenId: polyTokenId.slice(0, 12) + '…',
-            usdcAmount: cfg.maxPolyPositionUsdc,
+            usdcAmount: sized.submitUsdc,
             entryPrice: polyEntryPrice,
+            clampedToDepth: sized.clampedToDepth,
           });
           const resp = await polyExec.marketBuy({
             tokenId: polyTokenId,
-            usdcAmount: cfg.maxPolyPositionUsdc,
+            usdcAmount: sized.submitUsdc,
           });
 
           // Operator-action-required: maker-not-allowed means the EOA
@@ -772,7 +814,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           // the next signal evaluation may not match).
           let fill: ReturnType<typeof parsePolyFillResponse>;
           try {
-            fill = parsePolyFillResponse(resp, { requestedUsdc: cfg.maxPolyPositionUsdc, side: 'buy' });
+            fill = parsePolyFillResponse(resp, { requestedUsdc: sized.submitUsdc, side: 'buy' });
           } catch (parseErr) {
             log.error('svx.poly.parse_failed', {
               err: errMsg(parseErr),
@@ -782,9 +824,14 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             continue;
           }
           if (fill.status === 'failed') {
+            // Mark this tokenId for cooldown so we don't hammer the same
+            // FOK-failing order every loop.
+            state.polyFillFailedAt.set(polyTokenId, Date.now());
             log.warn('svx.poly.fill_failed', { resp: fill.raw });
             continue;
           }
+          // Successful fill — clear any prior cooldown for this token.
+          state.polyFillFailedAt.delete(polyTokenId);
           log.info('svx.poly.filled', {
             orderId: fill.orderId,
             shares: fill.filledShares,

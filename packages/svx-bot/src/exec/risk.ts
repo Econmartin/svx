@@ -46,6 +46,9 @@ export class RiskGate {
       /* ignore */
     }
     this.ledger.setPause(false);
+    // Watermark consecutiveLosses() to NOW — otherwise the breaker re-trips
+    // on the next risk check off the same prior loss streak that paused us.
+    this.ledger.resetCircuitBreaker(Date.now());
   }
 
   isPaused(): { paused: boolean; reason?: string } {

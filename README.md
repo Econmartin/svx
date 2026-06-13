@@ -87,6 +87,115 @@ pnpm tsx scripts/setup-manager.ts
 PAPER_TRADING=false pnpm svx start
 ```
 
+## Run your own (full mainnet bot)
+
+Walk-through for a fresh operator who's cloned the repo and wants to stand up the mainnet bot — paper Predict (testnet SVI as the pricing brain), live Polymarket on Polygon, live Hyperliquid perp hedge.
+
+### 1. Generate the three operator wallets
+
+```bash
+# Sui (testnet — Predict has no mainnet deployment yet)
+pnpm --filter svx-bot setup-manager
+#  -> prints + persists the operator address + PredictManager ID to data/operator.json
+
+# Polymarket (Polygon EOA)
+pnpm --filter svx-bot generate-poly-wallet
+#  -> prints the EOA address + private key ONCE. Copy the privkey into POLY_PRIVATE_KEY.
+
+# Hyperliquid (Arbitrum-side EOA)
+pnpm --filter svx-bot generate-hl-wallet
+#  -> prints the EOA address + private key ONCE. Copy into HL_PRIVATE_KEY.
+```
+
+### 2. Polymarket Deposit Wallet (POLY_1271) — one-time
+
+Polymarket's May 2026 rollout requires a smart-contract Deposit Wallet that verifies signatures via EIP-1271. EOA-direct orders are rejected with `maker address not allowed`.
+
+```bash
+# 1. Log in to polymarket.com (Ireland VPN) with the EOA from step 1.
+#    Make ONE tiny manual trade (e.g. $5) to deploy the Deposit Wallet.
+# 2. Find the DW address on your Profile → Wallet page (or in the page HTML
+#    as proxyAddress). Set it as POLY_FUNDER_ADDRESS in env.
+# 3. Re-derive the L2 API key against the DW:
+pnpm --filter svx-bot derive-poly-api-key-1271
+#  -> prints + persists apiKey / secret / passphrase. Copy into
+#     POLY_API_KEY / POLY_API_SECRET / POLY_API_PASSPHRASE.
+```
+
+Full details: [docs/mainnet-runbook.md](docs/mainnet-runbook.md) §1.4.5.
+
+### 3. Fund each wallet
+
+| Leg | Token | Network | Destination | Get it via |
+|---|---|---|---|---|
+| Sui (testnet) | dUSDC | Sui testnet | Operator address | Mysten faucet form (linked in the spec) |
+| Polymarket | pUSD | Polygon | **Funder / Deposit Wallet** | Kraken USDC → Polygon → wrap → send to funder |
+| Polymarket gas | POL | Polygon | Funder | Kraken POL → Polygon |
+| Hyperliquid | USDC | Arbitrum → HL | HL operator | Kraken USDC → Arbitrum → bridge in HL Portfolio |
+
+Polymarket pUSD path (one tx each):
+
+```bash
+# Kraken's "USDC on Polygon" arrives as USDC.e at the EOA (or as native USDC —
+# verify on polygonscan; swap to USDC.e on Quickswap if needed).
+pnpm --filter svx-bot wrap-usdce-to-pusd -- --amount=50 --confirm
+pnpm --filter svx-bot send-pusd-to-proxy -- --to=<funder-addr> --amount=50 --confirm
+pnpm --filter svx-bot verify-poly-wallet
+```
+
+Hyperliquid bridge: log in at app.hyperliquid.xyz with the HL EOA (Ireland VPN), Portfolio → Deposit. Then:
+
+```bash
+pnpm --filter svx-bot verify-hl-wallet
+#  -> should show accountValueUsdc > 0 within ~30s of the bridge tx
+```
+
+### 4. Set Coolify env vars (or local `.env`)
+
+Two services: `bot` (testnet) and `bot-mainnet`. Mainnet-prefixed envs map to the standard names inside the mainnet container.
+
+```bash
+# bot (testnet)
+SUI_PRIVATE_KEY_BECH32=<bech32 from setup-manager>
+OPERATOR_JSON=<contents of data/operator.json>
+PAPER_TRADING=false                  # flip when ready to mint on testnet
+SVX_INSTANCE_LABEL=testnet
+
+# bot-mainnet
+MAINNET_SUI_PRIVATE_KEY_BECH32=<same as above>
+MAINNET_OPERATOR_JSON=<same as above>
+MAINNET_PAPER_TRADING=true           # paper Predict (testnet SVI as pricing only)
+MAINNET_POLY_EXECUTION_ENABLED=true
+MAINNET_POLY_PRIVATE_KEY=<from generate-poly-wallet>
+MAINNET_POLY_FUNDER_ADDRESS=<DW address>
+MAINNET_POLY_SIGNATURE_TYPE=POLY_1271
+MAINNET_POLY_API_KEY=<from derive-poly-api-key-1271>
+MAINNET_POLY_API_SECRET=<…>
+MAINNET_POLY_API_PASSPHRASE=<…>
+MAINNET_HL_EXECUTION_ENABLED=true
+MAINNET_HL_PRIVATE_KEY=<from generate-hl-wallet>
+MAINNET_SVX_INSTANCE_LABEL=mainnet
+```
+
+All non-secret strategy knobs — thresholds, caps, intervals — live in [`packages/svx-bot/src/tunables.ts`](packages/svx-bot/src/tunables.ts). Edit the file, redeploy. **No env-var roulette for strategy params.**
+
+### 5. Boot the stack
+
+```bash
+docker compose up -d
+# bot (4321), bot-mainnet (4321), dashboard (3030)
+```
+
+### 6. Round-trip verification (recommended before un-pausing)
+
+```bash
+pnpm --filter svx-bot force-mint -- --quantity 0.1 --direction up --i-know-what-im-doing
+pnpm --filter svx-bot force-poly-trade -- --usdc 0.5
+pnpm --filter svx-bot force-hl-trade -- --size 0.0001 --side short --confirm --round-trip
+```
+
+Each is a single-tx flush that proves the wallet, the API auth, and the bot's response parser are all wired correctly. If any of these errors out, fix that path before letting the bot run on its own.
+
 ## Operations
 
 ```bash

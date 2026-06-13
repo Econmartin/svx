@@ -224,6 +224,17 @@ export class LedgerStore {
     // their trades so per-strategy PnL + positions can be segregated on
     // the dashboard.
     ensureColumn('strategy', "TEXT NOT NULL DEFAULT 'poly_arb'");
+
+    // Backfill: pre-2026-05-20 vol-arb trades never had their `settled` flag
+    // flipped when the HL leg closed, leaving them stuck in `openTrades()`
+    // and inflating the generic openPositionCount feeding the risk gate.
+    // Idempotent — only matches rows still in the broken state.
+    this.db.exec(
+      `UPDATE trades
+         SET settled = 1,
+             settled_at_ms = COALESCE(settled_at_ms, hl_closed_at_ms)
+       WHERE strategy = 'vol_arb' AND hl_status = 'closed' AND settled = 0`,
+    );
   }
 
   close(): void {
@@ -670,7 +681,13 @@ export class LedgerStore {
       .run(leg.asset, leg.orderId, leg.size, leg.side, leg.openPrice, leg.status, tradeId);
   }
 
-  /** Record close of an HL leg + final realized PnL. */
+  /** Record close of an HL leg + final realized PnL.
+   *
+   * Vol-arb trades have only an HL leg, so closing HL completes the trade —
+   * also flip `settled=1` so they exit `openTrades()` (which the generic risk
+   * gate keys on via `openPositionCount`). pnl_usdc is left NULL: vol-arb PnL
+   * is tracked via `hl_pnl_usdc` + `realizedHlPnlSince`, and we don't want it
+   * to leak into the Sui-leg `realizedPnlSince` aggregation. */
   closeHlLeg(
     tradeId: string,
     leg: {
@@ -684,10 +701,19 @@ export class LedgerStore {
       .prepare(
         `UPDATE trades SET hl_close_price = ?, hl_pnl_usdc = ?,
                             hl_funding_paid_usdc = ?, hl_closed_at_ms = ?,
-                            hl_status = 'closed'
+                            hl_status = 'closed',
+                            settled = CASE WHEN strategy = 'vol_arb' THEN 1 ELSE settled END,
+                            settled_at_ms = CASE WHEN strategy = 'vol_arb' AND settled_at_ms IS NULL THEN ? ELSE settled_at_ms END
          WHERE id = ?`,
       )
-      .run(leg.closePrice, leg.pnlUsdc, leg.fundingPaidUsdc, leg.closedAtMs, tradeId);
+      .run(
+        leg.closePrice,
+        leg.pnlUsdc,
+        leg.fundingPaidUsdc,
+        leg.closedAtMs,
+        leg.closedAtMs,
+        tradeId,
+      );
   }
 
   /** Open HL hedges — used to close on settlement and compute current exposure. */

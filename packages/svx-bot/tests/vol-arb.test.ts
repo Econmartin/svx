@@ -10,7 +10,10 @@
  *   - RiskGate.checkVolArb: cap + daily-loss enforcement
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   appendMid,
   btcSizeForUsdNotional,
@@ -24,7 +27,7 @@ import {
 } from '../src/strategy/vol-arb.js';
 import { RiskGate } from '../src/exec/risk.js';
 import type { SvxConfig } from '../src/config.js';
-import type { LedgerStore } from '../src/ledger/store.js';
+import { LedgerStore } from '../src/ledger/store.js';
 import type { OracleSnapshot } from 'svx-shared/types';
 
 const baseCfg: SvxConfig = {
@@ -52,6 +55,8 @@ const baseCfg: SvxConfig = {
   maxPolyPositionUsdc: 2,
   maxOpenPolyPositions: 5,
   polyMinBookDepthShares: 20,
+  polyMinOrderUsdc: 0.5,
+  polyFillFailedCooldownMs: 5 * 60_000,
   dailyPolyLossLimitUsdc: 10,
   polyFillTimeoutMs: 30_000,
   polySignatureType: 'EOA',
@@ -401,6 +406,136 @@ describe('btcSizeForUsdNotional', () => {
 
   it('returns 0 when price is zero (safety)', () => {
     expect(btcSizeForUsdNotional(100, 0)).toBe(0);
+  });
+});
+
+describe('LedgerStore vol-arb settle behavior', () => {
+  let tmp: string;
+  let dbPath: string;
+  let ledger: LedgerStore;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svx-volarb-'));
+    dbPath = path.join(tmp, 'svx.sqlite');
+    ledger = new LedgerStore(dbPath);
+  });
+  afterEach(() => {
+    ledger.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function insertVolArbTrade(): string {
+    return ledger.insertTrade({
+      signalId: 's',
+      timestampMs: 1_700_000_000_000,
+      mode: 'live',
+      oracleId: 'oracle-x',
+      underlyingAsset: 'BTC',
+      expiryMs: 1_700_000_900_000,
+      strike: 80_000,
+      direction: 'up',
+      quantityDusdc: 0,
+      costPrice: 0,
+      costUsdc: 0,
+      settled: false,
+      strategy: 'vol_arb',
+    });
+  }
+
+  it('closeHlLeg flips settled=1 for vol_arb (so they leave openTrades)', () => {
+    const id = insertVolArbTrade();
+    ledger.recordHlLeg(id, {
+      asset: 'BTC',
+      orderId: 'o1',
+      size: 0.0001,
+      side: 'long',
+      openPrice: 80_000,
+      status: 'open',
+    });
+    expect(ledger.openTrades().map((t) => t.id)).toContain(id);
+
+    ledger.closeHlLeg(id, {
+      closePrice: 80_500,
+      pnlUsdc: 0.05,
+      fundingPaidUsdc: 0,
+      closedAtMs: 1_700_001_000_000,
+    });
+
+    expect(ledger.openTrades().map((t) => t.id)).not.toContain(id);
+    expect(ledger.closedTrades().map((t) => t.id)).toContain(id);
+  });
+
+  it('closeHlLeg leaves pnl_usdc NULL on vol_arb (Sui-leg realizedPnl unaffected)', () => {
+    const id = insertVolArbTrade();
+    ledger.recordHlLeg(id, {
+      asset: 'BTC', orderId: 'o', size: 0.0001, side: 'long', openPrice: 80_000, status: 'open',
+    });
+    ledger.closeHlLeg(id, {
+      closePrice: 80_500, pnlUsdc: 0.05, fundingPaidUsdc: 0, closedAtMs: 1_700_001_000_000,
+    });
+    // Sui-leg PnL aggregation should NOT pick up vol-arb PnL.
+    expect(ledger.realizedPnlSince(0)).toBe(0);
+    // But the HL-leg aggregation does.
+    expect(ledger.realizedHlPnlSince(0)).toBeCloseTo(0.05, 6);
+  });
+
+  it('closeHlLeg keeps settled=0 on poly_arb (HL is just a hedge, Poly still open)', () => {
+    const id = ledger.insertTrade({
+      signalId: 's',
+      timestampMs: 1_700_000_000_000,
+      mode: 'live',
+      oracleId: 'oracle-x',
+      underlyingAsset: 'BTC',
+      expiryMs: 1_700_000_900_000,
+      strike: 80_000,
+      direction: 'up',
+      quantityDusdc: 0,
+      costPrice: 0,
+      costUsdc: 0,
+      settled: false,
+      strategy: 'poly_arb',
+    });
+    ledger.recordHlLeg(id, {
+      asset: 'BTC', orderId: 'o', size: 0.0001, side: 'long', openPrice: 80_000, status: 'open',
+    });
+    ledger.closeHlLeg(id, {
+      closePrice: 80_500, pnlUsdc: 0.05, fundingPaidUsdc: 0, closedAtMs: 1_700_001_000_000,
+    });
+    // Poly leg still open → trade should remain in openTrades.
+    expect(ledger.openTrades().map((t) => t.id)).toContain(id);
+  });
+
+  it('boot-time backfill settles pre-existing vol_arb rows with hl_status=closed', () => {
+    const id = insertVolArbTrade();
+    // Simulate the old buggy state: open then directly mutate hl_status to
+    // 'closed' via raw SQL, bypassing closeHlLeg (mimicking the on-disk
+    // database written by the pre-fix bot).
+    ledger.recordHlLeg(id, {
+      asset: 'BTC', orderId: 'o', size: 0.0001, side: 'long', openPrice: 80_000, status: 'open',
+    });
+    // Direct UPDATE bypassing closeHlLeg.
+    // @ts-expect-error reach into private db for the legacy-state simulation.
+    ledger.db
+      .prepare(
+        `UPDATE trades SET hl_status='closed', hl_close_price=80500, hl_pnl_usdc=0.05,
+                            hl_funding_paid_usdc=0, hl_closed_at_ms=1700001000000,
+                            settled=0
+         WHERE id=?`,
+      )
+      .run(id);
+    expect(ledger.openTrades().map((t) => t.id)).toContain(id);
+    ledger.close();
+
+    // Reopen → constructor runs the backfill.
+    const reopened = new LedgerStore(dbPath);
+    try {
+      expect(reopened.openTrades().map((t) => t.id)).not.toContain(id);
+      expect(reopened.closedTrades().map((t) => t.id)).toContain(id);
+    } finally {
+      reopened.close();
+    }
+    // Reassign so afterEach can close cleanly.
+    ledger = new LedgerStore(dbPath);
   });
 });
 

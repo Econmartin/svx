@@ -59,6 +59,12 @@ export const TUNABLES = {
   maxOpenPolyPositions: 5,
   /** Min shares at top-of-book before we'll fill — avoids partial-fill drift. */
   polyMinBookDepthShares: 20,
+  /** Floor on a sized poly order. The depth-clamp can shrink an order below
+   *  what's worth spending CLOB fees on; below this we skip the market. */
+  polyMinOrderUsdc: 0.5,
+  /** After a fill_failed on a given token, skip that token for this long.
+   *  Stops the bot from hammering the same FOK-failing book every 15s. */
+  polyFillFailedCooldownMs: 5 * 60_000,
   dailyPolyLossLimitUsdc: 10,
   /** Max wait for the Polymarket leg to fill. */
   polyFillTimeoutMs: 30_000,

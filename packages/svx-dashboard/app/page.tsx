@@ -10,6 +10,7 @@ import { HealthPanel } from '@/components/HealthPanel';
 import { PageIntro } from '@/components/PageIntro';
 import { PnlChart } from '@/components/PnlChart';
 import { StrategyStats } from '@/components/StrategyStats';
+import { EdgeCaptureChart } from '@/components/EdgeCaptureChart';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -132,6 +133,28 @@ export default function OverviewPage() {
           </CardHeader>
           <CardContent>
             <StrategyStats closed={closedForChart} isMainnet={isMainnet} />
+          </CardContent>
+        </Card>
+      )}
+
+      {isMainnet && closedForChart.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Edge captured — math validation</CardTitle>
+            <p className="text-xs text-muted mt-0.5 leading-relaxed">
+              For each closed trade: <strong>entry edge</strong> (the
+              Predict − Polymarket probability gap the bot saw when it pulled
+              the trigger) vs <strong>realized return on cost</strong>. If the
+              math is right, the least-squares fit line tilts up to the right —
+              deeper edges identified deliver larger realized returns. A flat
+              or down-sloped fit means the bot is trading noise.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <EdgeCaptureChart
+              closed={closedForChart}
+              spreadThreshold={status?.spreadThreshold ?? 0.03}
+            />
           </CardContent>
         </Card>
       )}

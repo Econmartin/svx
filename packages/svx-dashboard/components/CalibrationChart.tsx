@@ -120,19 +120,19 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart margin={{ top: 5, right: 16, left: 0, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1c2230" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" />
             <XAxis
               type="number"
               dataKey="predicted"
               domain={[0, 1]}
               ticks={[0, 0.25, 0.5, 0.75, 1]}
               tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-              tick={{ fontSize: 11, fill: '#8c93a3' }}
+              tick={{ fontSize: 11, fill: '#7a8579' }}
               label={{
                 value: 'Predicted win probability',
                 position: 'bottom',
                 offset: 5,
-                fill: '#8c93a3',
+                fill: '#7a8579',
                 fontSize: 11,
               }}
             />
@@ -142,14 +142,14 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
               domain={[0, 1]}
               ticks={[0, 0.25, 0.5, 0.75, 1]}
               tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-              tick={{ fontSize: 11, fill: '#8c93a3' }}
+              tick={{ fontSize: 11, fill: '#7a8579' }}
               width={50}
               label={{
                 value: 'Actual hit rate',
                 angle: -90,
                 position: 'left',
                 offset: -10,
-                fill: '#8c93a3',
+                fill: '#7a8579',
                 fontSize: 11,
               }}
             />
@@ -157,8 +157,8 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
             <Tooltip
               cursor={{ strokeDasharray: '3 3' }}
               contentStyle={{
-                background: '#11141b',
-                border: '1px solid #1c2230',
+                background: '#0c1110',
+                border: '1px solid #1a2520',
                 borderRadius: 6,
                 fontSize: 12,
               }}
@@ -168,8 +168,8 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
               }}
               labelFormatter={() => ''}
             />
-            <ReferenceLine y={0} stroke="#2a3142" />
-            <ReferenceLine x={0} stroke="#2a3142" />
+            <ReferenceLine y={0} stroke="#28342e" />
+            <ReferenceLine x={0} stroke="#28342e" />
             {/* y = x diagonal — perfect calibration. */}
             <Line
               data={diagonal}
@@ -190,7 +190,7 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
                 // red; under-confident (above diagonal) = blue.
                 const miss = b.actual - b.predicted;
                 const color =
-                  Math.abs(miss) < 0.05 ? '#10b981' : miss < 0 ? '#ef4444' : '#7dd3fc';
+                  Math.abs(miss) < 0.05 ? '#1eff8a' : miss < 0 ? '#ef4444' : '#5af9fb';
                 return <Cell key={i} fill={color} fillOpacity={0.8} />;
               })}
             </Scatter>

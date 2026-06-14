@@ -87,7 +87,7 @@ export function PnlChart({
     points.push({ ts: nowMs, total: last.total, poly: last.poly, hl: last.hl });
   }
 
-  const totalColor = cumTotal >= 0 ? '#10b981' : '#ef4444';
+  const totalColor = cumTotal >= 0 ? '#1eff8a' : '#ef4444';
 
   // Generate one tick per midnight UTC across the visible time span so the
   // x-axis shows "13 Jun · 14 Jun · 15 Jun" once each instead of recharts'
@@ -120,18 +120,18 @@ export function PnlChart({
               <stop offset="95%" stopColor={totalColor} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1c2230" />
+          <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" />
           <XAxis
             dataKey="ts"
             type="number"
             domain={['auto', 'auto']}
             ticks={spansLessThanADay ? undefined : dayTicks}
             tickFormatter={tickFormat}
-            tick={{ fontSize: 11, fill: '#8c93a3' }}
+            tick={{ fontSize: 11, fill: '#7a8579' }}
             scale="time"
           />
           <YAxis
-            tick={{ fontSize: 11, fill: '#8c93a3' }}
+            tick={{ fontSize: 11, fill: '#7a8579' }}
             domain={['auto', 'auto']}
             tickFormatter={(v) => `${v >= 0 ? '+' : ''}$${v.toFixed(2)}`}
             width={70}
@@ -139,8 +139,8 @@ export function PnlChart({
           <Tooltip
             labelFormatter={(v) => new Date(Number(v)).toLocaleString()}
             contentStyle={{
-              background: '#11141b',
-              border: '1px solid #1c2230',
+              background: '#0c1110',
+              border: '1px solid #1a2520',
               borderRadius: 6,
               fontSize: 12,
             }}
@@ -150,7 +150,7 @@ export function PnlChart({
             ]}
           />
           {showLegs && <Legend wrapperStyle={{ fontSize: 12 }} />}
-          <ReferenceLine y={0} stroke="#2a3142" strokeDasharray="2 2" />
+          <ReferenceLine y={0} stroke="#28342e" strokeDasharray="2 2" />
           <Area
             type="stepAfter"
             dataKey="total"
@@ -160,7 +160,7 @@ export function PnlChart({
             fill="url(#totalFill)"
           />
           {showLegs && (
-            <Line type="stepAfter" dataKey="poly" name="Polymarket" stroke="#7dd3fc" strokeWidth={1.5} dot={false} />
+            <Line type="stepAfter" dataKey="poly" name="Polymarket" stroke="#5af9fb" strokeWidth={1.5} dot={false} />
           )}
           {showLegs && (
             <Line type="stepAfter" dataKey="hl" name="Hyperliquid hedge" stroke="#f59e0b" strokeWidth={1.5} dot={false} />

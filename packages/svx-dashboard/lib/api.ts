@@ -121,6 +121,13 @@ export interface TradeRecord {
   settled: boolean;
   payoutUsdc?: number;
   pnlUsdc?: number;
+  // Analytics — captured at execution time for math-validation / calibration.
+  msToExpiryAtExec?: number;
+  predictProbAtExec?: number;
+  polyAskAtExec?: number;
+  predictIvAtExec?: number;
+  /** Predict-vs-Polymarket spread the bot saw when it pulled the trigger. */
+  edgeAtExec?: number;
   // Polymarket execution leg (populated when POLY_EXECUTION_ENABLED).
   polyNetwork?: 'amoy' | 'polygon';
   polyTokenId?: string;

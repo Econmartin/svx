@@ -36,7 +36,12 @@ export function PnlChart({
   closed: TradeRecord[];
   showLegs: boolean;
 }) {
-  const sorted = closed.slice().sort((a, b) => a.timestampMs - b.timestampMs);
+  // Settlement time is the x-axis we plot on, so it has to be the sort key
+  // too — otherwise trades that opened in order but settled out of order
+  // produce a backwards-jumping line. (Was sorting by timestampMs and
+  // plotting at polySettledAtMs — they're different timestamps.)
+  const pointTs = (t: TradeRecord): number => t.polySettledAtMs ?? t.timestampMs;
+  const sorted = closed.slice().sort((a, b) => pointTs(a) - pointTs(b));
   const points: PnlPoint[] = [];
   let cumTotal = 0;
   let cumPoly = 0;
@@ -45,7 +50,7 @@ export function PnlChart({
   // (otherwise the first data point IS the first PnL value and the line just
   // appears mid-air).
   if (sorted.length > 0) {
-    const seedTs = (sorted[0]!.polySettledAtMs ?? sorted[0]!.timestampMs) - 1;
+    const seedTs = pointTs(sorted[0]!) - 1;
     points.push({ ts: seedTs, total: 0, poly: showLegs ? 0 : undefined, hl: showLegs ? 0 : undefined });
   }
   for (const t of sorted) {
@@ -58,7 +63,7 @@ export function PnlChart({
     cumHl += hlPnl;
     cumTotal += showLegs ? polyPnl + hlPnl : sui;
     points.push({
-      ts: t.polySettledAtMs ?? t.timestampMs,
+      ts: pointTs(t),
       total: cumTotal,
       poly: showLegs ? cumPoly : undefined,
       hl: showLegs ? cumHl : undefined,
@@ -84,6 +89,27 @@ export function PnlChart({
 
   const totalColor = cumTotal >= 0 ? '#10b981' : '#ef4444';
 
+  // Generate one tick per midnight UTC across the visible time span so the
+  // x-axis shows "13 Jun · 14 Jun · 15 Jun" once each instead of recharts'
+  // auto-picker producing several same-day labels.
+  const dayTicks: number[] = [];
+  if (points.length > 0) {
+    const firstTs = points[0]!.ts;
+    const lastTs = points[points.length - 1]!.ts;
+    // Snap to UTC midnight on the day BEFORE the first point so the line's
+    // seed point lands inside the tick range.
+    const startDay = new Date(firstTs);
+    startDay.setUTCHours(0, 0, 0, 0);
+    for (let t = startDay.getTime(); t <= lastTs; t += 24 * 3600_000) {
+      dayTicks.push(t);
+    }
+  }
+  // For sub-day spans, fall back to hourly ticks so we don't get a blank axis.
+  const spansLessThanADay = points.length > 1 && points[points.length - 1]!.ts - points[0]!.ts < 24 * 3600_000;
+  const tickFormat = spansLessThanADay
+    ? (v: number) => new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    : (v: number) => new Date(v).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
   return (
     <div className="h-64">
       <ResponsiveContainer width="100%" height="100%">
@@ -99,9 +125,8 @@ export function PnlChart({
             dataKey="ts"
             type="number"
             domain={['auto', 'auto']}
-            tickFormatter={(v) =>
-              new Date(v).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-            }
+            ticks={spansLessThanADay ? undefined : dayTicks}
+            tickFormatter={tickFormat}
             tick={{ fontSize: 11, fill: '#8c93a3' }}
             scale="time"
           />

@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { HealthPanel } from '@/components/HealthPanel';
 import { PageIntro } from '@/components/PageIntro';
 import { PnlChart } from '@/components/PnlChart';
+import { StrategyStats } from '@/components/StrategyStats';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -118,6 +119,22 @@ export default function OverviewPage() {
           <PnlChart closed={closedForChart} showLegs={isMainnet} />
         </CardContent>
       </Card>
+
+      {closedForChart.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Strategy stats</CardTitle>
+            <p className="text-xs text-muted mt-0.5">
+              Derived from the closed-trade tape. Distribution shape, downside,
+              throughput — the metrics that say <em>"is this working consistently?"</em>
+              beyond top-line PnL.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <StrategyStats closed={closedForChart} isMainnet={isMainnet} />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

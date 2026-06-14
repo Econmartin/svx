@@ -5,18 +5,24 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        bg: '#0b0d12',
-        surface: '#11141b',
-        'surface-elevated': '#161a23',
-        border: '#1c2230',
-        'border-strong': '#2a3142',
-        muted: '#8c93a3',
-        'muted-strong': '#b1b6c5',
-        accent: '#7dd3fc',
-        'accent-strong': '#38bdf8',
-        win: '#10b981',
-        loss: '#ef4444',
-        warn: '#f59e0b',
+        // Terminal-trader palette — near-black with a vibrant green primary.
+        // Reference aesthetic: modern crypto perp trader (Hyperliquid, dYdX,
+        // BlockTrade), not Bloomberg amber.
+        bg: '#06090a',
+        surface: '#0c1110',
+        'surface-elevated': '#121916',
+        'surface-hover': '#172220',
+        border: '#1a2520',
+        'border-strong': '#28342e',
+        muted: '#7a8579',
+        'muted-strong': '#a8b3a5',
+        fg: '#e6efe8',
+        accent: '#1eff8a',
+        'accent-strong': '#10ff7d',
+        'accent-soft': '#1eff8a14',
+        win: '#1eff8a',
+        loss: '#ff4e4e',
+        warn: '#ffb648',
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'Menlo', 'monospace'],
@@ -31,10 +37,21 @@ module.exports = {
           from: { opacity: '0' },
           to: { opacity: '1' },
         },
+        'pulse-glow': {
+          '0%, 100%': { boxShadow: '0 0 0 0 rgb(30 255 138 / 0.4)' },
+          '50%': { boxShadow: '0 0 0 4px rgb(30 255 138 / 0)' },
+        },
       },
       animation: {
         shimmer: 'shimmer 2s linear infinite',
         'fade-in': 'fade-in 0.2s ease-out',
+        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+      },
+      backgroundImage: {
+        'glow-corner-tl':
+          'radial-gradient(circle at 0% 0%, rgba(30,255,138,0.10) 0%, rgba(30,255,138,0) 50%)',
+        'glow-corner-br':
+          'radial-gradient(circle at 100% 100%, rgba(30,255,138,0.06) 0%, rgba(30,255,138,0) 60%)',
       },
     },
   },

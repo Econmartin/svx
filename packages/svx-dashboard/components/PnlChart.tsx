@@ -41,6 +41,13 @@ export function PnlChart({
   let cumTotal = 0;
   let cumPoly = 0;
   let cumHl = 0;
+  // Seed at zero just before the first trade so the line starts on the x-axis
+  // (otherwise the first data point IS the first PnL value and the line just
+  // appears mid-air).
+  if (sorted.length > 0) {
+    const seedTs = (sorted[0]!.polySettledAtMs ?? sorted[0]!.timestampMs) - 1;
+    points.push({ ts: seedTs, total: 0, poly: showLegs ? 0 : undefined, hl: showLegs ? 0 : undefined });
+  }
   for (const t of sorted) {
     const polyPnl = t.polyPnlUsdc ?? 0;
     const hlPnl = t.hlPnlUsdc ?? 0;
@@ -64,6 +71,15 @@ export function PnlChart({
         No settled trades yet — chart populates after the first settlement.
       </div>
     );
+  }
+
+  // "Now" anchor — extend the staircase to the current time so the line ends
+  // at the right edge of the chart, not at the last trade's timestamp.
+  // Skipped if the last trade IS within ~30s of now (avoids a stub segment).
+  const last = points[points.length - 1]!;
+  const nowMs = Date.now();
+  if (nowMs - last.ts > 30_000) {
+    points.push({ ts: nowMs, total: last.total, poly: last.poly, hl: last.hl });
   }
 
   const totalColor = cumTotal >= 0 ? '#10b981' : '#ef4444';
@@ -111,7 +127,7 @@ export function PnlChart({
           {showLegs && <Legend wrapperStyle={{ fontSize: 12 }} />}
           <ReferenceLine y={0} stroke="#2a3142" strokeDasharray="2 2" />
           <Area
-            type="monotone"
+            type="stepAfter"
             dataKey="total"
             name="Combined"
             stroke={totalColor}
@@ -119,10 +135,10 @@ export function PnlChart({
             fill="url(#totalFill)"
           />
           {showLegs && (
-            <Line type="monotone" dataKey="poly" name="Polymarket" stroke="#7dd3fc" strokeWidth={1.5} dot={false} />
+            <Line type="stepAfter" dataKey="poly" name="Polymarket" stroke="#7dd3fc" strokeWidth={1.5} dot={false} />
           )}
           {showLegs && (
-            <Line type="monotone" dataKey="hl" name="Hyperliquid hedge" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
+            <Line type="stepAfter" dataKey="hl" name="Hyperliquid hedge" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
           )}
         </ComposedChart>
       </ResponsiveContainer>

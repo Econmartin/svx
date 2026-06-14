@@ -11,6 +11,7 @@ import { PageIntro } from '@/components/PageIntro';
 import { PnlChart } from '@/components/PnlChart';
 import { StrategyStats } from '@/components/StrategyStats';
 import { EdgeCaptureChart } from '@/components/EdgeCaptureChart';
+import { CalibrationChart } from '@/components/CalibrationChart';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -137,26 +138,47 @@ export default function OverviewPage() {
         </Card>
       )}
 
-      {isMainnet && closedForChart.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Edge captured — math validation</CardTitle>
-            <p className="text-xs text-muted mt-0.5 leading-relaxed">
-              For each closed trade: <strong>entry edge</strong> (the
-              Predict − Polymarket probability gap the bot saw when it pulled
-              the trigger) vs <strong>realized return on cost</strong>. If the
-              math is right, the least-squares fit line tilts up to the right —
-              deeper edges identified deliver larger realized returns. A flat
-              or down-sloped fit means the bot is trading noise.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <EdgeCaptureChart
-              closed={closedForChart}
-              spreadThreshold={status?.spreadThreshold ?? 0.03}
-            />
-          </CardContent>
-        </Card>
+      {closedForChart.length > 0 && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {isMainnet && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Edge captured — math validation</CardTitle>
+                <p className="text-xs text-muted mt-0.5 leading-relaxed">
+                  For each closed trade: <strong>entry edge</strong> (the
+                  Predict − Polymarket probability gap the bot saw when it pulled
+                  the trigger) vs <strong>realized return on cost</strong>. If the
+                  math is right, the least-squares fit line tilts up to the right —
+                  deeper edges identified deliver larger realized returns. A flat
+                  or down-sloped fit means the bot is trading noise.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <EdgeCaptureChart
+                  closed={closedForChart}
+                  spreadThreshold={status?.spreadThreshold ?? 0.03}
+                />
+              </CardContent>
+            </Card>
+          )}
+          <Card>
+            <CardHeader>
+              <CardTitle>Calibration — SVI feeder stress test</CardTitle>
+              <p className="text-xs text-muted mt-0.5 leading-relaxed">
+                For each closed trade we bin by <strong>predicted win
+                probability</strong> (Predict's SVI surface, evaluated at the
+                trade's strike) and compute the <strong>actual hit rate</strong>{' '}
+                in that bin. Points sitting on the dashed <em>y = x</em> diagonal
+                mean Predict's probabilities are well-calibrated — when it says
+                "70%," 70% of those trades win. The spec called vol-arb{' '}
+                <em>"a live stress test of the SVI feeder"</em>; this is the result.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <CalibrationChart closed={closedForChart} isMainnet={isMainnet} />
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       <Card>

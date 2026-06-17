@@ -115,6 +115,8 @@ const Schema = z.object({
   dailyPolyLossLimitUsdc: z.number().positive().default(10),
   /** Max time (ms) to wait for the Polymarket leg to fill before we abort. */
   polyFillTimeoutMs: z.number().int().positive().default(30_000),
+  /** Auto-abandon stuck poly trades after this many days. */
+  polyStaleSettlementDays: z.number().positive().default(14),
   /**
    * Polymarket signature mode:
    *   - 'EOA':              direct EOA — works only for whitelisted addresses.
@@ -299,6 +301,7 @@ export function loadConfig(): SvxConfig {
     polyFillFailedCooldownMs: TUNABLES.polyFillFailedCooldownMs,
     dailyPolyLossLimitUsdc: TUNABLES.dailyPolyLossLimitUsdc,
     polyFillTimeoutMs: TUNABLES.polyFillTimeoutMs,
+    polyStaleSettlementDays: TUNABLES.polyStaleSettlementDays,
     hlHedgeAsset: TUNABLES.hlHedgeAsset,
     hlMinOrderUsdc: TUNABLES.hlMinOrderUsdc,
     hlTakerFeeRate: TUNABLES.hlTakerFeeRate,

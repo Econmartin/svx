@@ -660,6 +660,37 @@ export class LedgerStore {
   }
 
   /**
+   * Abandon Polymarket trades that have been "filled but unsettled" for
+   * longer than `maxAgeMs`. Marks them as settled with outcome='abandoned',
+   * payout=0, PnL=-cost. Prevents stuck rows from pinning the
+   * maxOpenPolyPositions counter indefinitely when UMA never resolves +
+   * mid-life exit never triggers. Returns the number of rows touched.
+   *
+   * Recorded as a loss (payout=0, pnl=-cost) so the strategy stats reflect
+   * the real worst-case rather than an optimistic ignore. The audit trail
+   * survives via poly_settlement_outcome='abandoned'.
+   */
+  abandonStalePolyTrades(maxAgeMs: number, nowMs: number): number {
+    const cutoff = nowMs - maxAgeMs;
+    const r = this.db
+      .prepare(
+        `UPDATE trades
+            SET poly_settled = 1,
+                poly_settled_at_ms = ?,
+                poly_settlement_outcome = 'abandoned',
+                poly_payout_usdc = 0,
+                poly_pnl_usdc = -COALESCE(poly_cost_usdc, 0),
+                poly_redeem_tx_hash = 'abandoned',
+                poly_redeem_status = 'success'
+          WHERE poly_status = 'filled'
+            AND poly_settled = 0
+            AND ts_ms < ?`,
+      )
+      .run(nowMs, cutoff);
+    return r.changes;
+  }
+
+  /**
    * Winning Polymarket positions that haven't been redeemed on-chain yet.
    * Losing positions (`poly_payout_usdc = 0`) are skipped — redeeming them
    * just burns gas. Failed redeems (`poly_redeem_status='failed'`) are also

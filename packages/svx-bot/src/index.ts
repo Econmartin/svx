@@ -556,6 +556,11 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     }
   }
 
+  // Dedupe per-match risk-block log lines within a single loop iteration.
+  // With dozens of matches per loop, an unchanging cap-hit reason would
+  // otherwise log identically every 15s × every match — drowns real errors.
+  const loggedRiskReasons = new Set<string>();
+
   for (const match of matches) {
     const oracleSnap = oracleSnapshots.get(match.oracle.oracleId);
     if (!oracleSnap) continue;
@@ -744,8 +749,18 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           openPolyPositionCount: ledger.countOpenPolyPositions(),
         });
         if (!polyRisk.ok) {
-          log.info('svx.poly.risk_blocked', { reason: polyRisk.reason });
-          ledger.updateSignalAction(sigId, 'failed', `poly_risk:${polyRisk.reason}`);
+          // Log this reason only once per loop iteration — the same cap-hit
+          // would otherwise fire on every match (often 20+ per loop) and
+          // bury any real errors that show up at the same time.
+          const reason = polyRisk.reason ?? 'unknown';
+          if (!loggedRiskReasons.has(reason)) {
+            log.info('svx.poly.risk_blocked', {
+              reason,
+              note: 'subsequent matches this loop suppressed',
+            });
+            loggedRiskReasons.add(reason);
+          }
+          ledger.updateSignalAction(sigId, 'failed', `poly_risk:${reason}`);
           continue;
         }
 
@@ -1099,6 +1114,18 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     if (r.deletedSignals + r.deletedSvi + r.deletedPoly + r.deletedNav > 0) {
       log.info('svx.ledger.pruned', r);
       ledger.vacuum();
+    }
+    // Auto-abandon poly trades stuck as filled+unsettled past the staleness
+    // window. Stops them from pinning maxOpenPolyPositions forever when UMA
+    // never resolves and mid-life-exit never triggers. Recorded as a
+    // realized loss (payout=0, pnl=-cost) so the audit trail is honest.
+    const staleAgeMs = cfg.polyStaleSettlementDays * 24 * 3600_000;
+    const abandoned = ledger.abandonStalePolyTrades(staleAgeMs, Date.now());
+    if (abandoned > 0) {
+      log.warn('svx.poly.abandoned_stale', {
+        count: abandoned,
+        olderThanDays: cfg.polyStaleSettlementDays,
+      });
     }
     state.lastPruneAtMs = Date.now();
   }

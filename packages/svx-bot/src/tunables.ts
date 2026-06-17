@@ -82,6 +82,12 @@ export const TUNABLES = {
    *  of $10". The bot pre-checks `usdNotional < hlMinOrderUsdc` and skips
    *  the submission cleanly so we don't error-spam every 2s. */
   hlMinOrderUsdc: 10,
+  /** Hyperliquid taker fee rate as a decimal. Standard tier is 0.00035
+   *  (3.5 bps). Lower with HYPE stake / volume tiers — adjust to your
+   *  actual effective rate so the PnL accounting matches what your wallet
+   *  shows. Applied to both legs (open + close) because IOC orders are
+   *  always taker. Deducted from hl_pnl_usdc on close. */
+  hlTakerFeeRate: 0.00035,
   /** Per-trade USD cap on HL hedge legs. Must be ≥ hlMinOrderUsdc or every
    *  hedge attempt gets rejected; was 2 (below HL min), bumped to 12. */
   maxHlPerTradeUsdc: 12,

@@ -111,9 +111,15 @@ export default function OverviewPage() {
           <div>
             <CardTitle>Cumulative realized PnL</CardTitle>
             <p className="text-xs text-muted mt-0.5">
-              {isMainnet
-                ? 'Combined (Polymarket + Hyperliquid hedge) = pure-vol PnL.'
-                : 'Sui-side dUSDC realized PnL on Predict.'}
+              {isMainnet ? (
+                <>
+                  Combined (Polymarket + Hyperliquid hedge) = pure-vol PnL.{' '}
+                  <span className="text-fg/80">Net of HL taker fees + funding</span> —
+                  drag is broken out below.
+                </>
+              ) : (
+                'Sui-side dUSDC realized PnL on Predict.'
+              )}
             </p>
           </div>
         </CardHeader>
@@ -134,6 +140,37 @@ export default function OverviewPage() {
           </CardHeader>
           <CardContent>
             <StrategyStats closed={closedForChart} isMainnet={isMainnet} />
+            {isMainnet && (status?.hlFeesUsdc || status?.hlFundingUsdc) ? (
+              <div className="mt-3 rounded border border-border bg-surface-elevated/50 px-4 py-2.5 text-xs leading-relaxed">
+                <span className="text-muted uppercase tracking-wider text-[10px] mr-2">
+                  HL cost drag
+                </span>
+                <span className="font-mono tabular-nums">
+                  fees{' '}
+                  <span className="text-loss">
+                    −${(status.hlFeesUsdc ?? 0).toFixed(4)}
+                  </span>
+                  {' · '}
+                  funding{' '}
+                  <span
+                    className={
+                      (status.hlFundingUsdc ?? 0) > 0 ? 'text-loss' : 'text-win'
+                    }
+                  >
+                    {(status.hlFundingUsdc ?? 0) > 0 ? '−' : '+'}$
+                    {Math.abs(status.hlFundingUsdc ?? 0).toFixed(4)}
+                  </span>
+                  {' · '}
+                  total{' '}
+                  <span className="text-loss">
+                    −${((status.hlFeesUsdc ?? 0) + Math.max(0, status.hlFundingUsdc ?? 0)).toFixed(4)}
+                  </span>
+                </span>
+                <span className="text-muted ml-2">
+                  — already subtracted from chart + stats above. <em>This is what would have been "missing" if we only counted price PnL.</em>
+                </span>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       )}

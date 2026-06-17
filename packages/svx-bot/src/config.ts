@@ -149,6 +149,8 @@ const Schema = z.object({
   /** Hyperliquid minimum order value (USD). Pre-check that skips HL
    *  submissions below this so the bot doesn't error-spam every loop. */
   hlMinOrderUsdc: z.number().positive().default(10),
+  /** Hyperliquid taker fee rate (decimal). Deducted from realized HL PnL. */
+  hlTakerFeeRate: z.number().nonnegative().max(0.01).default(0.00035),
   /** Per-trade USD notional cap on the HL leg. Bounds the hedge size so a
    *  short-expiry gamma blow-up can't size a hedge bigger than we want. */
   maxHlPerTradeUsdc: z.number().positive().default(2),
@@ -299,6 +301,7 @@ export function loadConfig(): SvxConfig {
     polyFillTimeoutMs: TUNABLES.polyFillTimeoutMs,
     hlHedgeAsset: TUNABLES.hlHedgeAsset,
     hlMinOrderUsdc: TUNABLES.hlMinOrderUsdc,
+    hlTakerFeeRate: TUNABLES.hlTakerFeeRate,
     maxHlPerTradeUsdc: TUNABLES.maxHlPerTradeUsdc,
     maxHlOpenUsdc: TUNABLES.maxHlOpenUsdc,
     dailyHlLossLimitUsdc: TUNABLES.dailyHlLossLimitUsdc,

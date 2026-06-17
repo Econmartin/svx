@@ -51,6 +51,10 @@ export interface BotStatus {
   polyPusdBalance?: number | null;
   polyGasPol?: number | null;
   polyBalanceAtMs?: number | null;
+  /** Cumulative HL taker fees deducted from PnL. */
+  hlFeesUsdc?: number;
+  /** Cumulative HL funding paid (positive) or received (negative). */
+  hlFundingUsdc?: number;
   /** Realized Polymarket-leg PnL across all settled trades (pUSD). */
   realizedPolyPnlUsdc?: number;
   /** Rolling 24h realized Polymarket-leg PnL (pUSD) — feeds the daily limit. */

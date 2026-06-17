@@ -95,6 +95,10 @@ CREATE TABLE IF NOT EXISTS trades (
   hl_status TEXT,
   hl_pnl_usdc REAL,
   hl_funding_paid_usdc REAL,
+  -- HL taker fees on open + close. Stored separately so the audit trail keeps
+  -- gross PnL (hl_pnl_usdc) intact; realizedHlPnlSince subtracts this at query
+  -- time. Added 2026-06-14.
+  hl_fees_usdc REAL,
   hl_closed_at_ms INTEGER,
   -- Strategy tag (additive 2026-05-15). 'poly_arb' for the original
   -- cross-venue strategy, 'vol_arb' for the standalone HL vol strategy.
@@ -223,6 +227,7 @@ export class LedgerStore {
     ensureColumn('hl_status', 'TEXT');
     ensureColumn('hl_pnl_usdc', 'REAL');
     ensureColumn('hl_funding_paid_usdc', 'REAL');
+    ensureColumn('hl_fees_usdc', 'REAL');
     ensureColumn('hl_closed_at_ms', 'INTEGER');
     // Strategy tag (additive 2026-05-15). Existing rows are implicitly
     // 'poly_arb' (the original cross-venue strategy). New strategies tag
@@ -747,15 +752,21 @@ export class LedgerStore {
     tradeId: string,
     leg: {
       closePrice: number;
+      /** GROSS price PnL: (close - open) * size, signed for direction. */
       pnlUsdc: number;
+      /** Cumulative funding actually paid on this position (positive = paid,
+       *  negative = received). Captured from HL position state before close. */
       fundingPaidUsdc: number;
+      /** Estimated taker fees on open + close legs combined. */
+      feesUsdc: number;
       closedAtMs: number;
     },
   ): void {
     this.db
       .prepare(
         `UPDATE trades SET hl_close_price = ?, hl_pnl_usdc = ?,
-                            hl_funding_paid_usdc = ?, hl_closed_at_ms = ?,
+                            hl_funding_paid_usdc = ?, hl_fees_usdc = ?,
+                            hl_closed_at_ms = ?,
                             hl_status = 'closed',
                             settled = CASE WHEN strategy = 'vol_arb' THEN 1 ELSE settled END,
                             settled_at_ms = CASE WHEN strategy = 'vol_arb' AND settled_at_ms IS NULL THEN ? ELSE settled_at_ms END
@@ -765,6 +776,7 @@ export class LedgerStore {
         leg.closePrice,
         leg.pnlUsdc,
         leg.fundingPaidUsdc,
+        leg.feesUsdc,
         leg.closedAtMs,
         leg.closedAtMs,
         tradeId,
@@ -791,13 +803,37 @@ export class LedgerStore {
 
   /** Realized HL PnL since `sinceMs` — feeds the daily HL loss gate. */
   realizedHlPnlSince(sinceMs: number): number {
+    // NET HL PnL = gross price PnL − funding paid − taker fees. Existing rows
+    // pre-2026-06-14 have NULL fees and 0 funding, so COALESCE keeps them
+    // accurate to what was actually recorded at the time.
     const r = this.db
       .prepare<[number], { p: number }>(
-        `SELECT COALESCE(SUM(hl_pnl_usdc), 0) AS p FROM trades
+        `SELECT COALESCE(SUM(
+            COALESCE(hl_pnl_usdc, 0)
+            - COALESCE(hl_funding_paid_usdc, 0)
+            - COALESCE(hl_fees_usdc, 0)
+         ), 0) AS p
+         FROM trades
          WHERE hl_status = 'closed' AND hl_closed_at_ms >= ?`,
       )
       .get(sinceMs);
     return r?.p ?? 0;
+  }
+
+  /** Sum of HL trading costs (fees + funding) across closed trades in the
+   *  window. Surfaces the drag separately from gross PnL so the dashboard
+   *  can show "you'd be up $X if not for fees." */
+  hlCostsSince(sinceMs: number): { feesUsdc: number; fundingUsdc: number } {
+    const r = this.db
+      .prepare<[number], { f: number; g: number }>(
+        `SELECT
+            COALESCE(SUM(COALESCE(hl_fees_usdc, 0)), 0) AS f,
+            COALESCE(SUM(COALESCE(hl_funding_paid_usdc, 0)), 0) AS g
+         FROM trades
+         WHERE hl_status = 'closed' AND hl_closed_at_ms >= ?`,
+      )
+      .get(sinceMs);
+    return { feesUsdc: r?.f ?? 0, fundingUsdc: r?.g ?? 0 };
   }
 
   // ============================================================

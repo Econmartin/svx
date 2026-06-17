@@ -95,6 +95,9 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     // Hyperliquid hedge leg — net of the perp position PnL on each closed trade.
     const realizedHlAllTime = deps.ledger.realizedHlPnlSince(0);
     const realizedHl24h = deps.ledger.realizedHlPnlSince(since24h);
+    // HL trading costs (fees + funding) surfaced separately so the dashboard
+    // can show drag-vs-gross. realizedHlPnl already nets these out.
+    const hlCosts = deps.ledger.hlCostsSince(0);
     const openHlExposureUsdc = deps.ledger.openHlExposureUsdc();
     const pause = deps.ledger.getPause();
     res.json({
@@ -151,6 +154,8 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       openHlExposureUsdc,
       realizedHlPnlUsdc: realizedHlAllTime,
       realizedHlPnl24hUsdc: realizedHl24h,
+      hlFeesUsdc: hlCosts.feesUsdc,
+      hlFundingUsdc: hlCosts.fundingUsdc,
       dailyHlLossLimitUsdc: deps.cfg.dailyHlLossLimitUsdc,
       // Last attempt timestamps — null if bot has never tried this leg since
       // boot. Lets the health panel distinguish "configured but no chance
@@ -165,6 +170,8 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       spreadThreshold: deps.cfg.spreadThreshold,
       // Combined cross-venue PnL — what the demo headline should reference.
       // Poly PnL is pUSD, HL PnL is USDC; both stable-pegged → safe to add.
+      // Combined PnL is NET — realizedHlPnlUsdc already has fees + funding
+      // subtracted via the SUM in realizedHlPnlSince.
       realizedCombinedPnlUsdc: realizedPolyAllTime + realizedHlAllTime,
       realizedCombinedPnl24hUsdc: realizedPoly24h + realizedHl24h,
     });

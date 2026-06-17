@@ -65,6 +65,7 @@ const baseCfg: SvxConfig = {
   hlNetwork: 'mainnet',
   hlHedgeAsset: 'BTC',
   hlMinOrderUsdc: 10,
+  hlTakerFeeRate: 0.00035,
   maxHlPerTradeUsdc: 2,
   maxHlOpenUsdc: 10,
   dailyHlLossLimitUsdc: 5,
@@ -459,6 +460,7 @@ describe('LedgerStore vol-arb settle behavior', () => {
       closePrice: 80_500,
       pnlUsdc: 0.05,
       fundingPaidUsdc: 0,
+      feesUsdc: 0,
       closedAtMs: 1_700_001_000_000,
     });
 
@@ -472,7 +474,7 @@ describe('LedgerStore vol-arb settle behavior', () => {
       asset: 'BTC', orderId: 'o', size: 0.0001, side: 'long', openPrice: 80_000, status: 'open',
     });
     ledger.closeHlLeg(id, {
-      closePrice: 80_500, pnlUsdc: 0.05, fundingPaidUsdc: 0, closedAtMs: 1_700_001_000_000,
+      closePrice: 80_500, pnlUsdc: 0.05, fundingPaidUsdc: 0, feesUsdc: 0, closedAtMs: 1_700_001_000_000,
     });
     // Sui-leg PnL aggregation should NOT pick up vol-arb PnL.
     expect(ledger.realizedPnlSince(0)).toBe(0);
@@ -500,7 +502,7 @@ describe('LedgerStore vol-arb settle behavior', () => {
       asset: 'BTC', orderId: 'o', size: 0.0001, side: 'long', openPrice: 80_000, status: 'open',
     });
     ledger.closeHlLeg(id, {
-      closePrice: 80_500, pnlUsdc: 0.05, fundingPaidUsdc: 0, closedAtMs: 1_700_001_000_000,
+      closePrice: 80_500, pnlUsdc: 0.05, fundingPaidUsdc: 0, feesUsdc: 0, closedAtMs: 1_700_001_000_000,
     });
     // Poly leg still open → trade should remain in openTrades.
     expect(ledger.openTrades().map((t) => t.id)).toContain(id);

@@ -449,7 +449,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     Date.now() - state.lastPolySettlementCheckMs > POLY_SETTLEMENT_CHECK_INTERVAL_MS
   ) {
     try {
-      await reconcilePolySettlements(poly, polyExec, ledger, hlExec);
+      await reconcilePolySettlements(poly, polyExec, ledger, hlExec, cfg);
     } catch (e) {
       log.warn('svx.poly.settlement_loop_error', { err: errMsg(e) });
     }
@@ -1240,6 +1240,13 @@ export async function walkPolyEarlyExits(args: {
       trade.hlOpenPrice != null
     ) {
       try {
+        // Capture funding BEFORE close — once HL settles the close, the
+        // position drops from getOpenPositions() and the funding number is
+        // gone. cumFundingUsdc is signed (positive = paid, negative = received).
+        const fundingAtClose = await readCumFundingForAsset(
+          hlExec,
+          trade.hlAsset ?? 'BTC',
+        );
         const closeFill = await hlExec.closeMarketPerp({
           asset: trade.hlAsset ?? 'BTC',
           originalSide: trade.hlSide,
@@ -1251,16 +1258,26 @@ export async function walkPolyEarlyExits(args: {
             trade.hlSide === 'short'
               ? (trade.hlOpenPrice - closePx) * trade.hlSize
               : (closePx - trade.hlOpenPrice) * trade.hlSize;
+          const feesUsdc = estimateHlFees(
+            trade.hlOpenPrice,
+            closePx,
+            trade.hlSize,
+            cfg.hlTakerFeeRate,
+          );
           ledger.closeHlLeg(trade.id, {
             closePrice: closePx,
             pnlUsdc: hlPnl,
-            fundingPaidUsdc: 0,
+            fundingPaidUsdc: fundingAtClose,
+            feesUsdc,
             closedAtMs: nowMs,
           });
           log.info('svx.poly.early_exit.hl_closed', {
             tradeId: trade.id,
             closePx,
-            hlPnlUsdc: hlPnl.toFixed(4),
+            hlGrossPnlUsdc: hlPnl.toFixed(4),
+            hlFeesUsdc: feesUsdc.toFixed(4),
+            hlFundingUsdc: fundingAtClose.toFixed(4),
+            hlNetPnlUsdc: (hlPnl - feesUsdc - fundingAtClose).toFixed(4),
           });
         } else {
           log.warn('svx.poly.early_exit.hl_close_rejected', {
@@ -1296,6 +1313,7 @@ export async function reconcilePolySettlements(
   polyExec: PolymarketExecClient,
   ledger: LedgerStore,
   hlExec?: HyperliquidExecClient,
+  cfg?: SvxConfig,
 ): Promise<void> {
   const unsettled = ledger.unsettledPolyTrades();
   if (unsettled.length === 0) return;
@@ -1347,6 +1365,10 @@ export async function reconcilePolySettlements(
         trade.hlOpenPrice != null
       ) {
         try {
+          const fundingAtClose = await readCumFundingForAsset(
+            hlExec,
+            trade.hlAsset ?? 'BTC',
+          );
           const closeFill = await hlExec.closeMarketPerp({
             asset: trade.hlAsset ?? 'BTC',
             originalSide: trade.hlSide,
@@ -1360,13 +1382,18 @@ export async function reconcilePolySettlements(
               trade.hlSide === 'short'
                 ? (trade.hlOpenPrice - closePx) * trade.hlSize
                 : (closePx - trade.hlOpenPrice) * trade.hlSize;
-            // Funding paid is not yet wired — leave as 0 for v1 (sub-day
-            // expiries make it negligible). Track via a follow-up if it
-            // becomes material at scale.
+            // Fall back to standard 3.5bps if cfg isn't passed (tests).
+            const feesUsdc = estimateHlFees(
+              trade.hlOpenPrice,
+              closePx,
+              trade.hlSize,
+              cfg?.hlTakerFeeRate ?? 0.00035,
+            );
             ledger.closeHlLeg(trade.id, {
               closePrice: closePx,
               pnlUsdc: hlPnl,
-              fundingPaidUsdc: 0,
+              fundingPaidUsdc: fundingAtClose,
+              feesUsdc,
               closedAtMs: Date.now(),
             });
             log.info('svx.hl.closed', {
@@ -1375,7 +1402,10 @@ export async function reconcilePolySettlements(
               size: trade.hlSize,
               openPx: trade.hlOpenPrice,
               closePx,
-              pnlUsdc: hlPnl.toFixed(4),
+              grossPnlUsdc: hlPnl.toFixed(4),
+              feesUsdc: feesUsdc.toFixed(4),
+              fundingUsdc: fundingAtClose.toFixed(4),
+              netPnlUsdc: (hlPnl - feesUsdc - fundingAtClose).toFixed(4),
             });
           }
         } catch (e) {
@@ -1601,6 +1631,10 @@ async function runVolArbStep(args: {
       }
     } else if (decision.action === 'close' && openPos && openPos.hlSize && openPos.hlSide) {
       try {
+        const fundingAtClose = await readCumFundingForAsset(
+          hlExec,
+          openPos.hlAsset ?? 'BTC',
+        );
         const closeFill = await hlExec.closeMarketPerp({
           asset: openPos.hlAsset ?? 'BTC',
           originalSide: openPos.hlSide,
@@ -1612,17 +1646,27 @@ async function runVolArbStep(args: {
             openPos.hlSide === 'short'
               ? (openPos.hlOpenPrice - closePx) * openPos.hlSize
               : (closePx - openPos.hlOpenPrice) * openPos.hlSize;
+          const feesUsdc = estimateHlFees(
+            openPos.hlOpenPrice,
+            closePx,
+            openPos.hlSize,
+            cfg.hlTakerFeeRate,
+          );
           ledger.closeHlLeg(openPos.id, {
             closePrice: closePx,
             pnlUsdc: pnl,
-            fundingPaidUsdc: 0,
+            fundingPaidUsdc: fundingAtClose,
+            feesUsdc,
             closedAtMs: nowMs,
           });
           acted = true;
           log.info('svx.vol_arb.closed', {
             tradeId: openPos.id,
             reason: decision.reason,
-            pnlUsdc: pnl.toFixed(4),
+            grossPnlUsdc: pnl.toFixed(4),
+            feesUsdc: feesUsdc.toFixed(4),
+            fundingUsdc: fundingAtClose.toFixed(4),
+            netPnlUsdc: (pnl - feesUsdc - fundingAtClose).toFixed(4),
             ageMinutes: (openPosAgeMs! / 60_000).toFixed(1),
           });
         } else {
@@ -1737,6 +1781,39 @@ async function snapshotPolymarket(
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+/**
+ * Read cumulative funding for our position on `asset` before closing, so we
+ * can subtract the actual funding cost from PnL. After the position closes
+ * HL drops it from `getOpenPositions()` and the funding number is gone.
+ *
+ * Returns 0 if the position isn't found (already closed, or HL API hiccupped).
+ */
+async function readCumFundingForAsset(
+  hlExec: HyperliquidExecClient,
+  asset: string,
+): Promise<number> {
+  try {
+    const positions = await hlExec.getOpenPositions();
+    const ours = positions.find((p) => p.asset === asset);
+    return ours?.cumFundingUsdc ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Estimated HL taker fees on open + close legs combined. IOC orders are
+ *  always taker, so both legs pay. */
+function estimateHlFees(
+  openPrice: number,
+  closePrice: number,
+  size: number,
+  takerRate: number,
+): number {
+  const openNotional = openPrice * size;
+  const closeNotional = closePrice * size;
+  return (openNotional + closeNotional) * takerRate;
+}
+
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

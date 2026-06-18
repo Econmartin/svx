@@ -83,9 +83,15 @@ export function EdgeCaptureChart({ closed, spreadThreshold = 0.03 }: Props) {
 
   if (points.length === 0) {
     return (
-      <div className="h-64 flex items-center justify-center text-muted text-sm">
-        Need closed trades with entry-edge data to plot. Populates once mainnet
-        starts settling fills.
+      <div className="h-64 flex items-center justify-center text-center px-6">
+        <div className="space-y-1">
+          <div className="text-sm text-fg/80">No mainnet fills closed yet.</div>
+          <div className="text-xs text-muted leading-relaxed max-w-md">
+            The bot stamps an <span className="font-mono">edgeAtExec</span> on
+            every fill — this chart compares it to realised return once a
+            trade closes (mid-life exit or UMA settlement).
+          </div>
+        </div>
       </div>
     );
   }
@@ -104,7 +110,7 @@ export function EdgeCaptureChart({ closed, spreadThreshold = 0.03 }: Props) {
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart margin={{ top: 5, right: 16, left: 0, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" strokeOpacity={0.5} />
             <XAxis
               type="number"
               dataKey="edge"
@@ -155,7 +161,7 @@ export function EdgeCaptureChart({ closed, spreadThreshold = 0.03 }: Props) {
             />
             <Scatter name="Trades" data={points}>
               {points.map((p, i) => (
-                <Cell key={i} fill={p.win ? '#1eff8a' : '#ef4444'} fillOpacity={0.7} />
+                <Cell key={i} fill={p.win ? '#1eff8a' : '#ff5a5f'} fillOpacity={0.7} />
               ))}
             </Scatter>
             {fitData.length === 2 && (

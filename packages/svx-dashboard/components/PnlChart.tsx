@@ -72,8 +72,16 @@ export function PnlChart({
 
   if (points.length === 0) {
     return (
-      <div className="h-64 flex items-center justify-center text-muted text-sm">
-        No settled trades yet — chart populates after the first settlement.
+      <div className="h-64 flex items-center justify-center text-center px-6">
+        <div className="space-y-1">
+          <div className="text-sm text-fg/80">Waiting on the first settled trade.</div>
+          <div className="text-xs text-muted leading-relaxed max-w-md">
+            On mainnet, that's the first Polymarket fill to either hit{' '}
+            <span className="font-mono">+20%</span> mark profit (mid-life
+            exit) or have its UMA resolution finalised — usually 1–6h after
+            expiry.
+          </div>
+        </div>
       </div>
     );
   }
@@ -87,7 +95,7 @@ export function PnlChart({
     points.push({ ts: nowMs, total: last.total, poly: last.poly, hl: last.hl });
   }
 
-  const totalColor = cumTotal >= 0 ? '#1eff8a' : '#ef4444';
+  const totalColor = cumTotal >= 0 ? '#1eff8a' : '#ff5a5f';
 
   // Generate one tick per midnight UTC across the visible time span so the
   // x-axis shows "13 Jun · 14 Jun · 15 Jun" once each instead of recharts'
@@ -120,7 +128,7 @@ export function PnlChart({
               <stop offset="95%" stopColor={totalColor} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" />
+          <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" strokeOpacity={0.5} />
           <XAxis
             dataKey="ts"
             type="number"

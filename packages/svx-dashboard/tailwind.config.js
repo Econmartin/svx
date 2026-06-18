@@ -21,12 +21,17 @@ module.exports = {
         'accent-strong': '#10ff7d',
         'accent-soft': '#1eff8a14',
         win: '#1eff8a',
-        loss: '#ff4e4e',
+        // Softened from pure web-red #ef4444 — pure red fights green at
+        // small sizes and reads as generic. Slight orange shift settles
+        // it into the green/black palette without losing semantic clarity.
+        loss: '#ff5a5f',
         warn: '#ffb648',
       },
       fontFamily: {
-        mono: ['JetBrains Mono', 'Menlo', 'monospace'],
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        // Geist Mono for all numerics — taste-skill priority swap (was
+        // Inter + JetBrains Mono, the universal AI default stack).
+        mono: ['Geist Mono', 'ui-monospace', 'JetBrains Mono', 'Menlo', 'monospace'],
+        sans: ['Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       keyframes: {
         shimmer: {

@@ -582,8 +582,12 @@ function Venue({
     hero && tone === 'accent'
       ? 'shadow-[0_0_36px_-12px_rgba(30,255,138,0.35)]'
       : '';
+  // No `h-full` here: when this card is stacked under a sibling with
+  // `space-y-4`, h-full makes the second card overshoot the column
+  // height and overflow into the next section. The hero card naturally
+  // takes more vertical space via its larger title + text-sm body.
   return (
-    <Card className={`border-l-4 h-full ${accentCls} ${glowCls}`}>
+    <Card className={`border-l-4 ${accentCls} ${glowCls}`}>
       <CardHeader className={hero ? 'pb-2' : 'pb-1'}>
         <div className="text-xs text-muted font-medium tracking-tight">
           {subtitle}

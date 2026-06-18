@@ -99,10 +99,15 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
 
   if (buckets.length === 0) {
     return (
-      <div className="h-64 flex items-center justify-center text-muted text-sm text-center px-6">
-        Not enough closed trades per probability bucket yet. Need ≥
-        {MIN_TRADES_PER_BUCKET} trades per 5pp bucket; chart populates as the
-        sample grows.
+      <div className="h-64 flex items-center justify-center text-center px-6">
+        <div className="space-y-1">
+          <div className="text-sm text-fg/80">Sample too thin.</div>
+          <div className="text-xs text-muted leading-relaxed max-w-md">
+            Need ≥{MIN_TRADES_PER_BUCKET} closed trades per 5pp probability
+            bucket before plotting a point — buckets with single observations
+            are pure noise.
+          </div>
+        </div>
       </div>
     );
   }
@@ -120,7 +125,7 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart margin={{ top: 5, right: 16, left: 0, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" strokeOpacity={0.5} />
             <XAxis
               type="number"
               dataKey="predicted"
@@ -190,7 +195,7 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
                 // red; under-confident (above diagonal) = blue.
                 const miss = b.actual - b.predicted;
                 const color =
-                  Math.abs(miss) < 0.05 ? '#1eff8a' : miss < 0 ? '#ef4444' : '#5af9fb';
+                  Math.abs(miss) < 0.05 ? '#1eff8a' : miss < 0 ? '#ff5a5f' : '#5af9fb';
                 return <Cell key={i} fill={color} fillOpacity={0.8} />;
               })}
             </Scatter>

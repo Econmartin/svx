@@ -89,6 +89,9 @@ importers:
 
   packages/svx-dashboard:
     dependencies:
+      '@phosphor-icons/react':
+        specifier: ^2.1.10
+        version: 2.1.10(react-dom@18.3.1)(react@18.3.1)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -1136,6 +1139,17 @@ packages:
     dependencies:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
+
+  /@phosphor-icons/react@2.1.10(react-dom@18.3.1)(react@18.3.1):
+    resolution: {integrity: sha512-vt8Tvq8GLjheAZZYa+YG/pW7HDbov8El/MANW8pOAz4eGxrwhnbfrQZq0Cp4q8zBEu8NIhHdnr+r8thnfRSNYA==}
+    engines: {node: '>=10'}
+    peerDependencies:
+      react: '>= 16.8'
+      react-dom: '>= 16.8'
+    dependencies:
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+    dev: false
 
   /@polymarket/clob-client-v2@1.0.6(typescript@5.9.3)(zod@3.25.76):
     resolution: {integrity: sha512-Y6LefFNuxRs95fLq0m9W9EBjoM2w7EVgtsUGLydjlUFVGBeGhHOa8vll6+C6UZVnQEbdWE6i6hYRCwJE/ZVNKQ==}

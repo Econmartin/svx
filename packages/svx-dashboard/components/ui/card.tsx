@@ -27,6 +27,9 @@ export const CardHeader = React.forwardRef<
 ));
 CardHeader.displayName = 'CardHeader';
 
+// Sentence-case + medium weight reads more deliberate than the shadcn
+// default of `text-xs uppercase tracking-wider`. The taste-skill audit
+// flagged uppercase-everywhere as a generic-AI fingerprint.
 export const CardTitle = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
@@ -34,7 +37,7 @@ export const CardTitle = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      'text-xs uppercase tracking-wider text-muted font-medium',
+      'text-sm text-fg font-medium tracking-tight',
       className,
     )}
     {...props}

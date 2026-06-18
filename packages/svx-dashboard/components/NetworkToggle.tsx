@@ -2,7 +2,7 @@
 
 import { useNetwork } from '@/lib/network-context';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { FlaskConical, Banknote } from 'lucide-react';
+import { Flask, Money } from '@phosphor-icons/react';
 
 /**
  * Header network toggle — testnet (Predict-live) vs mainnet (Poly+HL-live).
@@ -19,11 +19,11 @@ export function NetworkToggle() {
       onValueChange={(v) => setNetwork(v as 'testnet' | 'mainnet')}
     >
       <ToggleGroupItem value="testnet">
-        <FlaskConical className="h-3.5 w-3.5" />
+        <Flask className="h-3.5 w-3.5" />
         testnet
       </ToggleGroupItem>
       <ToggleGroupItem value="mainnet">
-        <Banknote className="h-3.5 w-3.5" />
+        <Money className="h-3.5 w-3.5" />
         mainnet
       </ToggleGroupItem>
     </ToggleGroup>

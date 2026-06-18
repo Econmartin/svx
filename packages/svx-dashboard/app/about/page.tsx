@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ExternalLink, Workflow, ShieldCheck, GitBranch, Target, Trophy, Code2, Wrench, Network, AlertOctagon } from 'lucide-react';
+import { ArrowSquareOut, FlowArrow, ShieldCheck, GitBranch, Target, Trophy, Code, Wrench, TreeStructure, WarningOctagon } from '@phosphor-icons/react/dist/ssr';
 
 export default function AboutPage() {
   return (
@@ -19,31 +19,41 @@ export default function AboutPage() {
         </p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Venue
-          name="DeepBook Predict"
-          subtitle="Pricing brain"
-          body="SVI-parameterized vol surface gives the continuous fair probability for every BTC strike. On testnet we also execute against the surface directly with dUSDC; on mainnet (pending Sui mainnet) we use Predict only as our quote engine."
-          tone="accent"
-        />
-        <Venue
-          name="Polymarket"
-          subtitle="Real-money execution"
-          body="Live on Polygon mainnet. The bot buys Yes/No outcome shares when Predict's fair value disagrees with Polymarket's book by > threshold (default 3pp). Auto-redeems winning shares via the NegRiskAdapter once UMA settles."
-          tone="loss"
-        />
-        <Venue
-          name="Hyperliquid"
-          subtitle="Delta hedge"
-          body="Every Polymarket fill triggers a delta-sized BTC perp on Hyperliquid — short when we bought Yes, long when we bought No. Closes on settlement. Strips directional BTC exposure from the strategy."
-          tone="warn"
-        />
+      {/* Asymmetric 3-card layout — Predict (the pricing brain) takes the
+          wider hero column, Polymarket + Hyperliquid stack to its right.
+          Audit flagged the previous three-equal-cards grid as the most
+          generic AI move. The asymmetry also reinforces the strategy
+          hierarchy: Predict is the brain, the others are execution. */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="md:col-span-3">
+          <Venue
+            name="DeepBook Predict"
+            subtitle="Pricing brain"
+            body="SVI-parameterized vol surface gives the continuous fair probability for every BTC strike. On testnet we also execute against the surface directly with dUSDC; on mainnet (pending Sui mainnet) we use Predict only as our quote engine."
+            tone="accent"
+            hero
+          />
+        </div>
+        <div className="md:col-span-2 space-y-4">
+          <Venue
+            name="Polymarket"
+            subtitle="Real-money execution"
+            body="Live on Polygon mainnet. Buys Yes/No outcome shares when Predict's fair value disagrees with Polymarket's book by > threshold. Auto-redeems winning shares via the NegRiskAdapter once UMA settles."
+            tone="loss"
+          />
+          <Venue
+            name="Hyperliquid"
+            subtitle="Delta hedge"
+            body="Every Polymarket fill triggers a delta-sized BTC perp on Hyperliquid — short when we bought Yes, long when we bought No. Closes on settlement. Strips directional BTC exposure."
+            tone="warn"
+          />
+        </div>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Workflow className="h-4 w-4 text-accent" /> How it works
+            <FlowArrow className="h-4 w-4 text-accent" /> How it works
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -210,7 +220,7 @@ export default function AboutPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Network className="h-4 w-4 text-accent" /> Why two networks?
+            <TreeStructure className="h-4 w-4 text-accent" /> Why two networks?
           </CardTitle>
           <p className="text-xs text-muted mt-1 leading-relaxed">
             The dashboard shows a <strong>testnet</strong> bot and a <strong>mainnet</strong> bot
@@ -265,7 +275,7 @@ export default function AboutPage() {
       <Card className="border-l-4 border-l-warn">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <AlertOctagon className="h-4 w-4 text-warn" /> Limitations &amp; honest tradeoffs
+            <WarningOctagon className="h-4 w-4 text-warn" /> Limitations &amp; honest tradeoffs
           </CardTitle>
           <p className="text-xs text-muted mt-1">
             Where we knowingly cut scope or accepted a structural constraint. Worth saying out
@@ -491,7 +501,7 @@ export default function AboutPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Code2 className="h-4 w-4 text-accent" /> Repo layout
+            <Code className="h-4 w-4 text-accent" /> Repo layout
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -530,7 +540,7 @@ docs/                          Runbooks, strategy spec, math validation`}
           target="_blank"
           rel="noreferrer"
         >
-          <ExternalLink className="h-3.5 w-3.5" />
+          <ArrowSquareOut className="h-3.5 w-3.5" />
           github.com/Econmartin/svx
         </a>
         <a
@@ -539,7 +549,7 @@ docs/                          Runbooks, strategy spec, math validation`}
           target="_blank"
           rel="noreferrer"
         >
-          <ExternalLink className="h-3.5 w-3.5" />
+          <ArrowSquareOut className="h-3.5 w-3.5" />
           DeepBook Predict docs
         </a>
       </footer>
@@ -552,11 +562,15 @@ function Venue({
   subtitle,
   body,
   tone,
+  hero,
 }: {
   name: string;
   subtitle: string;
   body: string;
   tone: 'accent' | 'loss' | 'warn';
+  /** Hero treatment — bigger title, more body padding, faint glow. Used
+   *  for the wide "Predict" card in the asymmetric trio. */
+  hero?: boolean;
 }) {
   const accentCls =
     tone === 'accent'
@@ -564,14 +578,24 @@ function Venue({
       : tone === 'loss'
         ? 'border-l-loss'
         : 'border-l-warn';
+  const glowCls =
+    hero && tone === 'accent'
+      ? 'shadow-[0_0_36px_-12px_rgba(30,255,138,0.35)]'
+      : '';
   return (
-    <Card className={`border-l-4 ${accentCls}`}>
-      <CardHeader className="pb-1">
-        <div className="text-xs uppercase tracking-wider text-muted">{subtitle}</div>
-        <div className="text-base font-semibold">{name}</div>
+    <Card className={`border-l-4 h-full ${accentCls} ${glowCls}`}>
+      <CardHeader className={hero ? 'pb-2' : 'pb-1'}>
+        <div className="text-xs text-muted font-medium tracking-tight">
+          {subtitle}
+        </div>
+        <div className={hero ? 'text-xl font-semibold tracking-tight' : 'text-base font-semibold'}>
+          {name}
+        </div>
       </CardHeader>
       <CardContent>
-        <p className="text-xs text-muted leading-relaxed">{body}</p>
+        <p className={hero ? 'text-sm text-muted leading-relaxed' : 'text-xs text-muted leading-relaxed'}>
+          {body}
+        </p>
       </CardContent>
     </Card>
   );

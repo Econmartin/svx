@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ExternalLink } from 'lucide-react';
+import { ArrowSquareOut } from '@phosphor-icons/react';
 
 export default function OverviewPage() {
   const client = useApiClient();
@@ -258,7 +258,7 @@ export default function OverviewPage() {
           rel="noreferrer"
         >
           {status?.predictPackageId?.slice(0, 16) ?? '—'}…
-          <ExternalLink className="h-3 w-3" />
+          <ArrowSquareOut className="h-3 w-3" />
         </a>
       </footer>
     </div>

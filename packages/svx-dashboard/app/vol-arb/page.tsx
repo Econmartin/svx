@@ -38,7 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { CheckCircle2, AlertTriangle, Activity, Clock } from 'lucide-react';
+import { CheckCircle, Warning, Pulse, Clock } from '@phosphor-icons/react';
 import { PageIntro } from '@/components/PageIntro';
 
 export default function VolArbPage() {
@@ -171,7 +171,7 @@ export default function VolArbPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Activity className="h-4 w-4" /> Open positions
+              <Pulse className="h-4 w-4" /> Open positions
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
@@ -351,9 +351,9 @@ function DecisionList({ decisions }: { decisions: VolArbDecisionLog[] }) {
             {new Date(d.ts).toLocaleTimeString()}
           </span>
           {d.acted ? (
-            <CheckCircle2 className="h-3.5 w-3.5 text-win" />
+            <CheckCircle className="h-3.5 w-3.5 text-win" />
           ) : (
-            <AlertTriangle className="h-3.5 w-3.5 text-muted/40" />
+            <Warning className="h-3.5 w-3.5 text-muted/40" />
           )}
           <span
             className={`font-mono ${

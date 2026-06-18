@@ -1,7 +1,7 @@
 'use client';
 
 import { Badge } from '@/components/ui/badge';
-import { Pause, Radio, FlaskConical } from 'lucide-react';
+import { Pause, Broadcast, Flask } from '@phosphor-icons/react';
 
 interface Props {
   paused: boolean;
@@ -22,9 +22,9 @@ export function StatusBadge({ paused, reason, live }: Props) {
   return (
     <Badge variant={live ? 'live' : 'default'} className="gap-1.5">
       {live ? (
-        <Radio className="h-3 w-3 animate-pulse" />
+        <Broadcast className="h-3 w-3 animate-pulse" />
       ) : (
-        <FlaskConical className="h-3 w-3" />
+        <Flask className="h-3 w-3" />
       )}
       {live ? 'live' : 'paper'}
     </Badge>

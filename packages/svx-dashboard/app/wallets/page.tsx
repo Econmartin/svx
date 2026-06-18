@@ -29,7 +29,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
-import { ExternalLink, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { ArrowSquareOut, Warning, CheckCircle } from '@phosphor-icons/react';
 import { PageIntro } from '@/components/PageIntro';
 
 export default function WalletsPage() {
@@ -119,7 +119,7 @@ function SuiCard({ sui }: { sui: WalletsSnapshot['sui'] }) {
               rel="noreferrer"
               className="text-xs text-muted hover:text-accent inline-flex items-center gap-1 font-mono"
             >
-              {shortAddr(sui.address)} <ExternalLink className="h-3 w-3" />
+              {shortAddr(sui.address)} <ArrowSquareOut className="h-3 w-3" />
             </a>
           </div>
         </CardTitle>
@@ -145,7 +145,7 @@ function SuiCard({ sui }: { sui: WalletsSnapshot['sui'] }) {
                 rel="noreferrer"
                 className="text-accent hover:underline inline-flex items-center gap-1 font-mono text-xs"
               >
-                {sui.managerId.slice(0, 18)}… <ExternalLink className="h-3 w-3" />
+                {sui.managerId.slice(0, 18)}… <ArrowSquareOut className="h-3 w-3" />
               </a>
             }
           />
@@ -187,7 +187,7 @@ function SuiCard({ sui }: { sui: WalletsSnapshot['sui'] }) {
                           rel="noreferrer"
                           className="text-accent hover:underline inline-flex items-center gap-1"
                         >
-                          tx <ExternalLink className="h-3 w-3" />
+                          tx <ArrowSquareOut className="h-3 w-3" />
                         </a>
                       ) : (
                         '—'
@@ -288,7 +288,7 @@ function PolygonCard({
                 rel="noreferrer"
                 className="text-accent hover:underline inline-flex items-center gap-1 text-sm"
               >
-                tokentxns <ExternalLink className="h-3.5 w-3.5" />
+                tokentxns <ArrowSquareOut className="h-3.5 w-3.5" />
               </a>
             }
             small
@@ -358,7 +358,7 @@ function PolygonCard({
                           rel="noreferrer"
                           className="text-accent hover:underline inline-flex items-center gap-1"
                         >
-                          tx <ExternalLink className="h-3 w-3" />
+                          tx <ArrowSquareOut className="h-3 w-3" />
                         </a>
                       ) : (
                         '—'
@@ -412,7 +412,7 @@ function HyperliquidCard({ hl }: { hl: WalletsSnapshot['hyperliquid'] }) {
               rel="noreferrer"
               className="text-xs text-muted hover:text-accent inline-flex items-center gap-1 font-mono"
             >
-              {shortAddr(hl.address)} <ExternalLink className="h-3 w-3" />
+              {shortAddr(hl.address)} <ArrowSquareOut className="h-3 w-3" />
             </a>
           </div>
         </CardTitle>
@@ -441,7 +441,7 @@ function HyperliquidCard({ hl }: { hl: WalletsSnapshot['hyperliquid'] }) {
 
         {orphanReport.hasDrift && (
           <div className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn flex items-start gap-2">
-            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <Warning className="h-4 w-4 shrink-0 mt-0.5" />
             <div>
               <strong className="block">Ledger ↔ chain drift</strong>
               {orphanReport.onChainOnly > 0 && (
@@ -462,7 +462,7 @@ function HyperliquidCard({ hl }: { hl: WalletsSnapshot['hyperliquid'] }) {
 
         {!orphanReport.hasDrift && (hl.chainPositions?.length ?? 0) > 0 && (
           <div className="rounded border border-win/40 bg-win/10 px-3 py-2 text-xs text-win flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4" />
+            <CheckCircle className="h-4 w-4" />
             Ledger matches on-chain — no drift.
           </div>
         )}
@@ -627,7 +627,7 @@ function AddressRow({
         className="mt-0.5 font-mono text-sm text-white hover:text-accent inline-flex items-center gap-1 break-all"
       >
         {address}
-        <ExternalLink className="h-3 w-3 shrink-0" />
+        <ArrowSquareOut className="h-3 w-3 shrink-0" />
       </a>
       {sublabel && <div className="text-xs text-muted mt-0.5">{sublabel}</div>}
     </div>

@@ -17,7 +17,7 @@ import type { BotStatus } from '@/lib/api';
 import { formatRelative, formatUsdc } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CheckCircle2, AlertTriangle, XCircle, Activity } from 'lucide-react';
+import { CheckCircle, Warning, XCircle, Pulse } from '@phosphor-icons/react';
 
 type Level = 'ok' | 'warn' | 'err';
 
@@ -29,13 +29,13 @@ interface Row {
   detail?: string;
 }
 
-const TONE: Record<Level, { border: string; bg: string; text: string; icon: typeof Activity }> = {
-  ok: { border: 'border-win/40', bg: 'bg-win/5', text: 'text-win', icon: CheckCircle2 },
+const TONE: Record<Level, { border: string; bg: string; text: string; icon: typeof Pulse }> = {
+  ok: { border: 'border-win/40', bg: 'bg-win/5', text: 'text-win', icon: CheckCircle },
   warn: {
     border: 'border-warn/40',
     bg: 'bg-warn/5',
     text: 'text-warn',
-    icon: AlertTriangle,
+    icon: Warning,
   },
   err: { border: 'border-loss/40', bg: 'bg-loss/5', text: 'text-loss', icon: XCircle },
 };

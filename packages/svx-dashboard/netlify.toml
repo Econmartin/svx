@@ -1,0 +1,53 @@
+# Netlify config for hosting the SVX dashboard.
+#
+# Why this exists: the dashboard runs over HTTPS but the bot APIs live
+# on plain HTTP at sslip.io URLs. Browsers block mixed-content fetches
+# from HTTPS to HTTP, so direct calls fail. Netlify rewrites bridge the
+# gap — the browser hits Netlify (HTTPS), Netlify fetches the HTTP
+# backend server-side, and re-serves the response over HTTPS. Mixed-
+# content rule is satisfied; no backend change needed.
+#
+# Setup:
+#   1. Push this repo to GitHub.
+#   2. Netlify → Add new site → Import from Git → pick this repo.
+#   3. Netlify auto-detects this file. Confirm:
+#        Base directory:        packages/svx-dashboard
+#        Build command:         pnpm install && pnpm build
+#        Publish directory:     packages/svx-dashboard/.next
+#   4. In Site settings → Environment variables, set:
+#        SVX_API_TESTNET = http://<your-testnet-bot>.sslip.io
+#        SVX_API_MAINNET = http://<your-mainnet-bot>.sslip.io
+#        NEXT_PUBLIC_SVX_API = /api/testnet
+#        NEXT_PUBLIC_SVX_API_MAINNET = /api/mainnet
+#      (The "NEXT_PUBLIC_" pair is what the client bundle reads.
+#       The "SVX_API_*" pair is what the redirect rules below substitute.)
+#   5. Trigger deploy.
+
+[build]
+  base = "packages/svx-dashboard"
+  command = "pnpm install --frozen-lockfile=false && pnpm build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  # Tell pnpm to install workspace deps from monorepo root.
+  PNPM_FLAGS = "--shamefully-hoist"
+
+# Use Netlify's official Next.js runtime so SSR + ISR still work.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Proxy rules — these run server-side on Netlify's edge, so the browser
+# only ever talks to HTTPS Netlify, not the HTTP backend.
+# The :splat captures everything after /api/<bot>/ and passes it through.
+[[redirects]]
+  from = "/api/testnet/*"
+  to = "${SVX_API_TESTNET}/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/mainnet/*"
+  to = "${SVX_API_MAINNET}/:splat"
+  status = 200
+  force = true

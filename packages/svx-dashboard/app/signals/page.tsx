@@ -61,22 +61,14 @@ export default function SignalsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Signals</h1>
-          <p className="text-muted text-sm mt-1">
-            Real-time spread evaluations: Predict's SVI probability vs. Polymarket's order book.
-          </p>
-        </div>
-        <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
-          <TabsList>
-            {ACTIONS.map((a) => (
-              <TabsTrigger key={a} value={a}>
-                {a}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+      <header className="space-y-2">
+        <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+          Signals
+        </h1>
+        <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
+          Real-time spread evaluations: Predict's SVI probability vs.
+          Polymarket's order book.
+        </p>
       </header>
 
       {error && (
@@ -125,8 +117,25 @@ export default function SignalsPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Signals — last 200</CardTitle>
+        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <div className="space-y-1">
+            <CardTitle>Signals — last 200</CardTitle>
+            <p className="text-xs text-muted">
+              {rows.length === (data?.length ?? 0)
+                ? `Showing all ${rows.length}`
+                : `Showing ${rows.length} of ${data?.length ?? 0}`}
+              {filter !== 'all' ? ` · filter: ${filter}` : ''}
+            </p>
+          </div>
+          <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+            <TabsList>
+              {ACTIONS.map((a) => (
+                <TabsTrigger key={a} value={a}>
+                  {a}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         </CardHeader>
         <CardContent className="pt-0">
           <Table>

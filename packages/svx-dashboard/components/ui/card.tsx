@@ -6,7 +6,7 @@ export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDi
     <div
       ref={ref}
       className={cn(
-        'rounded-lg border border-border bg-surface text-white shadow-sm',
+        'rounded-md border border-border bg-surface/90 text-white',
         className,
       )}
       {...props}
@@ -21,23 +21,24 @@ export const CardHeader = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn('flex flex-col space-y-1 p-4 pb-2', className)}
+    className={cn('flex flex-col space-y-1 px-5 pt-4 pb-3', className)}
     {...props}
   />
 ));
 CardHeader.displayName = 'CardHeader';
 
-// Sentence-case + medium weight reads more deliberate than the shadcn
-// default of `text-xs uppercase tracking-wider`. The taste-skill audit
-// flagged uppercase-everywhere as a generic-AI fingerprint.
+// Card titles are semantic h3 — gives every page a real h1→h3 hierarchy
+// instead of div-only "titles" that fail screen-reader landmarking. Size
+// bumped to sm/15px with semibold + tight tracking to read as a real
+// section header against the long body copy that follows.
 export const CardTitle = React.forwardRef<
-  HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
+  HTMLHeadingElement,
+  React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, ...props }, ref) => (
-  <div
+  <h3
     ref={ref}
     className={cn(
-      'text-sm text-fg font-medium tracking-tight',
+      'text-[15px] text-fg font-semibold tracking-tight leading-snug',
       className,
     )}
     {...props}
@@ -49,7 +50,7 @@ export const CardDescription = React.forwardRef<
   HTMLParagraphElement,
   React.HTMLAttributes<HTMLParagraphElement>
 >(({ className, ...props }, ref) => (
-  <p ref={ref} className={cn('text-xs text-muted', className)} {...props} />
+  <p ref={ref} className={cn('text-xs text-muted leading-relaxed', className)} {...props} />
 ));
 CardDescription.displayName = 'CardDescription';
 
@@ -57,7 +58,7 @@ export const CardContent = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn('p-4 pt-2', className)} {...props} />
+  <div ref={ref} className={cn('px-5 pt-2 pb-5', className)} {...props} />
 ));
 CardContent.displayName = 'CardContent';
 
@@ -67,7 +68,7 @@ export const CardFooter = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn('flex items-center p-4 pt-2', className)}
+    className={cn('flex items-center px-5 py-3', className)}
     {...props}
   />
 ));

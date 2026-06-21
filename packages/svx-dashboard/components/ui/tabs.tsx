@@ -37,8 +37,9 @@ export function TabsList({
 }) {
   return (
     <div
+      role="tablist"
       className={cn(
-        'inline-flex h-9 items-center justify-center rounded-md bg-surface-elevated p-1 text-muted',
+        'inline-flex h-8 items-center gap-0.5 rounded-md border border-border bg-surface/70 p-0.5 text-muted',
         className,
       )}
     >
@@ -61,12 +62,14 @@ export function TabsTrigger({
   const active = ctx.value === value;
   return (
     <button
+      role="tab"
+      aria-selected={active}
       onClick={() => ctx.onValueChange(value)}
       className={cn(
-        'inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-bg transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex items-center justify-center whitespace-nowrap rounded-[5px] px-3 h-7 text-[12.5px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-50',
         active
-          ? 'bg-surface text-white shadow-sm border border-border'
-          : 'hover:text-muted-strong',
+          ? 'bg-accent/15 text-accent'
+          : 'text-muted hover:text-fg hover:bg-surface-elevated/60',
         className,
       )}
     >

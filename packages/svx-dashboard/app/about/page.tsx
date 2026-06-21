@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowSquareOut, FlowArrow, ShieldCheck, GitBranch, Target, Trophy, Code, Wrench, TreeStructure, WarningOctagon } from '@phosphor-icons/react/dist/ssr';
+import { ArrowSquareOut, FlowArrow, ShieldCheck, GitBranch, Target, Trophy, Code, Wrench, TreeStructure, WarningOctagon, Rocket } from '@phosphor-icons/react/dist/ssr';
 
 export default function AboutPage() {
   return (
@@ -267,6 +267,88 @@ export default function AboutPage() {
             full Predict integration in production today AND have a real-money signal-execution
             loop running in parallel. The day Predict ships mainnet, the bot is already trading.
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-l-4 border-l-accent">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Rocket className="h-4 w-4 text-accent" /> What SVX becomes on Predict mainnet
+          </CardTitle>
+          <p className="text-xs text-muted mt-1 leading-relaxed">
+            Phase 1 today → Phases 2–4 on Predict mainnet-day-one. The
+            single-operator architecture exists so each subsequent phase
+            is additive — never a rewrite. No promises beyond the
+            time-scale words below; no signup, no pooled funds, no
+            tokenised shares today.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <ol className="space-y-3 text-sm leading-relaxed">
+            <Step
+              n={1}
+              title="Single-operator bot — live today"
+              body={
+                <>
+                  Trades the operator's own dUSDC + pUSD + HL margin. No users,
+                  no pooled funds, no tokenised shares. Proves the end-to-end
+                  strategy works under real liquidity.
+                </>
+              }
+            />
+            <Step
+              n={2}
+              title="Public SVI calibration feeder (Predict mainnet, week 1)"
+              body={
+                <>
+                  The bot already back-solves Predict's IV from the SVI surface
+                  and compares it to Polymarket's implied vol every 15s. We
+                  publish that comparison as a free read-only feed — other
+                  Predict strategies, vaults, and risk dashboards can subscribe
+                  to <em>"is the SVI surface currently consistent with external
+                  venues, by how much, in which direction."</em> Zero trust,
+                  just data.
+                </>
+              }
+            />
+            <Step
+              n={3}
+              title="Open-source template (Predict mainnet, month 1)"
+              body={
+                <>
+                  One operator can clone the repo and stand up their own SVX in
+                  &lt;30 min (Quickstart + Mainnet runbook are already there for
+                  this reason). The more independent SVX instances run, the
+                  tighter Predict's surface stays calibrated against external
+                  venues. This is exactly the <em>"live stress test of the SVI
+                  feeder"</em> the spec asks for, run by many parties.
+                </>
+              }
+            />
+            <Step
+              n={4}
+              title="Tokenised cross-venue arb vault (post-audit)"
+              body={
+                <>
+                  A future Move package wraps the bot in a vault: LPs deposit
+                  dUSDC, receive a transferable share token (composable with
+                  <code className="code">deepbook_margin</code> /
+                  <code className="code">iron_bank</code> / structured products),
+                  and the bot trades on the vault's behalf. Combined PnL
+                  distributed pro-rata. <strong>This phase requires a Move
+                  audit + legal review</strong> (security-token classification
+                  depends on jurisdiction). Deliberately out of scope for the
+                  hackathon — the single-operator architecture exists so this
+                  is an additive evolution, not a rewrite.
+                </>
+              }
+            />
+          </ol>
+          <p className="text-xs text-muted mt-4 leading-relaxed">
+            Phases 2–4 are commitments to <em>direction</em>, not dates beyond
+            the time-scale words above. They drop out the moment they would
+            require pooling user funds before audit and legal sign-off.
+          </p>
         </CardContent>
       </Card>
 

@@ -5,12 +5,14 @@ import { ArrowSquareOut, FlowArrow, ShieldCheck, GitBranch, Target, Trophy, Code
 export default function AboutPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold flex items-center gap-3">
-          About SVX
+      <header className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+            About SVX
+          </h1>
           <Badge variant="outline">Sui Overflow 2026</Badge>
-        </h1>
-        <p className="text-muted text-sm mt-2 leading-relaxed">
+        </div>
+        <p className="text-muted-strong text-[14.5px] leading-relaxed">
           SVX is a fully-automated cross-venue volatility arbitrage bot for the
           DeepBook Predict track. It captures pricing disagreements between
           Predict's continuous SVI surface and Polymarket's discrete-strike
@@ -19,35 +21,31 @@ export default function AboutPage() {
         </p>
       </header>
 
-      {/* Asymmetric 3-card layout — Predict (the pricing brain) takes the
-          wider hero column, Polymarket + Hyperliquid stack to its right.
-          Audit flagged the previous three-equal-cards grid as the most
-          generic AI move. The asymmetry also reinforces the strategy
-          hierarchy: Predict is the brain, the others are execution. */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="md:col-span-3">
-          <Venue
-            name="DeepBook Predict"
-            subtitle="Pricing brain"
-            body="SVI-parameterized vol surface gives the continuous fair probability for every BTC strike. On testnet we also execute against the surface directly with dUSDC; on mainnet (pending Sui mainnet) we use Predict only as our quote engine."
-            tone="accent"
-            hero
-          />
-        </div>
-        <div className="md:col-span-2 space-y-4">
-          <Venue
-            name="Polymarket"
-            subtitle="Real-money execution"
-            body="Live on Polygon mainnet. Buys Yes/No outcome shares when Predict's fair value disagrees with Polymarket's book by > threshold. Auto-redeems winning shares via the NegRiskAdapter once UMA settles."
-            tone="loss"
-          />
-          <Venue
-            name="Hyperliquid"
-            subtitle="Delta hedge"
-            body="Every Polymarket fill triggers a delta-sized BTC perp on Hyperliquid — short when we bought Yes, long when we bought No. Closes on settlement. Strips directional BTC exposure."
-            tone="warn"
-          />
-        </div>
+      {/* Stacked 3-card list. Earlier we tried an asymmetric hero-vs-stack
+          grid to highlight Predict as the pricing brain, but at mid-width
+          breakpoints it broke awkwardly and the user feedback was just
+          "should be three on top of each other." Stacked reads cleaner,
+          works at every width, and the green-tone left border on Predict
+          still carries the hierarchy. */}
+      <div className="space-y-3">
+        <Venue
+          name="DeepBook Predict"
+          subtitle="Pricing brain"
+          body="SVI-parameterized vol surface gives the continuous fair probability for every BTC strike. On testnet we also execute against the surface directly with dUSDC; on mainnet (pending Sui mainnet) we use Predict only as our quote engine."
+          tone="accent"
+        />
+        <Venue
+          name="Polymarket"
+          subtitle="Real-money execution"
+          body="Live on Polygon mainnet. Buys Yes/No outcome shares when Predict's fair value disagrees with Polymarket's book by > threshold. Auto-redeems winning shares via the NegRiskAdapter once UMA settles."
+          tone="loss"
+        />
+        <Venue
+          name="Hyperliquid"
+          subtitle="Delta hedge"
+          body="Every Polymarket fill triggers a delta-sized BTC perp on Hyperliquid — short when we bought Yes, long when we bought No. Closes on settlement. Strips directional BTC exposure."
+          tone="warn"
+        />
       </div>
 
       <Card>
@@ -503,33 +501,35 @@ export default function AboutPage() {
           <CardTitle className="flex items-center gap-2">
             <Code className="h-4 w-4 text-accent" /> Repo layout
           </CardTitle>
+          <p className="text-xs text-muted mt-1">
+            Three packages in a pnpm workspace; docs at the root.
+          </p>
         </CardHeader>
         <CardContent>
-          <pre className="text-xs font-mono leading-relaxed text-muted overflow-x-auto">
-{`packages/
-  svx-bot/                     Trading bot (TS, Node 18+)
-    src/
-      tunables.ts              All strategy knobs as plain TS constants
-      config.ts                Env-driven gates + zod validation
-      index.ts                 Main loop + vol-arb fast ticker
-      pricing/{svi,bs,...}     Math: SVI eval, BS binary, IV inversion
-      signal/{match,spread,filter}  Cross-venue spread + filters
-      exec/{ptb,risk,sizer,polymarket-client,hyperliquid-client}
-      ledger/store.ts          SQLite + additive migrations
-      strategy/vol-arb.ts      Standalone HL vol-divergence strategy
-      api/server.ts            Read-only HTTP for dashboard
-    scripts/                   Operator scripts (setup, force-*, redeem)
-    tests/                     Vitest, 146 tests
-
-  svx-dashboard/               Next.js 14 (app router)
-    app/{,signals,positions,vol-arb,wallets,surface,about}/
-    components/{HealthPanel,PnlChart,...}
-    lib/{api,network-context,usePolling}
-
-  svx-shared/                  Types + addresses + constants
-
-docs/                          Runbooks, strategy spec, math validation`}
-          </pre>
+          {/* Was a single <pre> with the path on the left and the description
+              tab-aligned on the right — looked tidy at desktop width and
+              collapsed to a horizontal scroll soup at narrow widths.
+              Replaced with a two-column responsive list: path on top,
+              description below at narrow widths; side-by-side from sm up. */}
+          <dl className="divide-y divide-border/60 text-sm">
+            <RepoNode path="packages/svx-bot/" body="Trading bot — TS, Node 18+, runs both networks." />
+            <RepoNode path="    src/tunables.ts" body="All strategy knobs as plain TS constants." indent />
+            <RepoNode path="    src/config.ts" body="Env-driven gates + zod validation." indent />
+            <RepoNode path="    src/index.ts" body="Main loop + vol-arb fast ticker." indent />
+            <RepoNode path="    src/pricing/{svi,bs,…}" body="SVI eval, BS binary, IV inversion." indent />
+            <RepoNode path="    src/signal/{match,spread,filter}" body="Cross-venue spread + filters." indent />
+            <RepoNode path="    src/exec/{ptb,risk,sizer,polymarket-client,hyperliquid-client}" body="Order construction + risk gates." indent />
+            <RepoNode path="    src/ledger/store.ts" body="SQLite + additive migrations." indent />
+            <RepoNode path="    src/strategy/vol-arb.ts" body="Standalone HL vol-divergence strategy." indent />
+            <RepoNode path="    src/api/server.ts" body="Read-only HTTP for the dashboard." indent />
+            <RepoNode path="    scripts/" body="Operator scripts (setup, force-*, redeem)." indent />
+            <RepoNode path="    tests/" body="Vitest, 146 tests." indent />
+            <RepoNode path="packages/svx-dashboard/" body="This site. Next.js 14 (app router)." />
+            <RepoNode path="    app/{,signals,positions,vol-arb,wallets,surface,about}/" body="One route per page; network-aware." indent />
+            <RepoNode path="    components/, lib/" body="Shared UI primitives + the API client." indent />
+            <RepoNode path="packages/svx-shared/" body="Types + addresses + constants." />
+            <RepoNode path="docs/" body="Runbooks, strategy spec, math validation." />
+          </dl>
         </CardContent>
       </Card>
 
@@ -562,15 +562,11 @@ function Venue({
   subtitle,
   body,
   tone,
-  hero,
 }: {
   name: string;
   subtitle: string;
   body: string;
   tone: 'accent' | 'loss' | 'warn';
-  /** Hero treatment — bigger title, more body padding, faint glow. Used
-   *  for the wide "Predict" card in the asymmetric trio. */
-  hero?: boolean;
 }) {
   const accentCls =
     tone === 'accent'
@@ -578,28 +574,16 @@ function Venue({
       : tone === 'loss'
         ? 'border-l-loss'
         : 'border-l-warn';
-  const glowCls =
-    hero && tone === 'accent'
-      ? 'shadow-[0_0_36px_-12px_rgba(30,255,138,0.35)]'
-      : '';
-  // No `h-full` here: when this card is stacked under a sibling with
-  // `space-y-4`, h-full makes the second card overshoot the column
-  // height and overflow into the next section. The hero card naturally
-  // takes more vertical space via its larger title + text-sm body.
   return (
-    <Card className={`border-l-4 ${accentCls} ${glowCls}`}>
-      <CardHeader className={hero ? 'pb-2' : 'pb-1'}>
-        <div className="text-xs text-muted font-medium tracking-tight">
+    <Card className={`border-l-4 ${accentCls}`}>
+      <CardHeader className="pb-1.5 flex flex-row items-baseline gap-3 space-y-0">
+        <div className="text-base font-semibold tracking-tight">{name}</div>
+        <div className="text-[11px] text-muted uppercase tracking-wider font-medium">
           {subtitle}
-        </div>
-        <div className={hero ? 'text-xl font-semibold tracking-tight' : 'text-base font-semibold'}>
-          {name}
         </div>
       </CardHeader>
       <CardContent>
-        <p className={hero ? 'text-sm text-muted leading-relaxed' : 'text-xs text-muted leading-relaxed'}>
-          {body}
-        </p>
+        <p className="text-sm text-muted leading-relaxed">{body}</p>
       </CardContent>
     </Card>
   );
@@ -663,6 +647,32 @@ function Criterion({
         <div className="font-medium text-sm">{label}</div>
         <div className="text-muted text-sm mt-0.5">{body}</div>
       </div>
+    </div>
+  );
+}
+
+function RepoNode({
+  path,
+  body,
+  indent,
+}: {
+  path: string;
+  body: string;
+  /** Nested entry — left padding only kicks in at sm+ so the path stays
+   *  readable on narrow viewports without artificial whitespace eating
+   *  the line. */
+  indent?: boolean;
+}) {
+  return (
+    <div
+      className={`grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-x-4 gap-y-0.5 py-1.5 ${
+        indent ? 'sm:pl-4' : ''
+      }`}
+    >
+      <code className="font-mono text-[12px] text-fg/85 whitespace-pre-wrap break-all">
+        {path.trimStart()}
+      </code>
+      <span className="text-[12.5px] text-muted leading-snug">{body}</span>
     </div>
   );
 }

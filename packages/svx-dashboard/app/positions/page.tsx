@@ -67,25 +67,15 @@ export default function PositionsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Positions</h1>
-          <p className="text-muted text-sm mt-1">
-            {isMainnet
-              ? 'Polymarket fills + Hyperliquid hedges, per trade.'
-              : 'Sui-side dUSDC binaries, per trade.'}
-          </p>
-        </div>
-        <Tabs value={view} onValueChange={(v) => setView(v as View)}>
-          <TabsList>
-            <TabsTrigger value="open">
-              Open ({openAll.length})
-            </TabsTrigger>
-            <TabsTrigger value="closed">
-              Closed ({closedAll.length})
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+      <header className="space-y-2">
+        <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+          Positions
+        </h1>
+        <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
+          {isMainnet
+            ? 'Polymarket fills + Hyperliquid hedges, per trade.'
+            : 'Sui-side dUSDC binaries, per trade.'}
+        </p>
       </header>
 
       <PageIntro
@@ -138,27 +128,35 @@ export default function PositionsPage() {
         </Card>
       )}
 
-      {view === 'open' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Open positions</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <div className="space-y-1">
+            <CardTitle>
+              {view === 'open' ? 'Open positions' : 'Closed positions'}
+            </CardTitle>
+            <p className="text-xs text-muted">
+              {view === 'open'
+                ? `${openAll.length} currently in flight`
+                : `${closedAll.length} settled trades`}
+            </p>
+          </div>
+          <Tabs value={view} onValueChange={(v) => setView(v as View)}>
+            <TabsList>
+              <TabsTrigger value="open">Open ({openAll.length})</TabsTrigger>
+              <TabsTrigger value="closed">
+                Closed ({closedAll.length})
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {view === 'open' ? (
             <OpenTable open={openAll} isMainnet={isMainnet} />
-          </CardContent>
-        </Card>
-      )}
-
-      {view === 'closed' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Closed positions</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
+          ) : (
             <ClosedTable closed={closedAll} isMainnet={isMainnet} />
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

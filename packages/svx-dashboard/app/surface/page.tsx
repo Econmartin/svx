@@ -41,15 +41,17 @@ export default function SurfacePage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Volatility surface</h1>
-          <p className="text-muted text-sm mt-1">
+      <header className="flex items-end justify-between flex-wrap gap-4">
+        <div className="space-y-2">
+          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+            Volatility surface
+          </h1>
+          <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
             Raw SVI parameters from DeepBook Predict, evaluated across a strike grid.
             The smile that drives every signal.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2 items-center">
+        <div className="flex flex-wrap gap-1.5 items-center">
           {(oracles ?? []).slice(0, 6).map((o) => {
             const active = o.oracleId === selectedId;
             const mins = Math.max(0, Math.round((o.expiryMs - Date.now()) / 60_000));

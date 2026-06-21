@@ -202,6 +202,22 @@ export interface SurfaceArbReport {
   };
 }
 
+export interface SurfaceHistoryPoint {
+  tsMs: number;
+  spot: number;
+  forward: number;
+  a: number;
+  b: number;
+  rho: number;
+  m: number;
+  sigma: number;
+}
+
+export interface SurfaceHistoryResponse {
+  oracleId: string;
+  points: SurfaceHistoryPoint[];
+}
+
 export interface SurfaceResponse {
   oracleId: string;
   forward: number;
@@ -363,6 +379,8 @@ export function createApi(base: string) {
     volArbState: () => get<VolArbStateResponse>('/strategy/vol-arb/state'),
     oracles: () => get<OracleSummary[]>('/oracles'),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
+    surfaceHistory: (oracleId: string, limit = 200) =>
+      get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),
   };
 }
 

@@ -24,6 +24,16 @@ The dashboard shows a **testnet** bot and a **mainnet** bot side-by-side. They'r
 
 This is what "mainnet-day-one" concretely means: the cross-venue spread logic, SVI-driven signal generation, order submission, settlement reconciliation, and delta-hedge are all running against real liquidity today.
 
+## Strategy 3: Margin-Lever (paper)
+
+A third strategy that lives entirely on Sui mainnet: borrow dUSDC on `deepbook_margin` against an `iron_bank` USDsui share, take a directional BTC spot position on DeepBook driven by Predict's SVI bias, repay from the close.
+
+- **Why a third strategy?** The other two arbs don't deploy Sui-mainnet capital — Predict is testnet, vol-arb is HL-only. Margin-Lever gives the three-protocol composition story (`predict` × `iron_bank` × `deepbook_margin`) the brief asks for.
+- **Paper-mode only in v1.** The strategy constructs the real PTBs for both `deepbook_margin::*` and `iron_bank::*` (see `packages/svx-bot/src/exec/{deepbook-margin,iron-bank}-client.ts`) and ledgers them, but never signs or submits. Flipping to live requires the operator to fund USDsui collateral on iron_bank first — a deliberate follow-up step, not a v1 promise.
+- **Independent loop.** Runs on its own ticker, decoupled from the poly-arb 15s loop and the IV-RV 2s ticker. Its own risk gates (per-trade notional, max borrow, daily loss limit, time-stop) live in `tunables.ts` under the `marginLever*` namespace.
+- **Dashboard.** `/margin-lever` renders simulated PnL, the open paper position, the decision log, and a closed-positions table.
+- **Disabled by default.** Set `MARGIN_LEVER_ENABLED=true` in the env to spin up the ticker.
+
 ## Limitations & honest tradeoffs
 
 A few things we knowingly cut or accepted as structural constraints — better to say them out loud than paper over:

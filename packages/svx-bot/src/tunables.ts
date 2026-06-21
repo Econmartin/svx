@@ -159,6 +159,35 @@ export const TUNABLES = {
   volArbOracleCacheMs: 30_000,
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Strategy 3: Margin-Lever (paper-mode only in v1)
+  //
+  // Borrow dUSDC on deepbook_margin against an iron_bank USDsui share,
+  // deploy into a directional BTC spot view driven by Predict's SVI bias,
+  // repay from the close. Lives on Sui mainnet (vs Predict testnet for the
+  // pricing brain). Live execution is GATED — see strategy/margin-lever.ts.
+  // ─────────────────────────────────────────────────────────────────────────
+  /** |P(↑) − 50%| at which the strategy opens a paper position. 0.10 means
+   *  the surface has to think one side is at least 60% / 40%. */
+  marginLeverOpenBias: 0.10,
+  /** |P(↑) − 50%| below which an open position closes. Hysteresis. */
+  marginLeverCloseBias: 0.04,
+  /** Time-stop in minutes. Predict oracles are sub-hour, but the spot
+   *  position rides on DeepBook orderbook independently — cap held time. */
+  marginLeverMaxHoldMinutes: 45,
+  /** Per-trade USD notional cap on the BTC spot leg. */
+  marginLeverPerTradeNotionalUsdc: 500,
+  /** Cap on borrowed dUSDC notional given simulated collateral. Acts as
+   *  the leverage envelope: at 1000 USD of supplied USDsui share, a 3x
+   *  cap caps total spot exposure at 3000. */
+  marginLeverMaxBorrowNotionalUsdc: 1500,
+  /** Daily paper-loss limit. Strategy holds (no new opens) on breach. */
+  marginLeverDailyLossLimitUsdc: 100,
+  /** Loop tick. Same cadence as the main poly-arb loop is fine — Predict's
+   *  SVI doesn't move faster than that, and the open/close decisions are
+   *  cheap. */
+  marginLeverTickMs: 15_000,
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Bot scheduling + housekeeping
   // ─────────────────────────────────────────────────────────────────────────
   /** Main poly-arb scheduler interval. Vol-arb runs on its own faster tick

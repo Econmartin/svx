@@ -17,6 +17,7 @@ import {
   scanButterfly,
   wingNoArb,
 } from '../pricing/svi-arb.js';
+import type { MarginLeverState } from '../strategy/margin-lever.js';
 import { log } from '../util/log.js';
 
 interface ApiDeps {
@@ -73,6 +74,8 @@ interface ApiDeps {
       lastDecision: unknown;
       recentDecisions: unknown[];
     };
+    /** Margin-Lever (paper) strategy state — see strategy/margin-lever.ts. */
+    marginLever?: MarginLeverState;
   };
   predict: PredictClient;
   addresses: PredictAddresses;
@@ -430,6 +433,32 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       log.warn('api.surface.error', { err: e instanceof Error ? e.message : String(e) });
       res.status(500).json({ error: 'failed to compute surface' });
     }
+  });
+
+  app.get('/strategy/margin-lever/state', (_req, res) => {
+    const ml = deps.state.marginLever;
+    res.json({
+      enabled: deps.cfg.marginLeverEnabled,
+      mode: 'paper',
+      thresholds: {
+        openBias: deps.cfg.marginLeverOpenBias,
+        closeBias: deps.cfg.marginLeverCloseBias,
+        maxHoldMinutes: deps.cfg.marginLeverMaxHoldMinutes,
+      },
+      caps: {
+        perTradeNotionalUsdc: deps.cfg.marginLeverPerTradeNotionalUsdc,
+        maxBorrowNotionalUsdc: deps.cfg.marginLeverMaxBorrowNotionalUsdc,
+        dailyLossLimitUsdc: deps.cfg.marginLeverDailyLossLimitUsdc,
+      },
+      open: ml?.open ?? null,
+      closed: ml?.closed ?? [],
+      recentDecisions: ml?.recentDecisions ?? [],
+      lastDecision: ml?.lastDecision ?? null,
+      simulatedPnlUsdc: (ml?.closed ?? []).reduce((a, c) => a + c.pnlUsdc, 0),
+      simulatedPnl24hUsdc: (ml?.closed ?? [])
+        .filter((c) => c.closedAtMs >= Date.now() - 24 * 3600_000)
+        .reduce((a, c) => a + c.pnlUsdc, 0),
+    });
   });
 
   app.get('/surface/:oracleId/history', (req: Request, res: Response) => {

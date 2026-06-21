@@ -65,6 +65,13 @@ import {
   recordDecision as recordVolArbDecision,
   type VolArbState,
 } from './strategy/vol-arb.js';
+import {
+  applyDecision as applyMarginLeverDecision,
+  decide as decideMarginLever,
+  freshMarginLeverState,
+  realizedPnlSince as marginLeverRealizedPnlSince,
+  type MarginLeverState,
+} from './strategy/margin-lever.js';
 import { startApiServer } from './api/server.js';
 import { log } from './util/log.js';
 
@@ -140,6 +147,8 @@ interface BotState {
   lastPolySettlementCheckMs: number;
   /** Vol-arb strategy state — in-memory rolling buffer + last decision. */
   volArb: VolArbState;
+  /** Margin-Lever (paper) strategy state — see strategy/margin-lever.ts. */
+  marginLever: MarginLeverState;
   /**
    * Cached shortest-expiry BTC oracle snapshot for the vol-arb fast ticker.
    * Refreshed every `cfg.volArbOracleCacheMs` so a 2s ticker doesn't pay
@@ -206,6 +215,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastPolySettlementCheckMs: 0,
     polyFillFailedAt: new Map(),
     volArb: freshVolArbState(),
+    marginLever: freshMarginLeverState(),
   };
 
   // If we have an operator key + manager record, read the real wallet balance
@@ -358,6 +368,28 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     });
   }
 
+  // Margin-Lever paper ticker — third strategy, independent loop. Always
+  // safe to run because it never sends a transaction in v1 (paper-mode
+  // only). Doesn't gate on hlExec because it doesn't trade HL.
+  let marginLeverTimer: NodeJS.Timeout | undefined;
+  if (!opts.onceOnly) {
+    let marginLeverInFlight = false;
+    marginLeverTimer = setInterval(() => {
+      if (marginLeverInFlight) return;
+      marginLeverInFlight = true;
+      runMarginLeverStep({ cfg, state, predict })
+        .catch((e) => log.warn('svx.margin_lever.step_error', { err: errMsg(e) }))
+        .finally(() => {
+          marginLeverInFlight = false;
+        });
+    }, cfg.marginLeverTickMs);
+    log.info('svx.margin_lever.ticker_started', {
+      tickMs: cfg.marginLeverTickMs,
+      enabled: cfg.marginLeverEnabled,
+      mode: 'paper',
+    });
+  }
+
   while (true) {
     const t0 = Date.now();
     try {
@@ -377,6 +409,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     }
     if (opts.onceOnly) {
       if (volArbTimer) clearInterval(volArbTimer);
+      if (marginLeverTimer) clearInterval(marginLeverTimer);
       stopApi?.();
       ledger.close();
       return;
@@ -1839,6 +1872,79 @@ function estimateHlFees(
   const openNotional = openPrice * size;
   const closeNotional = closePrice * size;
   return (openNotional + closeNotional) * takerRate;
+}
+
+/**
+ * Margin-Lever (paper) tick. Pull the shortest BTC oracle, compute
+ * P(↑) at spot, decide, apply. No PTBs submitted — see
+ * strategy/margin-lever.ts for the framing.
+ *
+ * Independent from poly-arb (15s) and vol-arb (2s). Only the Predict
+ * snapshot is read; nothing on Sui mainnet or HL is touched, so this
+ * is always safe to run.
+ */
+async function runMarginLeverStep(args: {
+  cfg: SvxConfig;
+  state: BotState;
+  predict: PredictClient;
+}): Promise<void> {
+  const { cfg, state, predict } = args;
+  if (!cfg.marginLeverEnabled) return;
+  const nowMs = Date.now();
+  let oracle: OracleSnapshot | null = null;
+  try {
+    const oracles = await predict.listActiveOracles('BTC');
+    const shortest = oracles
+      .filter((o) => o.status === 'active' && o.expiryMs > nowMs)
+      .sort((a, b) => a.expiryMs - b.expiryMs)[0];
+    if (!shortest) return;
+    oracle = await predict.snapshotOracle(shortest.oracleId);
+  } catch (e) {
+    log.debug('svx.margin_lever.oracle_refresh_failed', { err: errMsg(e) });
+    return;
+  }
+  if (!oracle) return;
+  const spot = oracle.spot;
+  const since24h = nowMs - 24 * 3600_000;
+  const pnl24h = marginLeverRealizedPnlSince(state.marginLever, since24h);
+  const decision = decideMarginLever({
+    oracle,
+    spot,
+    nowMs,
+    thresholds: {
+      openBias: cfg.marginLeverOpenBias,
+      closeBias: cfg.marginLeverCloseBias,
+      maxHoldMs: cfg.marginLeverMaxHoldMinutes * 60_000,
+    },
+    caps: {
+      perTradeNotionalUsdc: cfg.marginLeverPerTradeNotionalUsdc,
+      maxBorrowNotionalUsdc: cfg.marginLeverMaxBorrowNotionalUsdc,
+      dailyLossLimitUsdc: cfg.marginLeverDailyLossLimitUsdc,
+    },
+    state: state.marginLever,
+    pnl24hUsdc: pnl24h,
+  });
+  const acted = applyMarginLeverDecision(
+    state.marginLever,
+    decision,
+    {
+      perTradeNotionalUsdc: cfg.marginLeverPerTradeNotionalUsdc,
+      maxBorrowNotionalUsdc: cfg.marginLeverMaxBorrowNotionalUsdc,
+      dailyLossLimitUsdc: cfg.marginLeverDailyLossLimitUsdc,
+    },
+    oracle.oracleId,
+  );
+  if (acted || decision.action !== 'hold') {
+    log.info('svx.margin_lever.decision', {
+      action: decision.action,
+      reason: decision.reason,
+      pUp: decision.predictUpAtSpot,
+      bias: decision.biasMagnitude,
+      spot,
+      acted,
+      hasOpen: !!state.marginLever.open,
+    });
+  }
 }
 
 function errMsg(e: unknown): string {

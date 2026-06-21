@@ -10,6 +10,7 @@ const NAV = [
   ['Positions', '/positions'],
   ['Poly-arb', '/poly-arb'],
   ['IV-RV', '/vol-arb'],
+  ['Margin-Lever', '/margin-lever'],
   ['Wallets', '/wallets'],
   ['Surface', '/surface'],
   ['About', '/about'],

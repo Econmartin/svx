@@ -280,6 +280,54 @@ export interface VolArbStateResponse {
   realizedPnlUsdc: number;
 }
 
+export interface MarginLeverDecision {
+  ts: number;
+  action: 'hold' | 'open_long' | 'open_short' | 'close';
+  reason: string;
+  predictUpAtSpot: number;
+  biasMagnitude: number;
+  spot: number;
+}
+
+export interface MarginLeverOpenPosition {
+  id: string;
+  openedAtMs: number;
+  side: 'long' | 'short';
+  notionalUsdc: number;
+  entryPrice: number;
+  openPredictUp: number;
+  oracleId: string;
+  openReason: string;
+}
+
+export interface MarginLeverClosedPosition extends MarginLeverOpenPosition {
+  closedAtMs: number;
+  exitPrice: number;
+  pnlUsdc: number;
+  closeReason: string;
+}
+
+export interface MarginLeverStateResponse {
+  enabled: boolean;
+  mode: 'paper';
+  thresholds: {
+    openBias: number;
+    closeBias: number;
+    maxHoldMinutes: number;
+  };
+  caps: {
+    perTradeNotionalUsdc: number;
+    maxBorrowNotionalUsdc: number;
+    dailyLossLimitUsdc: number;
+  };
+  open: MarginLeverOpenPosition | null;
+  closed: MarginLeverClosedPosition[];
+  recentDecisions: MarginLeverDecision[];
+  lastDecision: MarginLeverDecision | null;
+  simulatedPnlUsdc: number;
+  simulatedPnl24hUsdc: number;
+}
+
 export interface WalletsSnapshot {
   sui: null | {
     address: string;
@@ -378,6 +426,7 @@ export function createApi(base: string) {
     wallets: () => get<WalletsSnapshot>('/wallets'),
     volArbState: () => get<VolArbStateResponse>('/strategy/vol-arb/state'),
     oracles: () => get<OracleSummary[]>('/oracles'),
+    marginLeverState: () => get<MarginLeverStateResponse>('/strategy/margin-lever/state'),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
     surfaceHistory: (oracleId: string, limit = 200) =>
       get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),

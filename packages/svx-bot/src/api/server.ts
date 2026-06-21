@@ -11,6 +11,12 @@ import type { LedgerStore } from '../ledger/store.js';
 import type { SvxConfig } from '../config.js';
 import type { PredictAddresses } from 'svx-shared/addresses';
 import type { PredictClient } from '../pricing/predict.js';
+import {
+  butterflyDensity,
+  calendarCheck,
+  scanButterfly,
+  wingNoArb,
+} from '../pricing/svi-arb.js';
 import { log } from '../util/log.js';
 
 interface ApiDeps {
@@ -351,16 +357,59 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       // Generate a strike grid covering ±20% of forward.
       const F = snap.forward;
       const tickPct = 0.005;
-      const points: Array<{ strike: number; iv: number; up: number }> = [];
+      const ks: number[] = [];
+      const points: Array<{
+        strike: number;
+        k: number;
+        iv: number;
+        up: number;
+        density: number;
+        butterflyOk: boolean;
+      }> = [];
+      const T = Math.max(1e-6, (snap.expiryMs - Date.now()) / (365.25 * 24 * 3600 * 1000));
       for (let pct = -0.2; pct <= 0.2; pct += tickPct) {
         const strike = F * (1 + pct);
         const k = Math.log(strike / F);
         const w = sviTotalVar(k, snap.svi);
-        const T = Math.max(1e-6, (snap.expiryMs - Date.now()) / (365.25 * 24 * 3600 * 1000));
         const iv = Math.sqrt(w / T);
         const d2 = -(k + w / 2) / Math.sqrt(w);
         const up = 0.5 * (1 + erf(d2 / Math.sqrt(2)));
-        points.push({ strike, iv, up });
+        const density = butterflyDensity(k, snap.svi);
+        ks.push(k);
+        points.push({ strike, k, iv, up, density, butterflyOk: density >= 0 });
+      }
+      const butterfly = scanButterfly(ks, snap.svi);
+      const wing = wingNoArb(snap.svi, T);
+      // Optional calendar check vs the next-longest active oracle (if any).
+      let calendar:
+        | { ok: boolean; worstDeficit: number; worstK: number; longerOracleId: string; longerTYears: number }
+        | undefined;
+      try {
+        const oracles = await deps.predict.listActiveOracles(snap.underlyingAsset);
+        const longer = oracles
+          .filter((o) => o.oracleId !== oracleId && o.expiryMs > snap.expiryMs)
+          .sort((a, b) => a.expiryMs - b.expiryMs)[0];
+        if (longer) {
+          const longerSnap = await deps.predict.snapshotOracle(longer.oracleId);
+          if (longerSnap) {
+            const longerT = Math.max(
+              1e-6,
+              (longerSnap.expiryMs - Date.now()) / (365.25 * 24 * 3600 * 1000),
+            );
+            const cal = calendarCheck(snap.svi, longerSnap.svi, ks);
+            calendar = {
+              ok: cal.ok,
+              worstDeficit: cal.worstDeficit,
+              worstK: cal.worstK,
+              longerOracleId: longerSnap.oracleId,
+              longerTYears: longerT,
+            };
+          }
+        }
+      } catch (e) {
+        log.warn('api.surface.calendar.skip', {
+          err: e instanceof Error ? e.message : String(e),
+        });
       }
       res.json({
         oracleId: snap.oracleId,
@@ -368,8 +417,14 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
         spot: snap.spot,
         expiryMs: snap.expiryMs,
         timestampMs: snap.timestampMs,
+        tYears: T,
         svi: snap.svi,
         points,
+        arb: {
+          butterfly: { ok: butterfly.ok, worst: butterfly.worst, worstIndex: butterfly.worstIndex },
+          wing,
+          calendar,
+        },
       });
     } catch (e) {
       log.warn('api.surface.error', { err: e instanceof Error ? e.message : String(e) });

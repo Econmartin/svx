@@ -24,8 +24,9 @@ export function ToggleGroup({
   return (
     <ToggleGroupContext.Provider value={{ value, onValueChange }}>
       <div
+        role="group"
         className={cn(
-          'inline-flex items-center gap-1 rounded-md border border-border bg-surface-elevated p-1',
+          'inline-flex items-center gap-0.5 rounded-md border border-border bg-surface/70 p-0.5 h-8',
           className,
         )}
       >
@@ -49,12 +50,18 @@ export function ToggleGroupItem({
   const active = ctx.value === value;
   return (
     <button
+      aria-pressed={active}
+      // Network value is hydrated from localStorage in NetworkProvider, so
+      // the server's default and the client's first render legitimately
+      // differ. The mismatch only ever touches aria-pressed + className on
+      // this toggle, never the API call, so silence the dev-mode warning.
+      suppressHydrationWarning
       onClick={() => ctx.onValueChange(value)}
       className={cn(
-        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-sm px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[5px] px-2.5 h-7 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-50',
         active
-          ? 'bg-surface text-white shadow-sm border border-border'
-          : 'text-muted hover:text-muted-strong',
+          ? 'bg-accent/15 text-accent'
+          : 'text-muted hover:text-fg hover:bg-surface-elevated/60',
         className,
       )}
     >

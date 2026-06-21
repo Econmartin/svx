@@ -112,3 +112,13 @@ tr:hover td {
 ::-webkit-scrollbar-thumb:hover {
   background: #28342e;
 }
+
+/* Mobile nav row uses overflow-x-auto so all 7 links remain reachable on
+   narrow viewports — but we don't want a visible scrollbar under them. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

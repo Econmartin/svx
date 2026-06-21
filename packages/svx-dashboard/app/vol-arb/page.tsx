@@ -68,35 +68,35 @@ export default function VolArbPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-start gap-4 justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-3">
+      <header className="space-y-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
             Vol-arb strategy
-            <Badge variant={data.enabled ? 'live' : 'outline'}>
-              {data.enabled ? 'exec on' : 'paper / signals only'}
-            </Badge>
           </h1>
-          <p className="text-muted text-sm mt-1 max-w-3xl">
-            Standalone Hyperliquid directional perp strategy. Trades when
-            Predict's ATM IV diverges from HL's realized vol AND the SVI
-            surface has a clear directional bias. Independent from the
-            Predict×Polymarket arb on the overview page.
-          </p>
-        </div>
-        {lastDecision && (
-          <Badge
-            variant={
-              lastDecision.action.startsWith('open')
-                ? 'live'
-                : lastDecision.action === 'close'
-                  ? 'warn'
-                  : 'outline'
-            }
-            className="text-xs"
-          >
-            {lastDecision.action}
+          <Badge variant={data.enabled ? 'live' : 'outline'}>
+            {data.enabled ? 'exec on' : 'paper / signals only'}
           </Badge>
-        )}
+          {lastDecision && (
+            <Badge
+              variant={
+                lastDecision.action.startsWith('open')
+                  ? 'live'
+                  : lastDecision.action === 'close'
+                    ? 'warn'
+                    : 'outline'
+              }
+              className="sm:ml-auto text-xs"
+            >
+              {lastDecision.action}
+            </Badge>
+          )}
+        </div>
+        <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
+          Standalone Hyperliquid directional perp strategy. Trades when
+          Predict's ATM IV diverges from HL's realized vol AND the SVI
+          surface has a clear directional bias. Independent from the
+          Predict×Polymarket arb on the overview page.
+        </p>
       </header>
 
       <PageIntro
@@ -353,7 +353,7 @@ function DecisionList({ decisions }: { decisions: VolArbDecisionLog[] }) {
           {d.acted ? (
             <CheckCircle className="h-3.5 w-3.5 text-win" />
           ) : (
-            <Warning className="h-3.5 w-3.5 text-muted/40" />
+            <Warning className="h-3.5 w-3.5 text-muted/70" />
           )}
           <span
             className={`font-mono ${
@@ -373,7 +373,7 @@ function DecisionList({ decisions }: { decisions: VolArbDecisionLog[] }) {
           <span className="text-muted">·</span>
           <span
             className={`font-mono tabular-nums ${
-              Math.abs(d.ivSpread) > 0.03 ? '' : 'text-muted/60'
+              Math.abs(d.ivSpread) > 0.03 ? '' : 'text-muted'
             }`}
           >
             {d.ivSpread >= 0 ? '+' : ''}

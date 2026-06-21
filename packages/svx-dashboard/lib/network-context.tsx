@@ -29,18 +29,30 @@ const NetworkContext = React.createContext<NetworkContextValue | null>(null);
 
 const STORAGE_KEY = 'svx.network';
 
+/** Pick the default network deterministically (no window access). */
+function defaultNetwork(): Network {
+  if (!api.enabled && apiMainnet.enabled) return 'mainnet';
+  return api.enabled ? 'testnet' : 'mainnet';
+}
+
 export function NetworkProvider({ children }: { children: React.ReactNode }) {
   const bothConfigured = api.enabled && apiMainnet.enabled;
-  const [network, setNetworkState] = React.useState<Network>(() => {
-    // Default to mainnet if it's the only one configured, otherwise testnet
-    // unless localStorage has a prior choice.
-    if (typeof window === 'undefined') return 'testnet';
-    if (!api.enabled && apiMainnet.enabled) return 'mainnet';
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === 'mainnet' && apiMainnet.enabled) return 'mainnet';
-    if (stored === 'testnet' && api.enabled) return 'testnet';
-    return api.enabled ? 'testnet' : 'mainnet';
-  });
+  // Seed with the deterministic default on BOTH server and first client
+  // render, then upgrade to the localStorage choice (if any) post-mount.
+  // Reading localStorage during initial render produced a server/client
+  // mismatch that broke hydration in every component rendering the
+  // network label (Hero, StatusTicker, etc.).
+  const [network, setNetworkState] = React.useState<Network>(defaultNetwork);
+
+  React.useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      if (stored === 'mainnet' && apiMainnet.enabled) setNetworkState('mainnet');
+      else if (stored === 'testnet' && api.enabled) setNetworkState('testnet');
+    } catch {
+      /* private-mode / quota — ignore */
+    }
+  }, []);
 
   const setNetwork = React.useCallback((n: Network) => {
     setNetworkState(n);

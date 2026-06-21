@@ -12,7 +12,6 @@
  */
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 import './hero.css';
 import { formatUsdc } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
@@ -37,26 +36,17 @@ export function Hero({
   paused,
   liveOnSelectedNetwork,
 }: HeroProps) {
-  // The network value is resolved from localStorage on mount and can differ
-  // from the server-rendered default. Defer any text that depends on it to
-  // post-hydration to avoid a mismatch — render a neutral placeholder on
-  // the server pass instead.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  const isMainnet = mounted && network === 'mainnet';
+  const isMainnet = network === 'mainnet';
   const pnlTone = combinedPnl > 0 ? 'win' : combinedPnl < 0 ? 'loss' : 'neutral';
   const pnl24Tone = pnl24h > 0 ? 'win' : pnl24h < 0 ? 'loss' : 'neutral';
 
-  const statusLabel = !mounted
-    ? '—'
-    : paused
-      ? 'paused'
-      : liveOnSelectedNetwork
-        ? isMainnet
-          ? 'live · real money'
-          : 'live · testnet'
-        : 'paper';
+  const statusLabel = paused
+    ? 'paused'
+    : liveOnSelectedNetwork
+      ? isMainnet
+        ? 'live · real money'
+        : 'live · testnet'
+      : 'paper';
 
   return (
     <section className="svx-hero grid min-h-[58vh] sm:min-h-[62vh] items-end justify-items-start">
@@ -66,24 +56,16 @@ export function Hero({
         <div className="svx-hero-gradient absolute inset-0" />
 
         <div className="relative flex flex-col justify-end h-full pb-24 sm:pb-28 px-6 sm:px-10 md:px-12 gap-5">
-          <div className="flex flex-wrap items-center gap-2" suppressHydrationWarning>
-            {mounted ? (
-              <>
-                <Badge variant={isMainnet ? 'mainnet' : 'testnet'} className="text-[10px]">
-                  {isMainnet ? 'mainnet · real money' : 'testnet'}
-                </Badge>
-                <Badge
-                  variant={paused ? 'outline' : liveOnSelectedNetwork ? 'live' : 'default'}
-                  className="text-[10px]"
-                >
-                  {statusLabel}
-                </Badge>
-              </>
-            ) : (
-              <Badge variant="outline" className="text-[10px]">
-                loading…
-              </Badge>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={isMainnet ? 'mainnet' : 'testnet'} className="text-[10px]">
+              {isMainnet ? 'mainnet · real money' : 'testnet'}
+            </Badge>
+            <Badge
+              variant={paused ? 'outline' : liveOnSelectedNetwork ? 'live' : 'default'}
+              className="text-[10px]"
+            >
+              {statusLabel}
+            </Badge>
             <Badge variant="outline" className="text-[10px]">
               Sui Overflow ’26
             </Badge>

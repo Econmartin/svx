@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3030",
     "build": "next build",
+    "build:static": "STATIC_EXPORT=1 next build && cp ws-resources.json out/ws-resources.json",
     "start": "next start -p 3030",
     "lint": "echo 'no lint configured' && exit 0"
   },

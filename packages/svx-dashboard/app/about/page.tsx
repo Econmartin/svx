@@ -594,23 +594,26 @@ export default function AboutPage() {
               Replaced with a two-column responsive list: path on top,
               description below at narrow widths; side-by-side from sm up. */}
           <dl className="divide-y divide-border/60 text-sm">
-            <RepoNode path="packages/svx-bot/" body="Trading bot — TS, Node 18+, runs both networks." />
+            <RepoNode path="packages/svx-bot/" body="Trading bot — TypeScript, Node 18+, runs both networks." />
             <RepoNode path="    src/tunables.ts" body="All strategy knobs as plain TS constants." indent />
             <RepoNode path="    src/config.ts" body="Env-driven gates + zod validation." indent />
-            <RepoNode path="    src/index.ts" body="Main loop + vol-arb fast ticker." indent />
-            <RepoNode path="    src/pricing/{svi,bs,…}" body="SVI eval, BS binary, IV inversion." indent />
+            <RepoNode path="    src/index.ts" body="Main loop + IV-RV ticker + margin-lever ticker." indent />
+            <RepoNode path="    src/pricing/{svi,svi-arb,bs,…}" body="SVI eval, arb-free checker, BS binary, IV inversion." indent />
             <RepoNode path="    src/signal/{match,spread,filter}" body="Cross-venue spread + filters." indent />
-            <RepoNode path="    src/exec/{ptb,risk,sizer,polymarket-client,hyperliquid-client}" body="Order construction + risk gates." indent />
+            <RepoNode path="    src/exec/{ptb,risk,sizer,polymarket-client,hyperliquid-client,deepbook-margin-client,iron-bank-client}" body="Order construction + risk gates for all four venues." indent />
             <RepoNode path="    src/ledger/store.ts" body="SQLite + additive migrations." indent />
-            <RepoNode path="    src/strategy/vol-arb.ts" body="Standalone HL vol-divergence strategy." indent />
+            <RepoNode path="    src/strategy/vol-arb.ts" body="Standalone HL IV-RV divergence strategy." indent />
+            <RepoNode path="    src/strategy/margin-lever.ts" body="Paper-mode Predict × deepbook_margin × iron_bank composition." indent />
             <RepoNode path="    src/api/server.ts" body="Read-only HTTP for the dashboard." indent />
-            <RepoNode path="    scripts/" body="Operator scripts (setup, force-*, redeem)." indent />
-            <RepoNode path="    tests/" body="Vitest, 146 tests." indent />
-            <RepoNode path="packages/svx-dashboard/" body="This site. Next.js 14 (app router)." />
-            <RepoNode path="    app/{,signals,positions,vol-arb,wallets,surface,about}/" body="One route per page; network-aware." indent />
-            <RepoNode path="    components/, lib/" body="Shared UI primitives + the API client." indent />
+            <RepoNode path="    scripts/" body="Operator scripts (setup, force-*, redeem, generate-wallet)." indent />
+            <RepoNode path="    tests/" body="Vitest — 150+ tests covering math vectors + integration paths." indent />
+            <RepoNode path="packages/svx-dashboard/" body="This site. Next.js 14 (app router), static-exportable for Walrus." />
+            <RepoNode path="    app/{,overview,signals,positions,poly-arb,vol-arb,margin-lever,wallets,surface,about}/" body="One route per page; network-aware via header toggle." indent />
+            <RepoNode path="    components/" body="PageIntro, OperatorBanner, StatRow, SurfaceArbPanel, SviHistoryChart, charts." indent />
+            <RepoNode path="    lib/" body="API client, network context, polling hook." indent />
+            <RepoNode path="    ws-resources.json" body="Walrus Sites routing + cache headers." indent />
             <RepoNode path="packages/svx-shared/" body="Types + addresses + constants." />
-            <RepoNode path="docs/" body="Runbooks, strategy spec, math validation." />
+            <RepoNode path="docs/" body="Runbooks, strategy spec, math validation, Coolify deploy notes." />
           </dl>
         </CardContent>
       </Card>

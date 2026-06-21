@@ -11,6 +11,24 @@
     }
   },
   "routes": {
+    "/about": "/about/index.html",
+    "/about/": "/about/index.html",
+    "/overview": "/overview/index.html",
+    "/overview/": "/overview/index.html",
+    "/signals": "/signals/index.html",
+    "/signals/": "/signals/index.html",
+    "/positions": "/positions/index.html",
+    "/positions/": "/positions/index.html",
+    "/poly-arb": "/poly-arb/index.html",
+    "/poly-arb/": "/poly-arb/index.html",
+    "/vol-arb": "/vol-arb/index.html",
+    "/vol-arb/": "/vol-arb/index.html",
+    "/margin-lever": "/margin-lever/index.html",
+    "/margin-lever/": "/margin-lever/index.html",
+    "/wallets": "/wallets/index.html",
+    "/wallets/": "/wallets/index.html",
+    "/surface": "/surface/index.html",
+    "/surface/": "/surface/index.html",
     "/404": "/404.html"
   },
   "metadata": {

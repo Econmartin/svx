@@ -91,7 +91,7 @@ export default function SurfacePage() {
         }
         hints={[
           <>Pick a different expiry above to flip between the active oracles. Shorter expiries usually show steeper smiles.</>,
-          <>The shape of the smile matters: a clear skew tilts the directional bias gate on Vol-arb; a flat smile means neutral.</>,
+          <>The shape of the smile matters: a clear skew tilts the directional bias gate on the IV-RV strategy and Margin-Lever; a flat smile means neutral.</>,
           <>If the SVI parameters age past <code className="font-mono text-[10px]">maxSviStalenessSec</code>, the bot refuses to trade off that oracle (visible as <code className="font-mono text-[10px]">filter_reason: svi_stale</code> on Signals).</>,
         ]}
       />

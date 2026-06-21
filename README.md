@@ -6,6 +6,17 @@ SVX prices every BTC binary on Predict's continuous SVI surface, compares to Pol
 
 Execution is live on Polymarket (Polygon mainnet) and ready to flip on Predict the moment Predict ships on Sui mainnet. The bot detects UMA settlement, auto-redeems winning shares back to pUSD, and tracks realized PnL end-to-end.
 
+## Live deployments
+
+| Surface | URL | Hosting |
+|---|---|---|
+| Dashboard (primary) | <https://svx.econmartin.xyz> | Netlify (Let's Encrypt TLS) |
+| Dashboard (on-chain) | <https://econmartin.wal.app> | [Walrus Sites](https://docs.wal.app) on Sui mainnet, resolved via the `econmartin` [SuiNS](https://suins.io) name |
+| Bot API — testnet | `https://svx-testnet.econmartin.xyz` | Self-hosted on Coolify (read-only JSON) |
+| Bot API — mainnet | `https://svx-mainnet.econmartin.xyz` | Self-hosted on Coolify (read-only JSON) |
+
+The two dashboards serve identical code from the same git commit; the Walrus deploy stores the static bundle as a Sui object (id: `0x0a3fb7e6abe7a3287cc042186ac3f24638296400dad0e01bbab2cb2775b67565`) and is reachable via the Sui-native `wal.app` portal. Use whichever you prefer — both fetch live data from the same bot APIs.
+
 ## Why this project
 
 The DeepBook Predict problem statement explicitly names cross-venue vol-arb between Predict and Polymarket as *"the single most realistic mainnet-day-one strategy — and it doubles as live stress test of the SVI feeder."* SVX is that bot.
@@ -72,16 +83,20 @@ A few things we knowingly cut or accepted as structural constraints — better t
                                  ▼
    ┌────────────────────────────────────────────────────────────┐
    │                   SVX BOT (TypeScript)                     │
-   │  pricing/{svi,bs,predict,polymarket}                       │
+   │  pricing/{svi,svi-arb,bs,predict,polymarket}               │
    │  signal/{match,spread,filter}                              │
-   │  exec/{sizer,risk,ptb,keypair}                             │
+   │  exec/{sizer,risk,ptb,keypair,                             │
+   │        polymarket-client,hyperliquid-client,               │
+   │        deepbook-margin-client,iron-bank-client}            │
+   │  strategy/{vol-arb,margin-lever}                           │
    │  ledger/{store}     ops/{kill}     api/{server}            │
    └────────────────────────────────────────────────────────────┘
                                  │
                                  ▼
    ┌────────────────────────────────────────────────────────────┐
    │           SVX DASHBOARD (Next.js, read-only)               │
-   │   Overview · Signals · Positions · Surface · About         │
+   │  Overview · Signals · Positions · Poly-arb · IV-RV         │
+   │       · Margin-lever · Wallets · Surface · About           │
    └────────────────────────────────────────────────────────────┘
 ```
 
@@ -243,22 +258,37 @@ Manual kill switch is a filesystem flag (`/tmp/svx-paused`); the bot checks it e
 
 ```
 packages/
-  svx-bot/           # the trading bot
+  svx-bot/                          # the trading bot
     src/
-      pricing/       # SVI evaluator, BS binary pricing, REST clients
-      signal/        # matching, spread computation, data filters
-      exec/          # sizer, risk gate, PTB builders, keypair loader
-      ledger/        # SQLite store
-      ops/           # kill switch
-      api/           # read-only HTTP for the dashboard
-      cli.ts         # `svx` CLI
-      index.ts       # main scheduler loop
-    tests/           # math vectors + integration tests
-  svx-dashboard/     # Next.js read-only viewer
-  svx-shared/        # shared types, constants, addresses
-scripts/
-  setup-manager.ts   # one-time PredictManager creation (gated on dUSDC)
-  backtest.ts        # historical replay
+      pricing/                      # SVI evaluator, arb-free checker,
+                                    #   BS binary pricing, REST clients
+        svi.ts, svi-arb.ts, bs.ts, predict.ts, polymarket.ts
+      signal/                       # matching, spread computation, filters
+      exec/                         # sizer, risk gate, PTB builders, keypair,
+                                    #   polymarket / hyperliquid / deepbook-margin
+                                    #   / iron-bank protocol clients
+      strategy/
+        vol-arb.ts                  # standalone IV-RV divergence ticker (HL only)
+        margin-lever.ts             # paper-mode three-protocol margin loop
+                                    #   (Predict signal × deepbook_margin × iron_bank)
+      ledger/store.ts               # SQLite, additive migrations
+      ops/kill.ts                   # /tmp/svx-paused filesystem kill switch
+      api/server.ts                 # read-only HTTP for the dashboard
+      tunables.ts                   # all non-secret strategy knobs
+      cli.ts                        # `svx` CLI (start, pause, resume, status, report)
+      index.ts                      # main scheduler — poly-arb loop + sub-tickers
+    tests/                          # 150+ tests: math vectors + integration suites
+  svx-dashboard/                    # Next.js 14 read-only viewer (app router)
+    app/
+      page.tsx, overview/, signals/, positions/, poly-arb/, vol-arb/,
+      margin-lever/, wallets/, surface/, about/
+    components/                     # PageIntro, OperatorBanner, StatRow,
+                                    #   SurfaceArbPanel, SviHistoryChart,
+                                    #   EdgeCaptureChart, CalibrationChart, …
+    lib/                            # api client, network context, polling hook
+    ws-resources.json               # Walrus Sites routing + cache headers
+  svx-shared/                       # shared types, constants, pinned addresses
+scripts/                            # operator scripts (setup-manager, backtest)
 docs/
   strategy-spec.md
   math-validation.md
@@ -266,14 +296,30 @@ docs/
   operations-runbook.md
   mainnet-runbook.md
   demo-script.md
+  deploy-coolify.md
 ```
 
 ## Track-required notes
 
-- **Predict integration.** Composes with `predict::create_manager`, `predict::mint`, `predict::redeem`, `predict::redeem_permissionless` on the testnet `predict-testnet-4-16` deployment. Package + object IDs pinned in [packages/svx-shared/src/addresses.ts](packages/svx-shared/src/addresses.ts).
+- **Predict integration.** Composes with `predict::create_manager`, `predict::mint`, `predict::redeem`, `predict::redeem_permissionless`, and `predict_manager::*` on the testnet `predict-testnet-4-16` deployment. Package + object IDs pinned in [packages/svx-shared/src/addresses.ts](packages/svx-shared/src/addresses.ts).
 - **Polymarket integration.** Live on Polygon mainnet — submits Yes/No outcome buys via the [Polymarket CLOB v2 SDK](https://github.com/Polymarket/clob-client), polls gamma for UMA resolution, redeems winning shares via the NegRiskAdapter / ConditionalTokens contracts. Wallet operations are documented in [docs/mainnet-runbook.md](docs/mainnet-runbook.md).
-- **Submission category.** Bot/keeper. Not a vault, not a consumer app, not a tokenized share product.
-- **Mainnet-day-one claim.** Polymarket leg is mainnet today. The Sui leg flips with a single config change documented in [docs/mainnet-runbook.md](docs/mainnet-runbook.md) once Predict ships on Sui mainnet.
+- **Hyperliquid integration.** Live on Hyperliquid mainnet — opens delta-sized BTC perp hedges on every Polymarket fill via the [HL Node SDK](https://github.com/nktkas/hyperliquid). Closes on settlement; funding + fees tracked in the ledger and surfaced on the dashboard.
+- **DeepBook Margin + Iron Bank composition.** The Margin-Lever strategy constructs real PTBs against `deepbook_margin::*` and `iron_bank::*` (Sui mainnet). Currently paper-mode: PTBs are built and ledgered, never signed. Flipping to live is a tunables change + USDsui collateral funding step.
+- **Submission category.** Bot/keeper. Not a vault, not a consumer app, not a tokenized share product. Single-operator architecture — no users, no pooled funds, no securities-law exposure.
+- **Mainnet-day-one claim.** Polymarket + Hyperliquid legs are mainnet today. The Sui Predict leg flips with a single config change documented in [docs/mainnet-runbook.md](docs/mainnet-runbook.md) once Predict ships on Sui mainnet.
+
+## On-chain references
+
+| Resource | Network | Identifier |
+|---|---|---|
+| Predict package | Sui testnet | `0xf5ea2b3749c65d6e56507cc35388719aadb28f9cab873696a2f8687f5c785138` (`predict-testnet-4-16`) |
+| Predict shared object | Sui testnet | `0xc8736204d12f0a7277c86388a68bf8a194b0a14c5538ad13f22cbd8e2a38028a` |
+| dUSDC type | Sui testnet | `0xe95040085976bfd54a1a07225cd46c8a2b4e8e2b6732f140a0fc49850ba73e1a::dusdc::DUSDC` |
+| Operator's PredictManager | Sui testnet | `0x02a1c838ee9ccca772076b7c5be0a54093c47632cac27fb676bd1db5d5b30f03` |
+| Walrus Site object | Sui mainnet | `0x0a3fb7e6abe7a3287cc042186ac3f24638296400dad0e01bbab2cb2775b67565` |
+| SuiNS name | Sui mainnet | `econmartin` → resolves to the Walrus Site object above |
+
+The operator's testnet address is pinned in [packages/svx-shared/src/addresses.ts](packages/svx-shared/src/addresses.ts) so anyone can verify mints, redeems, and PredictManager state directly on [Suiscan](https://suiscan.xyz/testnet).
 
 ## License
 

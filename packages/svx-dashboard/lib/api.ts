@@ -181,8 +181,41 @@ export interface OracleSummary {
 
 export interface SurfacePoint {
   strike: number;
+  /** Log-moneyness ln(K/F). Omitted by older bot versions. */
+  k?: number;
   iv: number;
   up: number;
+  /** Butterfly-arb density g(k). ≥ 0 ⇒ implied density is non-negative. */
+  density?: number;
+  butterflyOk?: boolean;
+}
+
+export interface SurfaceArbReport {
+  butterfly: { ok: boolean; worst: number; worstIndex: number };
+  wing: { ok: boolean; bound: number; actual: number; tYears: number };
+  calendar?: {
+    ok: boolean;
+    worstDeficit: number;
+    worstK: number;
+    longerOracleId: string;
+    longerTYears: number;
+  };
+}
+
+export interface SurfaceHistoryPoint {
+  tsMs: number;
+  spot: number;
+  forward: number;
+  a: number;
+  b: number;
+  rho: number;
+  m: number;
+  sigma: number;
+}
+
+export interface SurfaceHistoryResponse {
+  oracleId: string;
+  points: SurfaceHistoryPoint[];
 }
 
 export interface SurfaceResponse {
@@ -191,8 +224,12 @@ export interface SurfaceResponse {
   spot: number;
   expiryMs: number;
   timestampMs: number;
+  /** Time-to-expiry in years. Omitted by older bot versions. */
+  tYears?: number;
   svi: { a: number; b: number; rho: number; m: number; sigma: number };
   points: SurfacePoint[];
+  /** Arbitrage-free diagnostics. Omitted by older bot versions. */
+  arb?: SurfaceArbReport;
 }
 
 /**
@@ -241,6 +278,54 @@ export interface VolArbStateResponse {
   openExposureUsdc: number;
   realizedPnl24hUsdc: number;
   realizedPnlUsdc: number;
+}
+
+export interface MarginLeverDecision {
+  ts: number;
+  action: 'hold' | 'open_long' | 'open_short' | 'close';
+  reason: string;
+  predictUpAtSpot: number;
+  biasMagnitude: number;
+  spot: number;
+}
+
+export interface MarginLeverOpenPosition {
+  id: string;
+  openedAtMs: number;
+  side: 'long' | 'short';
+  notionalUsdc: number;
+  entryPrice: number;
+  openPredictUp: number;
+  oracleId: string;
+  openReason: string;
+}
+
+export interface MarginLeverClosedPosition extends MarginLeverOpenPosition {
+  closedAtMs: number;
+  exitPrice: number;
+  pnlUsdc: number;
+  closeReason: string;
+}
+
+export interface MarginLeverStateResponse {
+  enabled: boolean;
+  mode: 'paper';
+  thresholds: {
+    openBias: number;
+    closeBias: number;
+    maxHoldMinutes: number;
+  };
+  caps: {
+    perTradeNotionalUsdc: number;
+    maxBorrowNotionalUsdc: number;
+    dailyLossLimitUsdc: number;
+  };
+  open: MarginLeverOpenPosition | null;
+  closed: MarginLeverClosedPosition[];
+  recentDecisions: MarginLeverDecision[];
+  lastDecision: MarginLeverDecision | null;
+  simulatedPnlUsdc: number;
+  simulatedPnl24hUsdc: number;
 }
 
 export interface WalletsSnapshot {
@@ -341,7 +426,10 @@ export function createApi(base: string) {
     wallets: () => get<WalletsSnapshot>('/wallets'),
     volArbState: () => get<VolArbStateResponse>('/strategy/vol-arb/state'),
     oracles: () => get<OracleSummary[]>('/oracles'),
+    marginLeverState: () => get<MarginLeverStateResponse>('/strategy/margin-lever/state'),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
+    surfaceHistory: (oracleId: string, limit = 200) =>
+      get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),
   };
 }
 

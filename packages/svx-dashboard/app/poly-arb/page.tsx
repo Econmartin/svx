@@ -31,6 +31,7 @@ import { Badge } from '@/components/ui/badge';
 import { StatRow } from '@/components/StatRow';
 import { StatusBadge } from '@/components/StatusBadge';
 import { PageIntro } from '@/components/PageIntro';
+import { OperatorBanner } from '@/components/OperatorBanner';
 import { EdgeCaptureChart } from '@/components/EdgeCaptureChart';
 import {
   Table,
@@ -110,7 +111,7 @@ export default function PolyArbPage() {
           delta-hedge with a BTC perp on Hyperliquid. Pure-vol PnL after the
           two legs net out. Independent from the standalone HL{' '}
           <a href="/vol-arb" className="underline hover:text-accent">
-            vol-arb strategy
+            IV-RV divergence strategy
           </a>
           .
         </p>
@@ -121,6 +122,14 @@ export default function PolyArbPage() {
           Could not reach the bot API: {statusError}
         </div>
       )}
+
+      <OperatorBanner
+        context={
+          isMainnet
+            ? 'real money in flight on Polymarket + Hyperliquid'
+            : 'paper signals on testnet'
+        }
+      />
 
       <PageIntro
         summary={

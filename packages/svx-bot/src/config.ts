@@ -218,6 +218,16 @@ const Schema = z.object({
   /** Predict ATM-IV cache TTL — the vol-arb fast ticker reuses the snapshot
    *  for this many ms before re-fetching. */
   volArbOracleCacheMs: z.number().int().positive().default(30_000),
+
+  // Margin-Lever (paper). Gated entirely in v1 — never sends a tx.
+  marginLeverEnabled: z.boolean().default(false),
+  marginLeverOpenBias: z.number().min(0).max(0.5).default(0.10),
+  marginLeverCloseBias: z.number().min(0).max(0.5).default(0.04),
+  marginLeverMaxHoldMinutes: z.number().positive().default(45),
+  marginLeverPerTradeNotionalUsdc: z.number().positive().default(500),
+  marginLeverMaxBorrowNotionalUsdc: z.number().positive().default(1500),
+  marginLeverDailyLossLimitUsdc: z.number().positive().default(100),
+  marginLeverTickMs: z.number().int().positive().default(15_000),
   /** Master switch for mid-life Polymarket exits. */
   polyEarlyExitEnabled: z.boolean().default(true),
   /** Profit-take fraction (vs cost) at which we sell the poly leg early. */
@@ -260,6 +270,7 @@ export function loadConfig(): SvxConfig {
     polyExecutionEnabled: parseBool(process.env.POLY_EXECUTION_ENABLED, false),
     hlExecutionEnabled: parseBool(process.env.HL_EXECUTION_ENABLED, false),
     volArbEnabled: parseBool(process.env.VOL_ARB_ENABLED, false),
+    marginLeverEnabled: parseBool(process.env.MARGIN_LEVER_ENABLED, false),
 
     // ── Network choices (env — per-deployment) ──
     polyNetwork: (process.env.POLY_NETWORK as 'amoy' | 'polygon' | undefined) ?? 'amoy',
@@ -320,6 +331,13 @@ export function loadConfig(): SvxConfig {
     volArbMinSamples: TUNABLES.volArbMinSamples,
     volArbTickMs: TUNABLES.volArbTickMs,
     volArbOracleCacheMs: TUNABLES.volArbOracleCacheMs,
+    marginLeverOpenBias: TUNABLES.marginLeverOpenBias,
+    marginLeverCloseBias: TUNABLES.marginLeverCloseBias,
+    marginLeverMaxHoldMinutes: TUNABLES.marginLeverMaxHoldMinutes,
+    marginLeverPerTradeNotionalUsdc: TUNABLES.marginLeverPerTradeNotionalUsdc,
+    marginLeverMaxBorrowNotionalUsdc: TUNABLES.marginLeverMaxBorrowNotionalUsdc,
+    marginLeverDailyLossLimitUsdc: TUNABLES.marginLeverDailyLossLimitUsdc,
+    marginLeverTickMs: TUNABLES.marginLeverTickMs,
     polyEarlyExitEnabled: TUNABLES.polyEarlyExitEnabled,
     polyEarlyExitMinProfitFrac: TUNABLES.polyEarlyExitMinProfitFrac,
     autoResumeOnBoot: TUNABLES.autoResumeOnBoot,

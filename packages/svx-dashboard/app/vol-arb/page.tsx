@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/table';
 import { CheckCircle, Warning, Pulse, Clock } from '@phosphor-icons/react';
 import { PageIntro } from '@/components/PageIntro';
+import { OperatorBanner } from '@/components/OperatorBanner';
 
 export default function VolArbPage() {
   const client = useApiClient();
@@ -71,7 +72,7 @@ export default function VolArbPage() {
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
-            Vol-arb strategy
+            IV-RV divergence strategy
           </h1>
           <Badge variant={data.enabled ? 'live' : 'outline'}>
             {data.enabled ? 'exec on' : 'paper / signals only'}
@@ -98,6 +99,8 @@ export default function VolArbPage() {
           Predict×Polymarket arb on the overview page.
         </p>
       </header>
+
+      <OperatorBanner context="standalone HL strategy — single-operator perp account" />
 
       <PageIntro
         summary={

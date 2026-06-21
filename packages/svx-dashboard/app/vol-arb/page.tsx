@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/table';
 import { CheckCircle, Warning, Pulse, Clock } from '@phosphor-icons/react';
 import { PageIntro } from '@/components/PageIntro';
+import { OperatorBanner } from '@/components/OperatorBanner';
 
 export default function VolArbPage() {
   const client = useApiClient();
@@ -98,6 +99,8 @@ export default function VolArbPage() {
           Predict×Polymarket arb on the overview page.
         </p>
       </header>
+
+      <OperatorBanner context="standalone HL strategy — single-operator perp account" />
 
       <PageIntro
         summary={

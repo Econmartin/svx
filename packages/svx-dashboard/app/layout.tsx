@@ -1,5 +1,5 @@
 import './globals.css';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
 import { NetworkProvider } from '@/lib/network-context';
 import { NetworkToggle } from '@/components/NetworkToggle';
@@ -10,6 +10,16 @@ export const metadata: Metadata = {
   title: 'SVX — Cross-venue vol-arb on DeepBook Predict',
   description:
     'A fully-automated bot that trades the spread between DeepBook Predict (SVI surface) and Polymarket BTC binaries, delta-hedged on Hyperliquid.',
+};
+
+// Without this, mobile browsers render the page at the default ~980px
+// desktop viewport and scale it down — content looks "half width" and tiny.
+// Setting width=device-width is what makes Tailwind's `sm:`/`md:` breakpoints
+// actually fire on real phones.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: '#06090a',
 };
 
 /**
@@ -27,37 +37,70 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="svx-ambient" aria-hidden />
           <div className="svx-grid" aria-hidden />
 
-          <header className="sticky top-0 z-40 border-b border-border bg-bg/90 backdrop-blur supports-[backdrop-filter]:bg-bg/70">
-            <div className="px-6 py-3 flex items-center gap-6">
-              <Link
-                href="/"
-                className="flex items-center gap-2 whitespace-nowrap group"
-              >
-                <span
-                  aria-hidden
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent/12 border border-accent/30 text-accent font-mono font-bold text-sm shadow-[0_0_18px_-4px_rgba(30,255,138,0.55)] group-hover:bg-accent/20 transition-colors"
+          <a
+            href="#main"
+            className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-accent focus:px-3 focus:py-2 focus:text-bg focus:font-medium"
+          >
+            Skip to content
+          </a>
+
+          <header className="sticky top-0 z-40 border-b border-border/80 bg-bg/85 backdrop-blur supports-[backdrop-filter]:bg-bg/65">
+            {/* Two-row header on mobile (brand + toggles on top, scrollable
+                nav below); single-row from md up. Keeps each row well within
+                the viewport instead of clipping the nav off-screen. */}
+            <div className="max-w-[1600px] mx-auto">
+              <div className="px-4 sm:px-5 h-14 flex items-center gap-3 md:gap-5">
+                <Link
+                  href="/"
+                  aria-label="SVX home"
+                  className="flex items-center gap-2.5 whitespace-nowrap group h-8 flex-shrink-0"
                 >
-                  S
-                </span>
-                <span className="font-mono font-bold tracking-tight text-base">
-                  <span className="text-accent">SVX</span>
-                  <span className="text-muted">/</span>
-                  <span className="text-fg/80 text-xs uppercase tracking-wider">
-                    vol-arb
+                  <span
+                    aria-hidden
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-accent/12 border border-accent/30 text-accent font-mono font-bold text-sm shadow-[0_0_22px_-6px_rgba(30,255,138,0.7)] group-hover:bg-accent/20 group-hover:border-accent/50 transition-colors"
+                  >
+                    S
                   </span>
-                </span>
-              </Link>
-              <NavLinks />
-              <div className="ml-auto flex items-center gap-4">
-                <NetworkToggle />
-                <span className="hidden md:inline text-[10px] text-muted font-mono whitespace-nowrap uppercase tracking-wider">
-                  Sui Overflow ’26
-                </span>
+                  <span className="flex items-baseline gap-1.5 leading-none">
+                    <span className="font-mono font-semibold tracking-tight text-[15px] text-fg">
+                      SVX
+                    </span>
+                    <span
+                      aria-hidden
+                      className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium"
+                    >
+                      vol-arb
+                    </span>
+                  </span>
+                </Link>
+                <span aria-hidden className="hidden md:block h-5 w-px bg-border/80" />
+                <div className="hidden md:block min-w-0 flex-1">
+                  <NavLinks />
+                </div>
+                <div className="ml-auto flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                  <NetworkToggle />
+                  <span
+                    aria-hidden
+                    className="hidden xl:inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-surface/60 px-2.5 h-7 text-[10px] text-muted font-mono whitespace-nowrap uppercase tracking-[0.14em]"
+                  >
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent/70" />
+                    Sui Overflow ’26
+                  </span>
+                </div>
+              </div>
+              {/* Mobile-only nav row: horizontally scrollable so all 7 links
+                  remain reachable on a 375px viewport without forcing the
+                  brand row to wrap. */}
+              <div className="md:hidden px-4 pb-2 -mt-1 overflow-x-auto scrollbar-none">
+                <NavLinks />
               </div>
             </div>
           </header>
 
-          <main className="relative z-10 px-6 py-6 pb-12 max-w-7xl mx-auto animate-fade-in">
+          <main
+            id="main"
+            className="relative z-10 px-5 sm:px-6 py-6 pb-16 max-w-[1400px] mx-auto animate-fade-in"
+          >
             {children}
           </main>
 

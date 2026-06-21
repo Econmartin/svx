@@ -54,31 +54,33 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-start gap-4 justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-3">
-            SVX Overview
-            <Badge variant={isMainnet ? 'mainnet' : 'testnet'} className="text-[10px]">
-              {isMainnet ? 'mainnet · real money' : 'testnet'}
-            </Badge>
+      <header className="space-y-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+            Overview
           </h1>
-          <p className="text-muted text-sm mt-1">
-            {isMainnet
-              ? 'Polymarket execution on Polygon with delta-hedged Hyperliquid perp legs. Predict signals priced from testnet SVI surface.'
-              : 'Cross-venue vol-arb on DeepBook Predict testnet, paired with paper Polymarket signals.'}
-          </p>
+          <Badge variant={isMainnet ? 'mainnet' : 'testnet'} className="text-[10px]">
+            {isMainnet ? 'mainnet · real money' : 'testnet'}
+          </Badge>
+          {status && (
+            <span className="sm:ml-auto">
+              <StatusBadge
+                paused={status.paused}
+                reason={status.pauseReason}
+                live={
+                  isMainnet
+                    ? !!status.polyExecutionEnabled
+                    : !!status.liveTradingEnabled
+                }
+              />
+            </span>
+          )}
         </div>
-        {status && (
-          <StatusBadge
-            paused={status.paused}
-            reason={status.pauseReason}
-            live={
-              isMainnet
-                ? !!status.polyExecutionEnabled
-                : !!status.liveTradingEnabled
-            }
-          />
-        )}
+        <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
+          {isMainnet
+            ? 'Polymarket execution on Polygon with delta-hedged Hyperliquid perp legs. Predict signals priced from testnet SVI surface.'
+            : 'Cross-venue vol-arb on DeepBook Predict testnet, paired with paper Polymarket signals.'}
+        </p>
       </header>
 
       {statusError && (

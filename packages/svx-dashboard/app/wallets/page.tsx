@@ -40,9 +40,11 @@ export default function WalletsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Wallets</h1>
-        <p className="text-muted text-sm mt-1">
+      <header className="space-y-2">
+        <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+          Wallets
+        </h1>
+        <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
           On-chain truth for each operator wallet — what's actually there, not
           what the bot's ledger thinks. Cross-referenced with the ledger view
           to spot orphan fills.

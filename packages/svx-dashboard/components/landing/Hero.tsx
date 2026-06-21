@@ -55,7 +55,10 @@ export function Hero({
         <div className="svx-hero-grid absolute inset-0" aria-hidden />
         <div className="svx-hero-gradient absolute inset-0" />
 
-        <div className="relative flex flex-col justify-end h-full pb-24 sm:pb-28 px-6 sm:px-10 md:px-12 gap-5">
+        <div className="relative flex flex-col justify-between h-full pt-8 sm:pt-10 pb-24 sm:pb-28 px-6 sm:px-10 md:px-12 gap-8">
+          {/* Top-anchored chip row — sits above the bottom-anchored
+              headline block so the badges read as a header strip rather
+              than crowding the H1. */}
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={isMainnet ? 'mainnet' : 'testnet'} className="text-[10px]">
               {isMainnet ? 'mainnet · real money' : 'testnet'}
@@ -71,19 +74,21 @@ export function Hero({
             </Badge>
           </div>
 
-          <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-semibold text-white leading-[0.95] tracking-tight max-w-3xl">
-            Cross-venue<br />
-            vol-arb on<br />
-            <span className="text-accent">DeepBook Predict.</span>
-          </h1>
+          {/* Bottom-anchored headline + stats block. */}
+          <div className="flex flex-col gap-5">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-semibold text-white leading-[0.95] tracking-tight max-w-3xl">
+              Cross-venue<br />
+              vol-arb on<br />
+              <span className="text-accent">DeepBook Predict.</span>
+            </h1>
 
-          <p className="text-base sm:text-lg text-white/75 max-w-xl leading-relaxed">
-            One operator, three venues, pure-vol PnL. A single-operator bot
-            that prices binaries off Predict's SVI surface, executes on
-            Polymarket, and hedges on Hyperliquid — fully open source.
-          </p>
+            <p className="text-base sm:text-lg text-white/75 max-w-xl leading-relaxed">
+              One operator, three venues, pure-vol PnL. A single-operator bot
+              that prices binaries off Predict's SVI surface, executes on
+              Polymarket, and hedges on Hyperliquid — fully open source.
+            </p>
 
-          <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3 pt-2 max-w-3xl">
+            <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3 pt-2 max-w-3xl">
             <Stat
               label={isMainnet ? 'Combined PnL' : 'Predict PnL'}
               value={formatUsdc(combinedPnl)}
@@ -108,7 +113,8 @@ export function Hero({
               tone="neutral"
               hint="Predict · Poly · HL"
             />
-          </dl>
+            </dl>
+          </div>
         </div>
       </div>
 

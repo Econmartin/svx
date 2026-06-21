@@ -181,8 +181,25 @@ export interface OracleSummary {
 
 export interface SurfacePoint {
   strike: number;
+  /** Log-moneyness ln(K/F). Omitted by older bot versions. */
+  k?: number;
   iv: number;
   up: number;
+  /** Butterfly-arb density g(k). ≥ 0 ⇒ implied density is non-negative. */
+  density?: number;
+  butterflyOk?: boolean;
+}
+
+export interface SurfaceArbReport {
+  butterfly: { ok: boolean; worst: number; worstIndex: number };
+  wing: { ok: boolean; bound: number; actual: number; tYears: number };
+  calendar?: {
+    ok: boolean;
+    worstDeficit: number;
+    worstK: number;
+    longerOracleId: string;
+    longerTYears: number;
+  };
 }
 
 export interface SurfaceResponse {
@@ -191,8 +208,12 @@ export interface SurfaceResponse {
   spot: number;
   expiryMs: number;
   timestampMs: number;
+  /** Time-to-expiry in years. Omitted by older bot versions. */
+  tYears?: number;
   svi: { a: number; b: number; rho: number; m: number; sigma: number };
   points: SurfacePoint[];
+  /** Arbitrage-free diagnostics. Omitted by older bot versions. */
+  arb?: SurfaceArbReport;
 }
 
 /**

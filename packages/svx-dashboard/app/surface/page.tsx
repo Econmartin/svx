@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageIntro } from '@/components/PageIntro';
+import { SurfaceArbPanel } from '@/components/SurfaceArbPanel';
 
 export default function SurfacePage() {
   const client = useApiClient();
@@ -249,6 +250,10 @@ export default function SurfacePage() {
               )}
             </CardContent>
           </Card>
+
+          {surface.arb && (
+            <SurfaceArbPanel arb={surface.arb} points={surface.points} />
+          )}
         </>
       ) : (
         <Card>

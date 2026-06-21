@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/cn';
 
 const NAV = [
-  ['Overview', '/'],
+  ['Overview', '/overview'],
   ['Signals', '/signals'],
   ['Positions', '/positions'],
   ['Poly-arb', '/poly-arb'],
@@ -25,7 +25,7 @@ export function NavLinks() {
   return (
     <nav aria-label="Primary" className="flex items-center gap-0.5 text-[13px]">
       {NAV.map(([label, href]) => {
-        const isActive = href === '/' ? pathname === '/' : pathname?.startsWith(href);
+        const isActive = pathname === href || pathname?.startsWith(`${href}/`);
         return (
           <Link
             key={href}

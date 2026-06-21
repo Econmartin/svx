@@ -1,556 +1,303 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback } from 'react';
 import { useApiClient, useNetwork } from '@/lib/network-context';
-import { formatPct, formatUsdc, formatRelative, type TradeRecord } from '@/lib/api';
 import { usePolling } from '@/lib/usePolling';
-import { StatRow } from '@/components/StatRow';
-import { StatusBadge } from '@/components/StatusBadge';
-import { HealthPanel } from '@/components/HealthPanel';
-import { PageIntro } from '@/components/PageIntro';
-import { PnlChart } from '@/components/PnlChart';
-import { StrategyStats } from '@/components/StrategyStats';
-import { EdgeCaptureChart } from '@/components/EdgeCaptureChart';
-import { CalibrationChart } from '@/components/CalibrationChart';
+import { formatUsdc, formatPct } from '@/lib/api';
+import { Hero } from '@/components/landing/Hero';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { ArrowSquareOut } from '@phosphor-icons/react';
+  ArrowRight,
+  ArrowSquareOut,
+  ChartLineUp,
+  Cube,
+  GitFork,
+  Lightning,
+  Pulse,
+  ShieldCheck,
+  Terminal,
+} from '@phosphor-icons/react';
 
-export default function OverviewPage() {
+export default function LandingPage() {
   const client = useApiClient();
   const { network } = useNetwork();
-  const isMainnet = network === 'mainnet';
-
   const fetchStatus = useCallback(() => client.status(), [client]);
-  const fetchClosed = useCallback(() => client.positionsClosed(500), [client]);
-  const fetchClosedPoly = useCallback(
-    () => (isMainnet ? client.positionsClosedPoly(500) : Promise.resolve([])),
-    [client, isMainnet],
-  );
-  const fetchSignals = useCallback(() => client.signals(15), [client]);
-  const fetchOpen = useCallback(() => client.positionsOpen(), [client]);
+  const { data: status } = usePolling(fetchStatus, 15_000);
 
-  const { data: status, error: statusError } = usePolling(fetchStatus, 10_000);
-  const { data: closed } = usePolling(fetchClosed, 30_000);
-  const { data: closedPoly } = usePolling(fetchClosedPoly, 30_000);
-  const { data: recentSignals } = usePolling(fetchSignals, 5_000);
-  const { data: open } = usePolling(fetchOpen, 10_000);
-
-  // Pick the right "closed" stream depending on view:
-  // - Mainnet: closed Poly trades (mainnet bot is paper-Predict, no Sui PnL)
-  // - Testnet: settled Sui trades
-  const closedForChart = isMainnet ? closedPoly ?? [] : closed ?? [];
-
-  const wins = closedForChart.filter((t) => combinedPnl(t, isMainnet) > 0).length;
-  const winRate = closedForChart.length > 0 ? wins / closedForChart.length : 0;
+  const isMainnet = network === 'mainnet';
+  const combinedPnl = isMainnet
+    ? status?.realizedCombinedPnlUsdc ??
+      ((status?.realizedPolyPnlUsdc ?? 0) + (status?.realizedHlPnlUsdc ?? 0))
+    : status?.realizedPnlUsdc ?? 0;
+  const pnl24h = isMainnet
+    ? status?.realizedCombinedPnl24hUsdc ?? 0
+    : status?.realizedPnl24hUsdc ?? 0;
+  const tradesLast24h = status?.tradesLast24h;
+  const signalsLast24h = status?.signalsLast24h;
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
-            Overview
-          </h1>
-          <Badge variant={isMainnet ? 'mainnet' : 'testnet'} className="text-[10px]">
-            {isMainnet ? 'mainnet · real money' : 'testnet'}
-          </Badge>
-          {status && (
-            <span className="sm:ml-auto">
-              <StatusBadge
-                paused={status.paused}
-                reason={status.pauseReason}
-                live={
-                  isMainnet
-                    ? !!status.polyExecutionEnabled
-                    : !!status.liveTradingEnabled
-                }
-              />
-            </span>
-          )}
-        </div>
-        <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
-          {isMainnet
-            ? 'Polymarket execution on Polygon with delta-hedged Hyperliquid perp legs. Predict signals priced from testnet SVI surface.'
-            : 'Cross-venue vol-arb on DeepBook Predict testnet, paired with paper Polymarket signals.'}
-        </p>
-      </header>
-
-      {statusError && (
-        <Card>
-          <CardContent className="p-4 border border-loss/40 bg-loss/10 rounded-lg text-loss text-sm">
-            Could not reach the bot API: {statusError}.
-          </CardContent>
-        </Card>
-      )}
-
-      <PageIntro
-        summary={
-          isMainnet
-            ? 'Live mainnet snapshot — real money on Polymarket (Polygon CLOB) with a delta-sized Hyperliquid perp hedge on every fill. The Predict leg stays paper-only until Predict ships on Sui mainnet; we use its SVI surface as our pricing brain.'
-            : "Testnet snapshot — the bot mints binary positions on DeepBook Predict with dUSDC, paired with paper Polymarket signals. Useful for watching the full end-to-end loop without spending real money."
+    <div className="space-y-10 -mt-4 sm:-mt-2">
+      <Hero
+        network={network}
+        combinedPnl={combinedPnl}
+        pnl24h={pnl24h}
+        tradesLast24h={tradesLast24h}
+        signalsLast24h={signalsLast24h}
+        paused={!!status?.paused}
+        liveOnSelectedNetwork={
+          isMainnet ? !!status?.polyExecutionEnabled : !!status?.liveTradingEnabled
         }
-        hints={[
-          <>The <strong>health panel</strong> below is the at-a-glance state: paused / live, wallet balances, last fill, NAV.</>,
-          <>Realized PnL on the chart is locked-in only — it excludes any open mark-to-market position.</>,
-          <>Use the network toggle in the header to flip between this view and the {isMainnet ? 'testnet' : 'mainnet'} bot.</>,
-        ]}
       />
 
-      <HealthPanel status={status} showAllLegs={isMainnet} />
+      <section aria-label="What it is" className="space-y-3">
+        <h2 className="text-[20px] font-semibold tracking-tight flex items-center gap-2">
+          <Pulse className="h-5 w-5 text-accent" />
+          What SVX is
+        </h2>
+        <p className="text-fg/85 leading-relaxed max-w-3xl">
+          A single-operator, fully-automated cross-venue volatility-arbitrage
+          bot for the Sui Overflow DeepBook Predict track. It uses Predict's
+          SVI surface as a pricing brain, takes the opposing side on
+          Polymarket when the implied probabilities disagree, and
+          delta-hedges the residual exposure on Hyperliquid perps. Three
+          venues, one bot, pure-vol PnL.
+        </p>
+        <p className="text-muted text-sm max-w-3xl">
+          The dashboard you're on is a read-only window onto the operator's
+          live bot. There is no signup, no wallet-connect, no deposit — the
+          single-operator architecture is intentional and is what keeps SVX
+          out of securities-law territory until the post-audit vault phase.
+        </p>
+      </section>
 
-      <OverviewStats status={status} isMainnet={isMainnet} closedCount={closedForChart.length} winRate={winRate} wins={wins} />
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <div>
-            <CardTitle>Cumulative realized PnL</CardTitle>
-            <p className="text-xs text-muted mt-0.5">
-              {isMainnet ? (
-                <>
-                  Combined (Polymarket + Hyperliquid hedge) = pure-vol PnL.{' '}
-                  <span className="text-fg/80">Net of HL taker fees + funding</span> —
-                  drag is broken out below.
-                </>
-              ) : (
-                'Sui-side dUSDC realized PnL on Predict.'
-              )}
-            </p>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <PnlChart closed={closedForChart} showLegs={isMainnet} />
-        </CardContent>
-      </Card>
-
-      {closedForChart.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Strategy stats</CardTitle>
-            <p className="text-xs text-muted mt-0.5">
-              Derived from the closed-trade tape. Distribution shape, downside,
-              throughput — the metrics that say <em>"is this working consistently?"</em>
-              beyond top-line PnL.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <StrategyStats closed={closedForChart} isMainnet={isMainnet} />
-            {isMainnet && (status?.hlFeesUsdc || status?.hlFundingUsdc) ? (
-              <div className="mt-3 rounded border border-border bg-surface-elevated/50 px-4 py-2.5 text-xs leading-relaxed">
-                <span className="text-muted uppercase tracking-wider text-[10px] mr-2">
-                  HL cost drag
-                </span>
-                <span className="font-mono tabular-nums">
-                  fees{' '}
-                  <span className="text-loss">
-                    −${(status.hlFeesUsdc ?? 0).toFixed(4)}
-                  </span>
-                  {' · '}
-                  funding{' '}
-                  <span
-                    className={
-                      (status.hlFundingUsdc ?? 0) > 0 ? 'text-loss' : 'text-win'
-                    }
-                  >
-                    {(status.hlFundingUsdc ?? 0) > 0 ? '−' : '+'}$
-                    {Math.abs(status.hlFundingUsdc ?? 0).toFixed(4)}
-                  </span>
-                  {' · '}
-                  total{' '}
-                  <span className="text-loss">
-                    −${((status.hlFeesUsdc ?? 0) + Math.max(0, status.hlFundingUsdc ?? 0)).toFixed(4)}
-                  </span>
-                </span>
-                <span className="text-muted ml-2">
-                  — already subtracted from chart + stats above. <em>This is what would have been "missing" if we only counted price PnL.</em>
-                </span>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
-      )}
-
-      {closedForChart.length > 0 && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          {isMainnet && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Edge captured — math validation</CardTitle>
-                <p className="text-xs text-muted mt-0.5 leading-relaxed">
-                  For each closed trade: <strong>entry edge</strong> (the
-                  Predict − Polymarket probability gap the bot saw when it pulled
-                  the trigger) vs <strong>realized return on cost</strong>. If the
-                  math is right, the least-squares fit line tilts up to the right —
-                  deeper edges identified deliver larger realized returns. A flat
-                  or down-sloped fit means the bot is trading noise.
-                </p>
-              </CardHeader>
-              <CardContent>
-                <EdgeCaptureChart
-                  closed={closedForChart}
-                  spreadThreshold={status?.spreadThreshold ?? 0.03}
-                />
-              </CardContent>
-            </Card>
-          )}
-          <Card>
-            <CardHeader>
-              <CardTitle>Calibration — SVI feeder stress test</CardTitle>
-              <p className="text-xs text-muted mt-0.5 leading-relaxed">
-                For each closed trade we bin by <strong>predicted win
-                probability</strong> (Predict's SVI surface, evaluated at the
-                trade's strike) and compute the <strong>actual hit rate</strong>{' '}
-                in that bin. Points sitting on the dashed <em>y = x</em> diagonal
-                mean Predict's probabilities are well-calibrated — when it says
-                "70%," 70% of those trades win. The spec called vol-arb{' '}
-                <em>"a live stress test of the SVI feeder"</em>; this is the result.
-              </p>
-            </CardHeader>
-            <CardContent>
-              <CalibrationChart closed={closedForChart} isMainnet={isMainnet} />
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Open positions{open?.length ? ` (${open.length})` : ''}</span>
-            {open?.length ? (
-              <span className="text-xs text-muted normal-case">live snapshot</span>
-            ) : null}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <OpenPositionsTable
-            open={open ?? []}
-            spot={status?.spotBtc ?? null}
-            isMainnet={isMainnet}
-            polyExecutionEnabled={status?.polyExecutionEnabled ?? false}
+      <section aria-label="Three pillars" className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Pillar
+            icon={<Cube className="h-5 w-5 text-accent" />}
+            title="Pricing brain"
+            kicker="DeepBook Predict (testnet)"
+            body="SVI-parameterised vol surface gives the fair probability for every BTC strike, continuously. The bot back-solves IV, reprices at any expiry, and uses it as the source of truth for every signal."
           />
-        </CardContent>
-      </Card>
+          <Pillar
+            icon={<Lightning className="h-5 w-5 text-warn" />}
+            title="Real-money execution"
+            kicker="Polymarket (Polygon mainnet)"
+            body="When Predict and Polymarket disagree by more than the spread threshold, SVX buys the cheap side via the Polymarket CLOB. Auto-redeems winning shares on settlement."
+          />
+          <Pillar
+            icon={<ShieldCheck className="h-5 w-5 text-loss" />}
+            title="Delta hedge"
+            kicker="Hyperliquid perps (mainnet)"
+            body="Every Polymarket fill triggers a binary-delta-sized BTC perp on the opposite side. Strips directional BTC exposure so realised PnL is the vol edge alone."
+          />
+        </div>
+      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Recent signals</span>
-            <span className="text-xs text-muted normal-case">last 15</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <RecentSignals signals={recentSignals ?? []} />
-        </CardContent>
-      </Card>
+      <section aria-label="Quick links" className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <DeepLinkCard
+            href="/overview"
+            icon={<ChartLineUp className="h-5 w-5 text-accent" />}
+            title="Live overview"
+            body="Cumulative PnL, open positions, health panel, recent signals — the operator's dashboard."
+          />
+          <DeepLinkCard
+            href="/about"
+            icon={<Cube className="h-5 w-5 text-accent" />}
+            title="How it works"
+            body="Full breakdown: SVI math, signal pipeline, risk gates, two-network architecture, judging-criteria mapping."
+          />
+        </div>
+      </section>
 
-      <footer className="text-xs text-muted font-mono flex items-center gap-2">
-        <span>Predict package:</span>
+      <section
+        aria-label="Run your own"
+        className="space-y-4 rounded-2xl border border-border bg-surface/40 p-6 md:p-8"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <GitFork className="h-5 w-5 text-accent" />
+          <h2 className="text-[20px] font-semibold tracking-tight">
+            Run your own SVX
+          </h2>
+          <Badge variant="outline" className="text-[10px]">single-operator · MIT</Badge>
+        </div>
+        <p className="text-fg/85 leading-relaxed max-w-3xl">
+          The whole stack is open source. One{' '}
+          <code className="code">git clone</code> and one Docker Compose up
+          stands up a copy that trades <em>your</em> wallet — not anybody
+          else's. The more independent SVX instances run, the tighter
+          Predict's surface stays calibrated against external venues. That's
+          exactly the "live stress test of the SVI feeder" the spec calls for.
+        </p>
+        <ol className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+          <SetupStep
+            n={1}
+            title="Clone + install"
+            body={
+              <>
+                <code className="code">
+                  git clone github.com/Econmartin/svx &amp;&amp; pnpm install
+                </code>
+              </>
+            }
+          />
+          <SetupStep
+            n={2}
+            title="Generate operator wallets"
+            body={
+              <>
+                One keypair per venue:{' '}
+                <code className="code">setup-manager</code> (Sui),{' '}
+                <code className="code">generate-poly-wallet</code> (Polygon),{' '}
+                <code className="code">generate-hl-wallet</code> (HL).
+              </>
+            }
+          />
+          <SetupStep
+            n={3}
+            title="Fund + tune"
+            body={
+              <>
+                Faucet dUSDC, bridge pUSD + HL USDC. Edit thresholds in{' '}
+                <code className="code">tunables.ts</code>. No env-var roulette.
+              </>
+            }
+          />
+          <SetupStep
+            n={4}
+            title="docker compose up"
+            body={
+              <>
+                Spins the bot + dashboard. Trades fire automatically inside
+                your configured risk gates.
+              </>
+            }
+          />
+        </ol>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <a
+            href="https://github.com/Econmartin/svx"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 h-9 rounded-md bg-accent text-bg font-semibold text-sm px-4 hover:bg-accent/90 transition-colors no-underline"
+          >
+            <Terminal className="h-4 w-4" />
+            View on GitHub
+            <ArrowSquareOut className="h-3.5 w-3.5" />
+          </a>
+          <Link
+            href="/about"
+            className="inline-flex items-center gap-2 h-9 rounded-md border border-border-strong bg-surface-elevated/60 text-fg font-semibold text-sm px-4 hover:bg-surface-elevated transition-colors no-underline"
+          >
+            Full walkthrough
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </section>
+
+      <footer className="text-xs text-muted font-mono flex flex-wrap items-center gap-4 pt-2">
+        <span>SVX — Sui Overflow 2026</span>
+        <span aria-hidden>·</span>
         <a
-          className="underline hover:text-accent inline-flex items-center gap-1"
-          href={`https://suiscan.xyz/testnet/object/${status?.predictPackageId ?? ''}`}
+          className="inline-flex items-center gap-1.5 hover:text-accent"
+          href="https://docs.sui.io/onchain-finance/deepbook-predict/"
           target="_blank"
           rel="noreferrer"
         >
-          {status?.predictPackageId?.slice(0, 16) ?? '—'}…
-          <ArrowSquareOut className="h-3 w-3" />
+          <ArrowSquareOut className="h-3.5 w-3.5" />
+          DeepBook Predict docs
         </a>
       </footer>
     </div>
   );
 }
 
-function combinedPnl(t: TradeRecord, isMainnet: boolean): number {
-  if (isMainnet) {
-    return (t.polyPnlUsdc ?? 0) + (t.hlPnlUsdc ?? 0);
-  }
-  return t.pnlUsdc ?? 0;
-}
-
-function OverviewStats({
-  status,
-  isMainnet,
-  closedCount,
-  winRate,
-  wins,
+function Pillar({
+  icon,
+  title,
+  kicker,
+  body,
 }: {
-  status: import('@/lib/api').BotStatus | null;
-  isMainnet: boolean;
-  closedCount: number;
-  winRate: number;
-  wins: number;
+  icon: React.ReactNode;
+  title: string;
+  kicker: string;
+  body: string;
 }) {
-  if (isMainnet) {
-    const polyAll = status?.realizedPolyPnlUsdc ?? 0;
-    const hlAll = status?.realizedHlPnlUsdc ?? 0;
-    const combinedAll = status?.realizedCombinedPnlUsdc ?? polyAll + hlAll;
-    const combined24h = status?.realizedCombinedPnl24hUsdc ?? 0;
-    return (
-      <StatRow
-        cols={5}
-        stats={[
-          {
-            label: 'BTC spot',
-            value: status?.spotBtc != null ? `$${formatUsdc(status.spotBtc, 0)}` : '—',
-            hint: status?.spotBtcAtMs ? formatRelative(status.spotBtcAtMs) : 'awaiting oracle',
-          },
-          {
-            label: 'Combined PnL (all)',
-            value: formatUsdc(combinedAll),
-            tone: combinedAll >= 0 ? 'win' : 'loss',
-            hint: `${closedCount} closed · win ${formatPct(winRate, 0)} (${wins}/${closedCount})`,
-          },
-          {
-            label: 'PnL 24h',
-            value: formatUsdc(combined24h),
-            tone: combined24h >= 0 ? 'win' : 'loss',
-            hint: `limit −${formatUsdc(status?.dailyPolyLossLimitUsdc ?? 0)}`,
-          },
-          {
-            label: 'Poly PnL',
-            value: formatUsdc(polyAll),
-            tone: polyAll >= 0 ? 'win' : 'loss',
-            hint: `${formatUsdc(status?.polyPusdBalance ?? 0)} pUSD wallet`,
-          },
-          {
-            label: 'HL exposure',
-            value: status?.hlExecutionEnabled
-              ? formatUsdc(status.openHlExposureUsdc ?? 0)
-              : '—',
-            hint: status?.hlExecutionEnabled
-              ? `${formatUsdc(status.hlAccountValueUsdc ?? 0)} margin`
-              : 'hedging off',
-          },
-        ]}
-      />
-    );
-  }
-  const realized = status?.realizedPnlUsdc ?? 0;
-  const realized24h = status?.realizedPnl24hUsdc ?? 0;
   return (
-    <StatRow
-      cols={5}
-      stats={[
-        {
-          label: 'BTC spot',
-          value: status?.spotBtc != null ? `$${formatUsdc(status.spotBtc, 0)}` : '—',
-          hint: status?.spotBtcAtMs ? formatRelative(status.spotBtcAtMs) : 'awaiting oracle',
-        },
-        {
-          label: 'PnL (all)',
-          value: formatUsdc(realized),
-          tone: realized >= 0 ? 'win' : 'loss',
-          hint: `${closedCount} closed · win ${formatPct(winRate, 0)} (${wins}/${closedCount})`,
-        },
-        {
-          label: 'PnL 24h',
-          value: formatUsdc(realized24h),
-          tone: realized24h >= 0 ? 'win' : 'loss',
-          hint: `limit −${formatUsdc(0)}`,
-        },
-        {
-          label: 'Bankroll',
-          value: formatUsdc(status?.totalBalanceUsdc ?? status?.navUsdc),
-          hint: 'wallet + manager',
-        },
-        {
-          label: 'Signals 24h',
-          value: status?.signalsLast24h ?? '—',
-          hint: `${status?.tradesLast24h ?? 0} executed`,
-        },
-      ]}
-    />
+    <Card>
+      <CardHeader className="pb-1.5 space-y-1">
+        <div className="flex items-center gap-2">
+          {icon}
+          <CardTitle className="text-[15px]">{title}</CardTitle>
+        </div>
+        <div className="text-[11px] uppercase tracking-wider text-muted font-medium">
+          {kicker}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted leading-relaxed">{body}</p>
+      </CardContent>
+    </Card>
   );
 }
 
-function OpenPositionsTable({
-  open,
-  spot,
-  isMainnet,
-  polyExecutionEnabled,
+function DeepLinkCard({
+  href,
+  icon,
+  title,
+  body,
 }: {
-  open: TradeRecord[];
-  spot: number | null;
-  isMainnet: boolean;
-  polyExecutionEnabled: boolean;
+  href: string;
+  icon: React.ReactNode;
+  title: string;
+  body: string;
 }) {
-  // Mainnet view: show all open trades, distinguish those with a real Poly
-  // leg from those that are paper-only (Sui-side paper signal, no Poly
-  // execution because POLY_EXECUTION_ENABLED was false).
-  const rows = open;
-  if (rows.length === 0) {
-    return (
-      <div className="space-y-3 py-4">
-        <div className="text-muted text-sm text-center">No open positions.</div>
-        {isMainnet && !polyExecutionEnabled && (
-          <div className="text-xs text-warn text-center max-w-md mx-auto">
-            Signals are evaluating but POLY_EXECUTION_ENABLED is off — no
-            Polymarket orders are being placed. Set
-            <code className="px-1 mx-1 bg-bg rounded font-mono">MAINNET_POLY_EXECUTION_ENABLED=true</code>
-            in Coolify to start firing.
+  return (
+    <Link
+      href={href}
+      className="group block rounded-xl border border-border bg-surface/40 hover:bg-surface/70 hover:border-border-strong p-5 transition-colors no-underline"
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex-shrink-0 mt-0.5">{icon}</div>
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-[15px] font-semibold tracking-tight text-fg">
+              {title}
+            </h3>
+            <ArrowRight className="h-4 w-4 text-muted group-hover:text-accent group-hover:translate-x-0.5 transition-transform" />
           </div>
-        )}
+          <p className="text-sm text-muted leading-relaxed">{body}</p>
+        </div>
       </div>
-    );
-  }
-  const paperOnlyCount = isMainnet
-    ? rows.filter((t) => !t.polyStatus).length
-    : 0;
+    </Link>
+  );
+}
+
+function SetupStep({
+  n,
+  title,
+  body,
+}: {
+  n: number;
+  title: string;
+  body: React.ReactNode;
+}) {
   return (
-    <div className="space-y-3">
-      {isMainnet && paperOnlyCount > 0 && !polyExecutionEnabled && (
-        <div className="text-xs text-warn px-3 py-2 rounded bg-warn/10 border border-warn/30">
-          <strong>{paperOnlyCount}</strong> of these are <em>Sui-paper</em> rows
-          — signals that would have executed if MAINNET_POLY_EXECUTION_ENABLED
-          were true. No real money in flight.
+    <li className="flex gap-3">
+      <span
+        aria-hidden
+        className="flex-shrink-0 w-6 h-6 rounded-full bg-surface-elevated text-accent text-xs font-mono flex items-center justify-center"
+      >
+        {n}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-fg">{title}</div>
+        <div className="text-muted text-[13px] leading-relaxed mt-0.5">
+          {body}
         </div>
-      )}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Opened</TableHead>
-            <TableHead>Strike</TableHead>
-            {isMainnet ? <TableHead>Outcome</TableHead> : <TableHead>Side</TableHead>}
-            <TableHead>{isMainnet ? 'Shares' : 'Stake'}</TableHead>
-            {isMainnet ? <TableHead>Fill</TableHead> : <TableHead>Entry</TableHead>}
-            {isMainnet && <TableHead>Hedge</TableHead>}
-            <TableHead>{isMainnet ? 'Status' : 'Spot'}</TableHead>
-            <TableHead>{isMainnet ? '' : 'Status'}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((t) => {
-            if (isMainnet) {
-              const hasPoly = !!t.polyStatus;
-              return (
-                <TableRow key={t.id} className={!hasPoly ? 'opacity-60' : ''}>
-                  <TableCell className="text-muted text-xs">
-                    {new Date(t.timestampMs).toLocaleTimeString()}
-                  </TableCell>
-                  <TableCell>${t.strike.toFixed(0)}</TableCell>
-                  <TableCell>{t.polyOutcome?.toUpperCase() ?? t.direction.toUpperCase()}</TableCell>
-                  <TableCell>
-                    {hasPoly ? t.polyFilledShares?.toFixed(2) ?? '—' : '—'}
-                  </TableCell>
-                  <TableCell>
-                    {t.polyFillPrice != null ? formatPct(t.polyFillPrice, 2) : '—'}
-                  </TableCell>
-                  <TableCell>
-                    {t.hlStatus === 'open' && t.hlSize != null ? (
-                      <span className="text-warn text-xs">
-                        {t.hlSide?.toUpperCase()} {t.hlSize.toFixed(5)}
-                      </span>
-                    ) : (
-                      <span className="text-muted text-xs">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {hasPoly ? (
-                      <Badge variant={t.polyStatus === 'filled' ? 'live' : 'default'}>
-                        {t.polyStatus}
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline">sui-paper</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell />
-                </TableRow>
-              );
-            }
-            const m = moneyness(t, spot);
-            return (
-              <TableRow key={t.id} className={m.cls}>
-                <TableCell className="text-muted text-xs">
-                  {new Date(t.timestampMs).toLocaleTimeString()}
-                </TableCell>
-                <TableCell>${t.strike.toFixed(0)}</TableCell>
-                <TableCell>{t.direction}</TableCell>
-                <TableCell>{formatUsdc(t.costUsdc)}</TableCell>
-                <TableCell>{formatPct(t.costPrice)}</TableCell>
-                <TableCell>{m.spotLabel}</TableCell>
-                <TableCell className="text-xs">{m.statusLabel}</TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
+      </div>
+    </li>
   );
-}
-
-function RecentSignals({ signals }: { signals: import('@/lib/api').SignalRecord[] }) {
-  if (signals.length === 0) {
-    return <div className="text-muted text-sm py-6 text-center">No signals yet.</div>;
-  }
-  return (
-    <div className="space-y-1.5">
-      {signals.map((s) => (
-        <div
-          key={s.id}
-          className="flex items-center gap-2 text-xs px-2 py-1.5 rounded hover:bg-surface-elevated transition-colors"
-        >
-          <span className="text-muted tabular-nums whitespace-nowrap">
-            {new Date(s.timestampMs).toLocaleTimeString()}
-          </span>
-          <span className="font-mono">${s.strike.toFixed(0)}</span>
-          <span className="text-muted">·</span>
-          <span className="font-mono tabular-nums">
-            P {formatPct(s.predictProb, 1)}
-          </span>
-          <span className="text-muted">/</span>
-          <span className="font-mono tabular-nums">
-            Y {formatPct(s.polyProb, 1)}
-          </span>
-          <span
-            className={`ml-auto font-mono tabular-nums ${
-              Math.abs(s.spread) > 0.03 ? 'text-win' : 'text-muted'
-            }`}
-          >
-            {s.spread >= 0 ? '+' : ''}
-            {formatPct(s.spread, 2)}
-          </span>
-          <SignalActionBadge action={s.action} reason={s.filterReason} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SignalActionBadge({ action, reason }: { action: string; reason?: string }) {
-  if (action === 'paper_executed' || action === 'live_executed') {
-    return <Badge variant="live">exec</Badge>;
-  }
-  if (action === 'sub_threshold') {
-    return <Badge variant="outline">sub</Badge>;
-  }
-  return (
-    <Badge variant="default" title={reason}>
-      {reason ?? 'filt'}
-    </Badge>
-  );
-}
-
-interface Moneyness {
-  cls: string;
-  spotLabel: string;
-  statusLabel: string;
-}
-
-function moneyness(t: TradeRecord, spot: number | null): Moneyness {
-  if (spot == null) {
-    return { cls: '', spotLabel: '—', statusLabel: 'no spot' };
-  }
-  const isWinning = t.direction === 'up' ? spot > t.strike : spot <= t.strike;
-  return {
-    cls: isWinning ? 'text-win' : 'text-loss',
-    spotLabel: `$${spot.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-    statusLabel: isWinning ? 'ITM' : 'OTM',
-  };
 }

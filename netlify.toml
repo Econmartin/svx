@@ -1,0 +1,56 @@
+# Netlify config for hosting the SVX dashboard.
+#
+# Why this exists: dashboard runs on HTTPS but the bot APIs live on
+# plain HTTP at sslip.io URLs. Browsers block mixed-content fetches
+# from HTTPS to HTTP. Netlify rewrites bridge the gap — the browser
+# hits Netlify (HTTPS), Netlify fetches the HTTP backend server-side,
+# and re-serves the response over HTTPS.
+#
+# IMPORTANT: this file MUST live at the repo root. Netlify only reads
+# netlify.toml from the root, never from a subdirectory.
+#
+# Setup:
+#   1. Push to GitHub.
+#   2. Netlify → Add new site → Import from Git → pick this repo.
+#   3. Confirm the build settings (Netlify reads them from this file):
+#        Build command:     pnpm install --no-frozen-lockfile && pnpm --filter svx-dashboard build
+#        Publish directory: packages/svx-dashboard/.next
+#   4. In Site settings → Environment variables, set:
+#        SVX_API_TESTNET = http://<testnet-bot>.sslip.io
+#        SVX_API_MAINNET = http://<mainnet-bot>.sslip.io
+#        NEXT_PUBLIC_SVX_API = /api/testnet
+#        NEXT_PUBLIC_SVX_API_MAINNET = /api/mainnet
+#   5. Trigger deploy.
+
+[build]
+  # No `base` directive — we run install + build from the repo root so
+  # pnpm's workspace resolution works and svx-shared / svx-bot deps
+  # are wired up correctly. The dashboard build is invoked via the
+  # workspace filter.
+  command = "pnpm install --no-frozen-lockfile && pnpm --filter svx-dashboard build"
+  publish = "packages/svx-dashboard/.next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  # Tell pnpm to flatten dependencies so Netlify's Next.js runtime can
+  # resolve them from the dashboard's own node_modules.
+  PNPM_FLAGS = "--shamefully-hoist"
+
+# Official Next.js runtime — handles RSC, route handlers, the lot.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Proxy rules — run server-side at Netlify's edge so the browser only
+# ever talks HTTPS to Netlify, never directly to the HTTP backend.
+# :splat captures the rest of the path after /api/<bot>/.
+[[redirects]]
+  from = "/api/testnet/*"
+  to = "${SVX_API_TESTNET}/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/mainnet/*"
+  to = "${SVX_API_MAINNET}/:splat"
+  status = 200
+  force = true

@@ -72,7 +72,7 @@ export default function VolArbPage() {
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
-            Vol-arb strategy
+            IV-RV divergence strategy
           </h1>
           <Badge variant={data.enabled ? 'live' : 'outline'}>
             {data.enabled ? 'exec on' : 'paper / signals only'}

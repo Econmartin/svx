@@ -111,7 +111,7 @@ export default function PolyArbPage() {
           delta-hedge with a BTC perp on Hyperliquid. Pure-vol PnL after the
           two legs net out. Independent from the standalone HL{' '}
           <a href="/vol-arb" className="underline hover:text-accent">
-            vol-arb strategy
+            IV-RV divergence strategy
           </a>
           .
         </p>

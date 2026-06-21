@@ -4,7 +4,7 @@
 # tsx executes TypeScript directly, which adds ~100ms cold start cost and
 # saves a build step. Acceptable for a long-running bot process.
 
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 RUN apk add --no-cache libc6-compat python3 make g++ tini
 RUN corepack enable && corepack prepare pnpm@8.15.9 --activate
 WORKDIR /app

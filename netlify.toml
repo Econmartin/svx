@@ -43,12 +43,12 @@
 # Hardcoded backend URLs (env-var substitution isn't supported here).
 [[redirects]]
   from = "/api/testnet/*"
-  to = "http://nlu6qz87u63bu5w8x0shj99z.65.21.62.22.sslip.io/:splat"
+  to = "http://y11rp4fhniki03we8nnzz22t.65.21.62.22.sslip.io/:splat"
   status = 200
   force = true
 
 [[redirects]]
   from = "/api/mainnet/*"
-  to = "http://nlu6qz87u63bu5w8x0shj99z.65.21.62.22.sslip.io/:splat"
+  to = "http://zozifpshf81xcz493fof1txy.65.21.62.22.sslip.io/:splat"
   status = 200
   force = true

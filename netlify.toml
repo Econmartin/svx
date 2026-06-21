@@ -1,29 +1,25 @@
 # Netlify config for hosting the SVX dashboard.
 #
-# Why this exists: dashboard runs on HTTPS but the bot APIs live on
-# plain HTTP at sslip.io URLs. Browsers block mixed-content fetches
-# from HTTPS to HTTP. Netlify rewrites bridge the gap — the browser
-# hits Netlify (HTTPS), Netlify fetches the HTTP backend server-side,
-# and re-serves the response over HTTPS.
-#
 # IMPORTANT: this file MUST live at the repo root. Netlify only reads
 # netlify.toml from the root, never from a subdirectory.
-#
-# IMPORTANT: Netlify DOES NOT expand environment variables in the
-# `to` URL of redirect rules. The backend hostnames below are
-# therefore HARDCODED. If your Coolify URLs change, edit them here
-# and redeploy. (Netlify env vars still work for client-side
-# NEXT_PUBLIC_* values that are baked into the JS bundle at build
-# time — see the build command output for those.)
 #
 # Setup:
 #   1. Push to GitHub.
 #   2. Netlify → Add new site → Import from Git → pick this repo.
 #   3. Netlify reads this file. No UI overrides needed.
 #   4. In Site settings → Environment variables, set:
-#        NEXT_PUBLIC_SVX_API = /api/testnet
-#        NEXT_PUBLIC_SVX_API_MAINNET = /api/mainnet
+#        NEXT_PUBLIC_SVX_API         = https://svx-testnet.econmartin.xyz
+#        NEXT_PUBLIC_SVX_API_MAINNET = https://svx-mainnet.econmartin.xyz
 #   5. Trigger deploy with "Clear cache and deploy site".
+#
+# History note: an earlier version of this file shipped two `[[redirects]]`
+# blocks that proxied /api/testnet/* and /api/mainnet/* to the bots' plain
+# HTTP sslip.io addresses (Netlify-edge HTTPS termination → server-side
+# fetch over HTTP → re-serve to the browser as HTTPS). That bridge was
+# only needed because the bots were HTTP-only. Once the bots got real
+# Let's Encrypt TLS via Coolify + Cloudflare DNS, the rewrites became
+# dead weight and were removed — the dashboard now calls the HTTPS bot
+# URLs directly from the browser.
 
 [build]
   command = "pnpm install --no-frozen-lockfile && pnpm --filter svx-dashboard build"
@@ -35,20 +31,3 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
-
-# Proxy rules — server-side at Netlify's edge so the browser only
-# talks HTTPS to Netlify, never directly to the HTTP backend.
-# :splat captures everything after /api/<bot>/.
-#
-# Hardcoded backend URLs (env-var substitution isn't supported here).
-[[redirects]]
-  from = "/api/testnet/*"
-  to = "http://y11rp4fhniki03we8nnzz22t.65.21.62.22.sslip.io/:splat"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/api/mainnet/*"
-  to = "http://zozifpshf81xcz493fof1txy.65.21.62.22.sslip.io/:splat"
-  status = 200
-  force = true

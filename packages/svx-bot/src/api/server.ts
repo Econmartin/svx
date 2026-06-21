@@ -432,6 +432,34 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     }
   });
 
+  app.get('/surface/:oracleId/history', (req: Request, res: Response) => {
+    try {
+      const oracleId = req.params.oracleId!;
+      const limit = clampInt(req.query.limit, 1, 1000, 200);
+      const snaps = deps.ledger.recentSviSnapshotsForOracle(oracleId, limit);
+      // Reverse so the dashboard chart reads oldest → newest along the x-axis.
+      const points = snaps
+        .slice()
+        .reverse()
+        .map((s) => ({
+          tsMs: s.timestampMs,
+          spot: s.spot,
+          forward: s.forward,
+          a: s.svi.a,
+          b: s.svi.b,
+          rho: s.svi.rho,
+          m: s.svi.m,
+          sigma: s.svi.sigma,
+        }));
+      res.json({ oracleId, points });
+    } catch (e) {
+      log.warn('api.surface.history.error', {
+        err: e instanceof Error ? e.message : String(e),
+      });
+      res.status(500).json({ error: 'failed to load surface history' });
+    }
+  });
+
   app.get('/oracles', async (_req, res) => {
     try {
       const list = await deps.predict.listActiveOracles('BTC');

@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageIntro } from '@/components/PageIntro';
 import { SurfaceArbPanel } from '@/components/SurfaceArbPanel';
+import { SviHistoryChart } from '@/components/SviHistoryChart';
 
 export default function SurfacePage() {
   const client = useApiClient();
@@ -39,6 +40,14 @@ export default function SurfacePage() {
     [client, selectedId],
   );
   const { data: surface } = usePolling(surfaceFetcher, 10_000);
+  const historyFetcher = useCallback(
+    () =>
+      selectedId
+        ? client.surfaceHistory(selectedId, 200).catch(() => null)
+        : Promise.resolve(null),
+    [client, selectedId],
+  );
+  const { data: history } = usePolling(historyFetcher, 15_000);
 
   return (
     <div className="space-y-6">
@@ -254,6 +263,24 @@ export default function SurfacePage() {
           {surface.arb && (
             <SurfaceArbPanel arb={surface.arb} points={surface.points} />
           )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Calibration history</CardTitle>
+              <p className="text-xs text-muted mt-0.5 leading-relaxed">
+                Per-parameter drift of the live SVI surface. The bot
+                snapshots <code className="font-mono text-[10px]">w(k)</code>'s
+                five parameters every time it polls; this is the rolling
+                replay. Big jumps in <strong>m</strong> usually track BTC
+                spot; spikes in <strong>b</strong>/<strong>σ</strong> mean
+                the smile is reshaping fast — the strategy's risk gate likes
+                quiet surfaces, so a busy chart here is a signal to look.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <SviHistoryChart points={history?.points ?? []} />
+            </CardContent>
+          </Card>
         </>
       ) : (
         <Card>

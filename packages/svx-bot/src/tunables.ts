@@ -59,7 +59,10 @@ export const TUNABLES = {
   // ─────────────────────────────────────────────────────────────────────────
   // Risk caps — Polymarket leg
   // ─────────────────────────────────────────────────────────────────────────
-  maxPolyPositionUsdc: 2,
+  // Doubled 2 → 4 after mainnet hit ~100% gains. Bigger per-trade
+  // captures more $$ per signal; total exposure cap (maxOpenPolyPositions)
+  // stays at 1000 so we don't pin the queue.
+  maxPolyPositionUsdc: 4,
   /** Hard cap on concurrent open Polymarket positions. Cranked to 1000 for
    *  hackathon-demo mode — effectively uncapped. The stale-row abandon
    *  prune (see polyStaleSettlementDays) keeps this from drifting forever. */
@@ -72,9 +75,10 @@ export const TUNABLES = {
   /** After a fill_failed on a given token, skip that token for this long.
    *  Stops the bot from hammering the same FOK-failing book every 15s. */
   polyFillFailedCooldownMs: 5 * 60_000,
-  /** Bumped from 10 → 50 — gives more room to absorb a losing day before
-   *  the bot pauses itself. Still well under the funded pUSD balance. */
-  dailyPolyLossLimitUsdc: 50,
+  /** Bumped 50 → 100 alongside the per-trade doubling so a losing day
+   *  doesn't trip the daily pause before the larger trade size has had
+   *  a chance to play out. */
+  dailyPolyLossLimitUsdc: 100,
   /** Max wait for the Polymarket leg to fill. */
   polyFillTimeoutMs: 30_000,
   /** Auto-abandon Polymarket trades that have been "filled but unsettled"
@@ -101,16 +105,17 @@ export const TUNABLES = {
    *  shows. Applied to both legs (open + close) because IOC orders are
    *  always taker. Deducted from hl_pnl_usdc on close. */
   hlTakerFeeRate: 0.00035,
-  /** Per-trade USD cap on HL hedge legs. Must be ≥ hlMinOrderUsdc or every
-   *  hedge attempt gets rejected; was 2 (below HL min), bumped to 12. */
-  maxHlPerTradeUsdc: 12,
-  /** Total open HL exposure cap (sum of all hedge legs' notionals).
-   *  Bumped 50 → 200 — at 1000 max poly trades each carrying a hedge, the
-   *  old 50 cap would have been hit on the 5th hedge. */
-  maxHlOpenUsdc: 200,
-  /** Daily HL loss limit. Bumped 30 → 50 for the same reason — broader
-   *  loss bandwidth at higher activity. */
-  dailyHlLossLimitUsdc: 50,
+  /** Per-trade USD cap on HL hedge legs. Doubled 12 → 24 alongside the
+   *  poly per-trade doubling so the hedge size scales with the larger
+   *  poly stake. Must stay above hlMinOrderUsdc=10. */
+  maxHlPerTradeUsdc: 24,
+  /** Total open HL exposure cap. Doubled 200 → 400 to match the
+   *  larger per-trade size. */
+  maxHlOpenUsdc: 400,
+  /** Daily HL loss limit. Doubled 50 → 100 to match the larger trade
+   *  sizes — a losing day shouldn't pause the bot before the bigger
+   *  per-trade cap has had a chance to play out. */
+  dailyHlLossLimitUsdc: 100,
   /** If true, skip a Poly fill when HL hedge can't be opened. */
   hlRequiredForPoly: false,
 
@@ -130,14 +135,14 @@ export const TUNABLES = {
    *  bypass logic makes sense for options (long gamma), not for linear
    *  perps. Set to 0.5 or lower to re-enable in extreme regimes. */
   volArbBiasBypassSpread: 1.0,
-  /** Per-trade USD cap on vol-arb perp positions. Must be ≥ hlMinOrderUsdc
-   *  (Hyperliquid's $10 floor) or every open is rejected — was 2, bumped
-   *  to 12. */
-  maxVolArbPerTradeUsdc: 12,
-  /** Total open vol-arb exposure cap. Bumped 50 → 200. */
-  maxVolArbOpenUsdc: 200,
-  /** Daily vol-arb loss limit. Bumped 30 → 50. */
-  dailyVolArbLossLimitUsdc: 50,
+  /** Per-trade USD cap on vol-arb perp positions. Doubled 12 → 24
+   *  alongside the poly + HL hedge doublings so vol-arb captures
+   *  proportionally larger wins on real signals. */
+  maxVolArbPerTradeUsdc: 24,
+  /** Total open vol-arb exposure cap. Doubled 200 → 400. */
+  maxVolArbOpenUsdc: 400,
+  /** Daily vol-arb loss limit. Doubled 50 → 100. */
+  dailyVolArbLossLimitUsdc: 100,
   /** Max minutes a vol-arb position stays open before time-stop. */
   volArbTimeStopMinutes: 60,
   /**

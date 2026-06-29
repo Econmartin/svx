@@ -937,6 +937,34 @@ export class LedgerStore {
       .run(redeemTxDigest, tradeId);
   }
 
+  /**
+   * Abandon Predict (Sui) trades that have sat in the unredeemed-winning
+   * queue for longer than `maxAgeMs`. Mirrors abandonStalePolyTrades. The
+   * usual cause is that the position was pruned from the on-chain
+   * predict_manager (oracles age out and lose their position records),
+   * leaving decrease_position to MoveAbort(1) on every retry forever.
+   *
+   * Marks the trade by setting redeem_tx_digest to a sentinel string so the
+   * unredeemedWinningTrades query stops returning it. Audit trail is
+   * preserved — the row's payout/pnl numbers are untouched, only the redeem
+   * marker changes. Returns rows touched.
+   */
+  abandonStaleRedeems(maxAgeMs: number, nowMs: number): number {
+    const cutoff = nowMs - maxAgeMs;
+    const r = this.db
+      .prepare(
+        `UPDATE trades
+            SET redeem_tx_digest = 'abandoned'
+          WHERE settled = 1
+            AND mode = 'live'
+            AND payout_usdc > 0
+            AND redeem_tx_digest IS NULL
+            AND ts_ms < ?`,
+      )
+      .run(cutoff);
+    return r.changes;
+  }
+
   // ---- Read API for dashboard ----
 
   recentSignals(limit = 100): SignalRecord[] {

@@ -202,6 +202,22 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     risk.resume();
   }
 
+  // One-shot stale-redeem cleanup on boot. The periodic prune handles this
+  // long-term every 6h, but on a fresh deploy we want any pre-existing
+  // stuck redeem queue cleared immediately so the bot stops spamming
+  // svx.redeem.failed every 15s from the first loop iteration.
+  {
+    const staleAgeMs = cfg.polyStaleSettlementDays * 24 * 3600_000;
+    const cleared = ledger.abandonStaleRedeems(staleAgeMs, Date.now());
+    if (cleared > 0) {
+      log.warn('svx.boot.abandoned_stale_redeems', {
+        count: cleared,
+        olderThanDays: cfg.polyStaleSettlementDays,
+        note: 'positions likely pruned from on-chain predict_manager; retry was failing forever',
+      });
+    }
+  }
+
   const state: BotState = {
     startedAtMs: Date.now(),
     navUsdc: PAPER_INITIAL_NAV,
@@ -1157,6 +1173,17 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     if (abandoned > 0) {
       log.warn('svx.poly.abandoned_stale', {
         count: abandoned,
+        olderThanDays: cfg.polyStaleSettlementDays,
+      });
+    }
+    // Same treatment for Predict (Sui) trades whose redeem keeps
+    // MoveAbort(1)'ing — typically because the position was pruned from the
+    // on-chain predict_manager. Without this, the redeem loop spams
+    // svx.redeem.failed every 15s indefinitely on those trades.
+    const abandonedRedeems = ledger.abandonStaleRedeems(staleAgeMs, Date.now());
+    if (abandonedRedeems > 0) {
+      log.warn('svx.predict.abandoned_stale_redeem', {
+        count: abandonedRedeems,
         olderThanDays: cfg.polyStaleSettlementDays,
       });
     }

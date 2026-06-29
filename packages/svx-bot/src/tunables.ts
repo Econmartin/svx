@@ -41,8 +41,11 @@ export const TUNABLES = {
   /** Per-trade cap on the Predict mint cost. Bumped from 15 → 50 for the
    *  hackathon-demo window — bigger trades = more visible PnL bars. */
   maxPositionDusdc: 50,
-  /** Per-trade cap as a fraction of NAV. */
-  maxPositionPct: 0.05,
+  /** Per-trade cap as a fraction of NAV. Bumped 0.05 → 0.20 — on testnet
+   *  the wallet NAV (~$80) was so small that the 5% cap ($4) blocked nearly
+   *  every signal. 20% lets sized trades through while still capping any
+   *  single trade well below the absolute maxPositionDusdc=50 ceiling. */
+  maxPositionPct: 0.20,
   /** Auto-pause if 24h realized dUSDC PnL drops below −this. Bumped from
    *  150 → 1000 — testnet, paper-mode, no real money risk. */
   dailyLossLimitDusdc: 1000,

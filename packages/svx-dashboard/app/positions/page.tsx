@@ -51,6 +51,14 @@ export default function PositionsPage() {
     ),
     30_000,
   );
+  // Live BTC spot for ITM/OTM badges on open rows. status is already exposed
+  // by the bot (same one the overview polls). 15s is plenty; the moneyness
+  // call only cares when spot moves through a strike.
+  const { data: status } = usePolling(
+    useCallback(() => client.status(), [client]),
+    15_000,
+  );
+  const spot = status?.spotBtc ?? null;
 
   const closedAll = isMainnet ? closedPoly ?? [] : closed ?? [];
   // On mainnet the bot's ledger accumulates unsettled paper-Predict trade
@@ -151,7 +159,7 @@ export default function PositionsPage() {
         </CardHeader>
         <CardContent className="pt-0">
           {view === 'open' ? (
-            <OpenTable open={openAll} isMainnet={isMainnet} />
+            <OpenTable open={openAll} isMainnet={isMainnet} spot={spot} />
           ) : (
             <ClosedTable closed={closedAll} isMainnet={isMainnet} />
           )}
@@ -299,9 +307,11 @@ function bucketPnls(pnls: number[]): Array<{ label: string; range: string; cente
 function OpenTable({
   open,
   isMainnet,
+  spot,
 }: {
   open: TradeRecord[];
   isMainnet: boolean;
+  spot: number | null;
 }) {
   // Pre-filtered upstream — rows here are all genuinely open. On testnet we
   // get every settled=0 row; on mainnet we get rows with an unsettled Poly
@@ -310,49 +320,65 @@ function OpenTable({
     return <div className="text-muted text-sm py-8 text-center">No open positions.</div>;
   }
   if (!isMainnet) {
-    // Testnet: simple Predict-side view.
+    // Testnet Predict view.
     return (
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Time</TableHead>
-            <TableHead>Mode</TableHead>
-            <TableHead>Strike</TableHead>
-            <TableHead>Direction</TableHead>
-            <TableHead>Qty</TableHead>
+            <TableHead>Opened</TableHead>
+            <TableHead>Market</TableHead>
+            <TableHead>Our bet</TableHead>
             <TableHead>Cost</TableHead>
-            <TableHead>Expiry</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Expires</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {open.map((t) => (
-            <TableRow key={t.id}>
-              <TableCell className="text-muted text-xs">{formatTime(t.timestampMs)}</TableCell>
-              <TableCell className="text-xs">
-                <Badge variant={t.mode === 'live' ? 'live' : 'outline'}>{t.mode}</Badge>
-              </TableCell>
-              <TableCell>${t.strike.toFixed(0)}</TableCell>
-              <TableCell>{t.direction}</TableCell>
-              <TableCell>{formatUsdc(t.quantityDusdc)}</TableCell>
-              <TableCell>{formatUsdc(t.costUsdc)}</TableCell>
-              <TableCell className="text-muted text-xs">{formatTime(t.expiryMs)}</TableCell>
-            </TableRow>
-          ))}
+          {open.map((t) => {
+            const m = predictMoneyness(t, spot);
+            return (
+              <TableRow key={t.id}>
+                <TableCell className="text-muted text-xs whitespace-nowrap">
+                  {formatTime(t.timestampMs)}
+                </TableCell>
+                <TableCell className="text-[13px]">
+                  <MarketLabel asset={t.underlyingAsset} strike={t.strike} expiryMs={t.expiryMs} />
+                </TableCell>
+                <TableCell className="text-[13px]">
+                  <PredictBetLabel
+                    direction={t.direction}
+                    quantityDusdc={t.quantityDusdc}
+                    costPrice={t.costPrice}
+                    mode={t.mode}
+                  />
+                </TableCell>
+                <TableCell className="font-mono text-[12.5px] tabular-nums">
+                  {formatUsdc(t.costUsdc)} dUSDC
+                </TableCell>
+                <TableCell>
+                  <MoneynessBadge m={m} />
+                </TableCell>
+                <TableCell className="text-muted text-xs whitespace-nowrap">
+                  <TimeToExpiry ms={t.expiryMs} />
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     );
   }
-  // Mainnet: show Polymarket leg + HL leg + strategy badge side-by-side.
+  // Mainnet: Poly + HL side-by-side, both rendered in plain English.
   return (
     <Table>
       <TableHeader>
         <TableRow>
           <TableHead>Opened</TableHead>
-          <TableHead>Strategy</TableHead>
-          <TableHead>Strike</TableHead>
+          <TableHead>Market</TableHead>
           <TableHead>Poly leg</TableHead>
-          <TableHead>HL leg</TableHead>
-          <TableHead>Expiry</TableHead>
+          <TableHead>HL hedge</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Expires</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -360,53 +386,261 @@ function OpenTable({
           const strategy = t.strategy ?? 'poly_arb';
           const hasPoly = t.polyStatus === 'filled' && !t.polySettled;
           const hasHl = t.hlStatus === 'open';
+          const m = polyMoneyness(t, spot);
           return (
             <TableRow key={t.id}>
-              <TableCell className="text-muted text-xs">
-                {formatTime(t.timestampMs)}
+              <TableCell className="text-muted text-xs whitespace-nowrap">
+                <div>{formatTime(t.timestampMs)}</div>
+                <div className="mt-1">
+                  <Badge variant={strategy === 'vol_arb' ? 'warn' : 'live'}>{strategy}</Badge>
+                </div>
               </TableCell>
-              <TableCell>
-                <Badge variant={strategy === 'vol_arb' ? 'warn' : 'live'}>{strategy}</Badge>
+              <TableCell className="text-[13px]">
+                {t.strike > 0 ? (
+                  <MarketLabel asset={t.underlyingAsset} strike={t.strike} expiryMs={t.expiryMs} />
+                ) : (
+                  <span className="text-muted">—</span>
+                )}
               </TableCell>
-              <TableCell>
-                {t.strike > 0 ? `$${t.strike.toFixed(0)}` : '—'}
-              </TableCell>
-              <TableCell className="text-xs">
+              <TableCell className="text-[13px]">
                 {hasPoly ? (
-                  <span>
-                    <span className="font-mono">
-                      {t.polyOutcome?.toUpperCase()} {t.polyFilledShares?.toFixed(2)} @
-                      {' '}{t.polyFillPrice ? formatPct(t.polyFillPrice, 2) : '—'}
-                    </span>
-                    <span className="text-muted ml-1">({formatUsdc(t.polyCostUsdc)} pUSD)</span>
-                  </span>
+                  <PolyBetLabel
+                    outcome={t.polyOutcome}
+                    shares={t.polyFilledShares}
+                    fillPrice={t.polyFillPrice}
+                    costUsdc={t.polyCostUsdc}
+                    strike={t.strike}
+                    asset={t.underlyingAsset}
+                  />
                 ) : (
                   <span className="text-muted">—</span>
                 )}
               </TableCell>
-              <TableCell className="text-xs">
+              <TableCell className="text-[13px]">
                 {hasHl ? (
-                  <span>
-                    <span className="font-mono">
-                      {t.hlSide?.toUpperCase()} {t.hlSize?.toFixed(5)} @ $
-                      {t.hlOpenPrice?.toFixed(0)}
-                    </span>
-                    <span className="text-muted ml-1">
-                      ({formatUsdc((t.hlSize ?? 0) * (t.hlOpenPrice ?? 0))} USD)
-                    </span>
-                  </span>
+                  <HlLegLabel
+                    side={t.hlSide}
+                    size={t.hlSize}
+                    openPrice={t.hlOpenPrice}
+                    asset={t.hlAsset ?? 'BTC'}
+                  />
                 ) : (
                   <span className="text-muted">—</span>
                 )}
               </TableCell>
-              <TableCell className="text-muted text-xs">
-                {t.expiryMs > 0 ? formatTime(t.expiryMs) : '—'}
+              <TableCell>{hasPoly ? <MoneynessBadge m={m} /> : <span className="text-muted text-xs">—</span>}</TableCell>
+              <TableCell className="text-muted text-xs whitespace-nowrap">
+                {t.expiryMs > 0 ? <TimeToExpiry ms={t.expiryMs} /> : '—'}
               </TableCell>
             </TableRow>
           );
         })}
       </TableBody>
     </Table>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Row helpers — the goal is that a reader who's never seen Polymarket can
+// look at any row and answer "what is this market" and "what did we buy".
+// ────────────────────────────────────────────────────────────────────────────
+
+function MarketLabel({
+  asset,
+  strike,
+  expiryMs,
+}: {
+  asset: string;
+  strike: number;
+  expiryMs: number;
+}) {
+  const strikeK = strike >= 1000 ? `${(strike / 1000).toFixed(strike >= 10000 ? 0 : 1)}k` : `${strike}`;
+  return (
+    <div className="leading-tight">
+      <div className="font-semibold whitespace-nowrap">
+        {asset} ≥ ${strikeK}
+      </div>
+      <div className="text-[11px] text-muted whitespace-nowrap">
+        {expiryMs > 0 ? new Date(expiryMs).toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }) : '—'}
+      </div>
+    </div>
+  );
+}
+
+function PredictBetLabel({
+  direction,
+  quantityDusdc,
+  costPrice,
+  mode,
+}: {
+  direction: 'up' | 'down';
+  quantityDusdc: number;
+  costPrice: number;
+  mode: 'live' | 'paper';
+}) {
+  const dirLabel = direction === 'up' ? 'UP' : 'DOWN';
+  return (
+    <div className="leading-tight">
+      <div className="whitespace-nowrap">
+        <span className={direction === 'up' ? 'text-win font-semibold' : 'text-loss font-semibold'}>
+          {dirLabel}
+        </span>
+        <span className="text-muted"> · </span>
+        <span className="font-mono">{formatUsdc(quantityDusdc)}</span>
+        <span className="text-muted"> pays $1 if right</span>
+      </div>
+      <div className="text-[11px] text-muted">
+        entry {formatPct(costPrice, 2)} · <Badge variant={mode === 'live' ? 'live' : 'outline'}>{mode}</Badge>
+      </div>
+    </div>
+  );
+}
+
+function PolyBetLabel({
+  outcome,
+  shares,
+  fillPrice,
+  costUsdc,
+  strike,
+  asset,
+}: {
+  outcome?: 'yes' | 'no';
+  shares?: number;
+  fillPrice?: number;
+  costUsdc?: number;
+  strike: number;
+  asset: string;
+}) {
+  if (!outcome) return <span className="text-muted">—</span>;
+  const isYes = outcome === 'yes';
+  const strikeK = strike >= 1000 ? `${(strike / 1000).toFixed(strike >= 10000 ? 0 : 1)}k` : `${strike}`;
+  // Plain-English claim: what would need to be true for this share to pay $1.
+  const claim = isYes
+    ? `${asset} ≥ $${strikeK} at expiry`
+    : `${asset} < $${strikeK} at expiry`;
+  return (
+    <div className="leading-tight">
+      <div className="whitespace-nowrap">
+        <span className={isYes ? 'text-win font-semibold' : 'text-loss font-semibold'}>
+          {isYes ? 'YES' : 'NO'}
+        </span>
+        <span className="text-muted"> · </span>
+        <span className="font-mono">{shares?.toFixed(2) ?? '—'} sh</span>
+        <span className="text-muted"> @ </span>
+        <span className="font-mono">${fillPrice?.toFixed(3) ?? '—'}</span>
+      </div>
+      <div className="text-[11px] text-muted">
+        pays $1 if {claim} · cost {formatUsdc(costUsdc)} pUSD
+      </div>
+    </div>
+  );
+}
+
+function HlLegLabel({
+  side,
+  size,
+  openPrice,
+  asset,
+}: {
+  side?: 'long' | 'short';
+  size?: number;
+  openPrice?: number;
+  asset: string;
+}) {
+  if (!side || !size || !openPrice) return <span className="text-muted">—</span>;
+  const notional = size * openPrice;
+  return (
+    <div className="leading-tight">
+      <div className="whitespace-nowrap">
+        <span className={side === 'long' ? 'text-win font-semibold' : 'text-loss font-semibold'}>
+          {side.toUpperCase()}
+        </span>
+        <span className="text-muted"> · </span>
+        <span className="font-mono">{size.toFixed(5)} {asset}</span>
+      </div>
+      <div className="text-[11px] text-muted">
+        entry ${openPrice.toFixed(0)} · ${notional.toFixed(2)} notional
+      </div>
+    </div>
+  );
+}
+
+interface Moneyness {
+  status: 'itm' | 'otm' | 'unknown';
+  label: string;
+  delta?: string;
+}
+
+/** Predict binary: direction=up → wins if spot > strike; down → wins if spot ≤ strike. */
+function predictMoneyness(t: TradeRecord, spot: number | null): Moneyness {
+  if (spot == null || t.strike <= 0) return { status: 'unknown', label: 'no spot' };
+  const winning = t.direction === 'up' ? spot > t.strike : spot <= t.strike;
+  const diff = spot - t.strike;
+  const delta = `${diff >= 0 ? '+' : ''}$${Math.abs(diff).toFixed(0)} vs strike`;
+  return {
+    status: winning ? 'itm' : 'otm',
+    label: winning ? 'ITM' : 'OTM',
+    delta,
+  };
+}
+
+/** Polymarket YES binary is "asset ≥ strike at expiry?". YES wins iff spot ≥ strike. */
+function polyMoneyness(t: TradeRecord, spot: number | null): Moneyness {
+  if (spot == null || t.strike <= 0 || !t.polyOutcome) return { status: 'unknown', label: 'no spot' };
+  const yesWins = spot >= t.strike;
+  const winning = t.polyOutcome === 'yes' ? yesWins : !yesWins;
+  const diff = spot - t.strike;
+  const delta = `${diff >= 0 ? '+' : ''}$${Math.abs(diff).toFixed(0)} vs strike`;
+  return {
+    status: winning ? 'itm' : 'otm',
+    label: winning ? 'ITM' : 'OTM',
+    delta,
+  };
+}
+
+function MoneynessBadge({ m }: { m: Moneyness }) {
+  if (m.status === 'unknown') {
+    return <span className="text-muted text-xs">{m.label}</span>;
+  }
+  return (
+    <div className="leading-tight">
+      <Badge variant={m.status === 'itm' ? 'live' : 'warn'}>{m.label}</Badge>
+      {m.delta && (
+        <div className="text-[11px] text-muted mt-0.5 font-mono tabular-nums">{m.delta}</div>
+      )}
+    </div>
+  );
+}
+
+function TimeToExpiry({ ms }: { ms: number }) {
+  const remaining = ms - Date.now();
+  if (remaining <= 0) {
+    return <span className="text-loss">expired</span>;
+  }
+  const mins = Math.floor(remaining / 60_000);
+  const hrs = Math.floor(mins / 60);
+  const days = Math.floor(hrs / 24);
+  let label: string;
+  if (days > 0) label = `in ${days}d ${hrs % 24}h`;
+  else if (hrs > 0) label = `in ${hrs}h ${mins % 60}m`;
+  else label = `in ${mins}m`;
+  return (
+    <div className="leading-tight">
+      <div>{label}</div>
+      <div className="text-[11px] text-muted">
+        {new Date(ms).toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })}
+      </div>
+    </div>
   );
 }
 

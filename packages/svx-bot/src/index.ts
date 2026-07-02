@@ -915,6 +915,26 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             continue;
           }
           if (fill.status === 'failed') {
+            // "not enough balance / allowance" is an operator-refill situation
+            // — cycling through 22 tokens with the same balance still burns
+            // ~4 CLOB requests/minute forever. Pause the bot so the operator
+            // sees a single, actionable line and can top up pUSD.
+            const respErr =
+              (resp as { error?: unknown })?.error != null
+                ? String((resp as { error?: unknown }).error)
+                : '';
+            if (/not enough balance|not enough allowance/i.test(respErr)) {
+              log.error('svx.poly.insufficient_balance', {
+                rawResponse: resp,
+                hint:
+                  'Polymarket EOA / deposit wallet is out of pUSD (or allowance). Top up the funder address and pnpm run resume — the bot is paused to stop wasting CLOB requests.',
+              });
+              risk.pause(
+                'Polymarket wallet out of pUSD — top up the funder address and resume',
+              );
+              ledger.updateSignalAction(sigId, 'failed', 'poly_insufficient_balance');
+              continue;
+            }
             // Mark this tokenId for cooldown so we don't hammer the same
             // FOK-failing order every loop.
             state.polyFillFailedAt.set(polyTokenId, Date.now());
@@ -1039,12 +1059,26 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       if (action === 'live_executed' && live) {
         // The manager holds pre-deposited dUSDC that Predict::mint spends
         // from directly. The top-up path only exists to refill the manager
-        // when the wallet is holding the trading budget. On testnet all the
-        // dUSDC lives inside the manager and the wallet is empty, so
-        // requesting any top-up trips InsufficientCoinBalance on the split.
-        // Skip the top-up when the wallet has no dUSDC coins.
+        // when the wallet is the pre-position dUSDC holder. On testnet the
+        // trading budget lives inside the manager and the wallet holds
+        // only a few $ of dust (gas coins etc.) — a "> 0 coins" check would
+        // still ask for a top-up we can't fund, and the splitCoins trips
+        // InsufficientCoinBalance. Compare actual wallet balance to the
+        // desired top-up and skip when it wouldn't cover.
+        const wantedTopUpDusdc = Math.min(signalCost * 1.5, signalNotional);
         const walletCoinIds = await getOperatorDusdcCoinIds(live);
-        const shouldTopUp = walletCoinIds.length > 0;
+        const walletDusdc =
+          walletCoinIds.length > 0
+            ? Number(
+                (
+                  await live.sui.getBalance({
+                    owner: live.operatorAddress,
+                    coinType: ADDRESSES.dusdcType,
+                  })
+                ).totalBalance,
+              ) / Number(QUOTE_UNIT)
+            : 0;
+        const shouldTopUp = walletDusdc >= wantedTopUpDusdc;
         const tx = buildMintTx({
           oracleId: oracleSnap.oracleId,
           expiryMs: oracleSnap.expiryMs,
@@ -1052,7 +1086,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           direction: predictDirection,
           quantityDusdc: signalNotional,
           managerId: live.managerId,
-          topUpDusdc: shouldTopUp ? Math.min(signalCost * 1.5, signalNotional) : 0,
+          topUpDusdc: shouldTopUp ? wantedTopUpDusdc : 0,
           dusdcCoinObjectIds: shouldTopUp ? walletCoinIds : undefined,
         });
         const result = await submitTx(live.sui, tx, live.keypair);

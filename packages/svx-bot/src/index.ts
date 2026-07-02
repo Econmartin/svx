@@ -140,6 +140,12 @@ interface BotState {
   /** tokenId → ms of last fill_failed. Used to skip retries during the
    *  cooldown window so a stuck-on-thin-book signal doesn't spam the CLOB. */
   polyFillFailedAt: Map<string, number>;
+  /** Set when the Polymarket leg needs an operator refill (wallet out of pUSD
+   *  or allowance drained). Poly submits skip while set; vol-arb + Predict
+   *  keep trading. Cleared on process restart after refill. Using a
+   *  Poly-only flag instead of the global RiskGate pause keeps unrelated
+   *  strategies alive. */
+  polyDisabledReason?: string;
   /** Last time the bot attempted an HL hedge (success or fail). 0 if never. */
   lastHlAttemptAtMs: number;
   /** Last time we polled gamma for Polymarket settlement / ran auto-redeem.
@@ -786,6 +792,13 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       // Only fire orders when the kill-switch is on. Without it, polyExec is
       // still loaded for read-only balance/orderbook surfacing on the dashboard.
       if (cfg.polyExecutionEnabled && polyExec && polySnap.yesTokenId && polySnap.noTokenId) {
+        // Poly-side disabled after an unrecoverable operator condition
+        // (wallet out of pUSD, allowance drained). Skip silently — the
+        // one-shot warn log at set-time is enough, and vol-arb keeps trading.
+        if (state.polyDisabledReason) {
+          ledger.updateSignalAction(sigId, 'failed', 'poly_disabled');
+          continue;
+        }
         const outcome: 'yes' | 'no' = predictDirection === 'down' ? 'yes' : 'no';
         const polyTokenId = outcome === 'yes' ? polySnap.yesTokenId : polySnap.noTokenId;
         const polyEntryPrice = outcome === 'yes' ? polySnap.yesAsk : polySnap.noAsk;
@@ -924,14 +937,15 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
                 ? String((resp as { error?: unknown }).error)
                 : '';
             if (/not enough balance|not enough allowance/i.test(respErr)) {
-              log.error('svx.poly.insufficient_balance', {
-                rawResponse: resp,
-                hint:
-                  'Polymarket EOA / deposit wallet is out of pUSD (or allowance). Top up the funder address and pnpm run resume — the bot is paused to stop wasting CLOB requests.',
-              });
-              risk.pause(
-                'Polymarket wallet out of pUSD — top up the funder address and resume',
-              );
+              const alreadyDisabled = !!state.polyDisabledReason;
+              if (!alreadyDisabled) {
+                log.error('svx.poly.insufficient_balance', {
+                  rawResponse: resp,
+                  hint:
+                    'Polymarket EOA / deposit wallet is out of pUSD (or allowance). Top up the funder address and restart — Poly submits are disabled to stop wasting CLOB requests. Vol-arb + Predict keep trading.',
+                });
+              }
+              state.polyDisabledReason = 'poly wallet out of pUSD / allowance';
               ledger.updateSignalAction(sigId, 'failed', 'poly_insufficient_balance');
               continue;
             }

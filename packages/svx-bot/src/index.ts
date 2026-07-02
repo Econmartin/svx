@@ -1763,7 +1763,29 @@ async function runVolArbStep(args: {
           log.warn('svx.vol_arb.close_rejected', { tradeId: openPos.id, raw: closeFill.raw });
         }
       } catch (e) {
-        log.error('svx.vol_arb.close_failed', { tradeId: openPos.id, err: errMsg(e) });
+        const msg = errMsg(e);
+        // HL says "reduce-only would INCREASE position" iff we're asking it
+        // to close a position that isn't actually there. Cause: ledger drift
+        // (manual close on HL, funding-liquidation, or a prior close that
+        // filled but crashed before ledger commit). Retrying every 3s spams
+        // the exchange forever, so reconcile: mark the leg closed with 0
+        // realized PnL (we can't reconstruct the phantom close price). Use
+        // the recorded openPrice so audit doesn't show a bogus mark.
+        if (/reduce only order would increase position/i.test(msg)) {
+          ledger.closeHlLeg(openPos.id, {
+            closePrice: openPos.hlOpenPrice ?? 0,
+            pnlUsdc: 0,
+            fundingPaidUsdc: 0,
+            feesUsdc: 0,
+            closedAtMs: nowMs,
+          });
+          log.warn('svx.vol_arb.reconciled_flat_on_hl', {
+            tradeId: openPos.id,
+            note: 'HL had no position to close; leg marked closed with 0 PnL to stop retry spam',
+          });
+        } else {
+          log.error('svx.vol_arb.close_failed', { tradeId: openPos.id, err: msg });
+        }
       }
     }
   }

@@ -54,6 +54,7 @@ const baseCfg: SvxConfig = {
   dailyPolyLossLimitUsdc: 10,
   polyFillTimeoutMs: 30_000,
   polyStaleSettlementDays: 14,
+  predictStaleRedeemHours: 6,
   polySignatureType: 'EOA',
   polyFunderAddress: '',
   hlExecutionEnabled: true,

@@ -206,13 +206,15 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   // long-term every 6h, but on a fresh deploy we want any pre-existing
   // stuck redeem queue cleared immediately so the bot stops spamming
   // svx.redeem.failed every 15s from the first loop iteration.
+  // Predict cutoff is HOURS not days — oracles settle in 15 min so a
+  // redeem either succeeds quickly or it's a permanent MoveAbort(1).
   {
-    const staleAgeMs = cfg.polyStaleSettlementDays * 24 * 3600_000;
+    const staleAgeMs = cfg.predictStaleRedeemHours * 3600_000;
     const cleared = ledger.abandonStaleRedeems(staleAgeMs, Date.now());
     if (cleared > 0) {
       log.warn('svx.boot.abandoned_stale_redeems', {
         count: cleared,
-        olderThanDays: cfg.polyStaleSettlementDays,
+        olderThanHours: cfg.predictStaleRedeemHours,
         note: 'positions likely pruned from on-chain predict_manager; retry was failing forever',
       });
     }
@@ -1178,13 +1180,14 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     }
     // Same treatment for Predict (Sui) trades whose redeem keeps
     // MoveAbort(1)'ing — typically because the position was pruned from the
-    // on-chain predict_manager. Without this, the redeem loop spams
-    // svx.redeem.failed every 15s indefinitely on those trades.
-    const abandonedRedeems = ledger.abandonStaleRedeems(staleAgeMs, Date.now());
+    // on-chain predict_manager. Cutoff is HOURS (not days like poly) — see
+    // predictStaleRedeemHours commentary in tunables.
+    const predictStaleAgeMs = cfg.predictStaleRedeemHours * 3600_000;
+    const abandonedRedeems = ledger.abandonStaleRedeems(predictStaleAgeMs, Date.now());
     if (abandonedRedeems > 0) {
       log.warn('svx.predict.abandoned_stale_redeem', {
         count: abandonedRedeems,
-        olderThanDays: cfg.polyStaleSettlementDays,
+        olderThanHours: cfg.predictStaleRedeemHours,
       });
     }
     state.lastPruneAtMs = Date.now();

@@ -41,11 +41,12 @@ export const TUNABLES = {
   /** Per-trade cap on the Predict mint cost. Bumped from 15 → 50 for the
    *  hackathon-demo window — bigger trades = more visible PnL bars. */
   maxPositionDusdc: 50,
-  /** Per-trade cap as a fraction of NAV. Bumped 0.05 → 0.20 — on testnet
-   *  the wallet NAV (~$80) was so small that the 5% cap ($4) blocked nearly
-   *  every signal. 20% lets sized trades through while still capping any
-   *  single trade well below the absolute maxPositionDusdc=50 ceiling. */
-  maxPositionPct: 0.20,
+  /** Per-trade cap as a fraction of NAV. Effectively disabled at 1.0.
+   *  Testnet dUSDC lives mostly inside the PredictManager, not the operator
+   *  wallet, so state.navUsdc (wallet-only) reads absurdly low ($6-$80) and
+   *  any nonzero pct cap gates every signal on a technicality. The absolute
+   *  maxPositionDusdc=$50 ceiling still applies. */
+  maxPositionPct: 1.0,
   /** Auto-pause if 24h realized dUSDC PnL drops below −this. Bumped from
    *  150 → 1000 — testnet, paper-mode, no real money risk. */
   dailyLossLimitDusdc: 1000,
@@ -91,6 +92,15 @@ export const TUNABLES = {
    *  Marked with poly_settlement_outcome='abandoned' (still counts in
    *  PnL as a loss = full cost). Default 14 days. */
   polyStaleSettlementDays: 14,
+  /** Auto-abandon Predict (Sui) trades whose on-chain redeem keeps
+   *  MoveAbort(1)-ing on decrease_position. Typical cause: oracle aged
+   *  out and lost the position record, so the redeem can never succeed.
+   *  Predict oracles settle in ~15 min so stuck redeems get stuck
+   *  immediately — this needs a MUCH shorter cutoff than the Polymarket
+   *  one (14d would let the queue spam for two weeks). 6 hours gives a
+   *  normal redeem plenty of time to land while draining a stuck queue
+   *  same-day. */
+  predictStaleRedeemHours: 6,
 
   // ─────────────────────────────────────────────────────────────────────────
   // Risk caps — Hyperliquid hedge leg

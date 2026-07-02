@@ -1037,6 +1037,14 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       }
 
       if (action === 'live_executed' && live) {
+        // The manager holds pre-deposited dUSDC that Predict::mint spends
+        // from directly. The top-up path only exists to refill the manager
+        // when the wallet is holding the trading budget. On testnet all the
+        // dUSDC lives inside the manager and the wallet is empty, so
+        // requesting any top-up trips InsufficientCoinBalance on the split.
+        // Skip the top-up when the wallet has no dUSDC coins.
+        const walletCoinIds = await getOperatorDusdcCoinIds(live);
+        const shouldTopUp = walletCoinIds.length > 0;
         const tx = buildMintTx({
           oracleId: oracleSnap.oracleId,
           expiryMs: oracleSnap.expiryMs,
@@ -1044,10 +1052,8 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           direction: predictDirection,
           quantityDusdc: signalNotional,
           managerId: live.managerId,
-          // Top up the manager from the operator wallet for the cost (with a
-          // small buffer for the protocol's spread on top of fair price).
-          topUpDusdc: Math.min(signalCost * 1.5, signalNotional),
-          dusdcCoinObjectIds: await getOperatorDusdcCoinIds(live),
+          topUpDusdc: shouldTopUp ? Math.min(signalCost * 1.5, signalNotional) : 0,
+          dusdcCoinObjectIds: shouldTopUp ? walletCoinIds : undefined,
         });
         const result = await submitTx(live.sui, tx, live.keypair);
         if (!result.ok) {

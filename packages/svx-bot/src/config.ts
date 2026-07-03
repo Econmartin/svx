@@ -126,6 +126,18 @@ const Schema = z.object({
   polyMinEntryPrice: z.number().min(0).max(1).default(0.03),
   /** Refuse poly entries priced at/above this (near-certain, no payoff room). */
   polyMaxEntryPrice: z.number().min(0).max(1).default(0.97),
+  /** Model edge over the entry ask required to trade: modelProb − ask. */
+  polyMinEvFrac: z.number().min(0).max(1).default(0.05),
+  // ── Expiry-convergence strategy (see strategy/convergence.ts) ──
+  convergenceEnabled: z.boolean().default(true),
+  convergenceMaxMinutes: z.number().positive().default(90),
+  convergenceMinMinutes: z.number().min(0).default(5),
+  convergenceMinSigma: z.number().positive().default(4),
+  convergenceMinPrice: z.number().min(0).max(1).default(0.9),
+  convergenceMaxPrice: z.number().min(0).max(1).default(0.97),
+  convergenceMinEvFrac: z.number().min(0).max(1).default(0.02),
+  maxConvergencePerTradeUsdc: z.number().positive().default(4),
+  convergenceCheckIntervalMs: z.number().int().positive().default(60_000),
   /**
    * Polymarket signature mode:
    *   - 'EOA':              direct EOA — works only for whitelisted addresses.
@@ -278,7 +290,15 @@ export function loadConfig(): SvxConfig {
     paperTrading: parseBool(process.env.PAPER_TRADING, true),
     polyExecutionEnabled: parseBool(process.env.POLY_EXECUTION_ENABLED, false),
     hlExecutionEnabled: parseBool(process.env.HL_EXECUTION_ENABLED, false),
-    volArbEnabled: parseBool(process.env.VOL_ARB_ENABLED, false),
+    // HARD OFF (2026-07 audit): the IV-RV perp strategy paid $29.12 in fees
+    // to flip a coin 2,600 times (direction PnL −$1.80 over 5,219 fills —
+    // reconciled to the cent against HL's own records). A perp has no vega;
+    // an IV−RV spread cannot be harvested with a delta-one instrument. The
+    // env var is deliberately ignored so a stale MAINNET_VOL_ARB_ENABLED=true
+    // can't resurrect it; re-enabling requires a code change and a real
+    // edge argument. The ticker still runs for telemetry + RV sampling
+    // (the convergence strategy consumes the mid history).
+    volArbEnabled: false,
     marginLeverEnabled: parseBool(process.env.MARGIN_LEVER_ENABLED, false),
 
     // ── Network choices (env — per-deployment) ──
@@ -327,6 +347,16 @@ export function loadConfig(): SvxConfig {
     polyReentryCooldownMs: TUNABLES.polyReentryCooldownMs,
     polyMinEntryPrice: TUNABLES.polyMinEntryPrice,
     polyMaxEntryPrice: TUNABLES.polyMaxEntryPrice,
+    polyMinEvFrac: TUNABLES.polyMinEvFrac,
+    convergenceEnabled: TUNABLES.convergenceEnabled,
+    convergenceMaxMinutes: TUNABLES.convergenceMaxMinutes,
+    convergenceMinMinutes: TUNABLES.convergenceMinMinutes,
+    convergenceMinSigma: TUNABLES.convergenceMinSigma,
+    convergenceMinPrice: TUNABLES.convergenceMinPrice,
+    convergenceMaxPrice: TUNABLES.convergenceMaxPrice,
+    convergenceMinEvFrac: TUNABLES.convergenceMinEvFrac,
+    maxConvergencePerTradeUsdc: TUNABLES.maxConvergencePerTradeUsdc,
+    convergenceCheckIntervalMs: TUNABLES.convergenceCheckIntervalMs,
     hlHedgeAsset: TUNABLES.hlHedgeAsset,
     hlMinOrderUsdc: TUNABLES.hlMinOrderUsdc,
     hlTakerFeeRate: TUNABLES.hlTakerFeeRate,

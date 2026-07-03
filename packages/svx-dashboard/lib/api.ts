@@ -163,10 +163,13 @@ export interface TradeRecord {
   hlPnlUsdc?: number;
   hlFundingPaidUsdc?: number;
   hlClosedAtMs?: number;
-  /** Strategy that opened the trade. 'poly_arb' (original cross-venue) or
-   *  'vol_arb' (standalone HL vol strategy). Defaults to 'poly_arb' on
-   *  rows that pre-date the strategy tag (May 2026). */
-  strategy?: 'poly_arb' | 'vol_arb';
+  /** Strategy that opened the trade. 'poly_arb' (original cross-venue),
+   *  'vol_arb' (standalone HL vol strategy), or 'convergence' (near-expiry
+   *  Polymarket certainty-discount buyer). Defaults to 'poly_arb' on rows
+   *  that pre-date the strategy tag (May 2026). */
+  strategy?: 'poly_arb' | 'vol_arb' | 'convergence';
+  /** High-water mark of the poly leg's P&L fraction (trailing ratchet). */
+  polyHighWaterFrac?: number;
 }
 
 export interface OracleSummary {

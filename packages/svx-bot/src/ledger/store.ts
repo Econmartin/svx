@@ -229,6 +229,10 @@ export class LedgerStore {
     ensureColumn('hl_funding_paid_usdc', 'REAL');
     ensureColumn('hl_fees_usdc', 'REAL');
     ensureColumn('hl_closed_at_ms', 'INTEGER');
+    // Trailing-ratchet exit (additive 2026-07). High-water mark of the poly
+    // leg's mark-to-market P&L fraction; the early-exit walker sells when
+    // P&L falls below the highest locked step. NULL on rows that predate it.
+    ensureColumn('poly_high_water_frac', 'REAL');
     // Strategy tag (additive 2026-05-15). Existing rows are implicitly
     // 'poly_arb' (the original cross-venue strategy). New strategies tag
     // their trades so per-strategy PnL + positions can be segregated on
@@ -321,7 +325,7 @@ export class LedgerStore {
       predictIvAtExec?: number;
       edgeAtExec?: number;
       /** Strategy tag. Defaults to 'poly_arb' for backwards compatibility. */
-      strategy?: 'poly_arb' | 'vol_arb';
+      strategy?: 'poly_arb' | 'vol_arb' | 'convergence';
     },
   ): string {
     const id = t.id ?? randomUUID();
@@ -650,6 +654,17 @@ export class LedgerStore {
          WHERE id = ?`,
       )
       .run(settledAtMs, outcome, payoutUsdc, pnlUsdc, tradeId);
+  }
+
+  /**
+   * Persist the trailing-ratchet high-water mark for a poly leg. Written by
+   * the early-exit walker whenever mark-to-market P&L makes a new high, so
+   * the locked floor survives restarts.
+   */
+  updatePolyHighWater(tradeId: string, highWaterFrac: number): void {
+    this.db
+      .prepare(`UPDATE trades SET poly_high_water_frac = ? WHERE id = ?`)
+      .run(highWaterFrac, tradeId);
   }
 
   /**
@@ -1253,6 +1268,7 @@ export class LedgerStore {
           hl_funding_paid_usdc: number | null;
           hl_closed_at_ms: number | null;
           strategy: string | null;
+          poly_high_water_frac: number | null;
         }
       >(`SELECT * FROM trades ${suffix}`)
       .all(...params);
@@ -1312,7 +1328,8 @@ export class LedgerStore {
       hlPnlUsdc: r.hl_pnl_usdc ?? undefined,
       hlFundingPaidUsdc: r.hl_funding_paid_usdc ?? undefined,
       hlClosedAtMs: r.hl_closed_at_ms ?? undefined,
-      strategy: (r.strategy as 'poly_arb' | 'vol_arb' | null) ?? 'poly_arb',
+      strategy: (r.strategy as 'poly_arb' | 'vol_arb' | 'convergence' | null) ?? 'poly_arb',
+      polyHighWaterFrac: r.poly_high_water_frac ?? undefined,
     }));
   }
 }

@@ -16,8 +16,16 @@ export const TUNABLES = {
   // ─────────────────────────────────────────────────────────────────────────
   // Poly-arb signal thresholds + filters
   // ─────────────────────────────────────────────────────────────────────────
-  /** Minimum (predict vs polymarket) probability spread to consider trading. */
-  spreadThreshold: 0.03,
+  /** Minimum (predict vs polymarket) probability spread to consider trading.
+   *  Raised 0.03 → 0.08 post-incident: two weeks of (healed) data showed 3%
+   *  divergences carried no edge — the bot paid the book spread every time
+   *  and netted −$120. Fat divergences only; expect a few signals/day. */
+  spreadThreshold: 0.08,
+  /** Model edge must clear the entry ASK by this much: modelProb − ask ≥
+   *  polyMinEvFrac. spreadThreshold compares two probabilities; this one
+   *  compares against the price actually PAID, which embeds the book
+   *  spread — a 8% prob-edge on a 10¢-wide book is still a losing trade. */
+  polyMinEvFrac: 0.05,
   /** Skip signals where predictProb falls outside [min, max] — protocol
    *  rejects asks > 99% / < 1% anyway, so these waste gas. */
   minPredictProb: 0.05,
@@ -240,10 +248,46 @@ export const TUNABLES = {
    *  leg can't be exited (protocol has no sell function), but the poly leg
    *  can — locking in poly gains without waiting hours for UMA. */
   polyEarlyExitEnabled: true,
-  /** Mark-to-market P&L (as a fraction of cost) at which we exit the poly
-   *  leg early. 0.20 = "sell when current bid × shares is 20% above what we
-   *  paid." Tune up to capture more before exiting; down to exit sooner. */
+  /** RATCHET STEP for the trailing take-profit (repurposed 2026-07 from the
+   *  old fixed exit threshold — same knob, new semantics). The old behavior
+   *  sold the whole position the moment P&L hit +20%, which clipped every
+   *  winner while losers rode to $0. Now: winners RIDE. Each time the
+   *  high-water P&L crosses a multiple of this step (+20%, +40%, ...), the
+   *  exit floor locks in at that multiple; we only sell when P&L falls back
+   *  below the highest locked floor. A trade that runs to resolution never
+   *  sells at all — it redeems at $1. */
   polyEarlyExitMinProfitFrac: 0.20,
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Expiry-convergence strategy (Polymarket BTC dailies, final hour)
+  // ─────────────────────────────────────────────────────────────────────────
+  /** Buy the deep-ITM side of near-expiry dailies at 90-97¢ when realized
+   *  vol says the strike is unreachable. See strategy/convergence.ts for the
+   *  mechanism (we were the COUNTERPARTY to this trade during the July
+   *  incident — the 800-shares-at-1¢ loss was someone running this). */
+  convergenceEnabled: true,
+  /** Only markets expiring within this window are considered. */
+  convergenceMaxMinutes: 90,
+  /** ...but not closer than this — books go haywire in the last minutes and
+   *  a fill there can't be managed if it goes wrong. */
+  convergenceMinMinutes: 5,
+  /** Spot must sit at least this many sigmas (realized vol, √T-scaled) from
+   *  the strike. 4σ ≈ 3e-5 crossing probability. */
+  convergenceMinSigma: 4,
+  /** Ask below this means the crowd prices real doubt — trust the crowd
+   *  over trailing RV and stand down. */
+  convergenceMinPrice: 0.90,
+  /** Ask above this leaves no meat after tail risk. */
+  convergenceMaxPrice: 0.97,
+  /** Required EV per $1 share: (1 − ask) − Φ(−dσ). */
+  convergenceMinEvFrac: 0.02,
+  /** Per-trade pUSD clip. Small on purpose: the loss shape is −95% on a
+   *  crossing, so clip size IS the risk budget. Kept ≤ maxPolyPositionUsdc
+   *  so the shared RiskGate.checkPoly rail passes sized orders. */
+  maxConvergencePerTradeUsdc: 4,
+  /** Walker cadence. Books near expiry move fast but 60s is plenty — the
+   *  edge is a level (the discount), not a race. */
+  convergenceCheckIntervalMs: 60_000,
 
   // ─────────────────────────────────────────────────────────────────────────
   // Boot-time behaviour

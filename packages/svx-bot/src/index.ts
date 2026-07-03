@@ -72,6 +72,7 @@ import {
   realizedPnlSince as marginLeverRealizedPnlSince,
   type MarginLeverState,
 } from './strategy/margin-lever.js';
+import { decideConvergence, sigmaDistance } from './strategy/convergence.js';
 import { startApiServer } from './api/server.js';
 import { log } from './util/log.js';
 
@@ -155,6 +156,8 @@ interface BotState {
   /** Last time we polled gamma for Polymarket settlement / ran auto-redeem.
    *  UMA resolves markets hours after expiry, so 5-min cadence is plenty. */
   lastPolySettlementCheckMs: number;
+  /** Last time the expiry-convergence walker scanned near-expiry markets. */
+  lastConvergenceCheckMs: number;
   /** Vol-arb strategy state — in-memory rolling buffer + last decision. */
   volArb: VolArbState;
   /** Margin-Lever (paper) strategy state — see strategy/margin-lever.ts. */
@@ -274,6 +277,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastPolyAttemptAtMs: 0,
     lastHlAttemptAtMs: 0,
     lastPolySettlementCheckMs: 0,
+    lastConvergenceCheckMs: 0,
     polyFillFailedAt: new Map(),
     polyEntryAt: new Map(),
     volArb: freshVolArbState(),
@@ -561,6 +565,24 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       await walkPolyEarlyExits({ poly, polyExec, hlExec, ledger, cfg });
     } catch (e) {
       log.warn('svx.poly.early_exit_loop_error', { err: errMsg(e) });
+    }
+  }
+
+  // 2d. Expiry-convergence — buy the deep-ITM side of BTC dailies in their
+  // final hour when realized vol says the strike is out of reach. Sigma
+  // comes from the vol-arb ticker's always-on mid sampling. Throttled: the
+  // edge is a price level (the discount), not a race.
+  if (
+    polyExec &&
+    cfg.convergenceEnabled &&
+    cfg.polyExecutionEnabled &&
+    Date.now() - state.lastConvergenceCheckMs > cfg.convergenceCheckIntervalMs
+  ) {
+    state.lastConvergenceCheckMs = Date.now();
+    try {
+      await walkExpiryConvergence({ poly, polyExec, ledger, risk, cfg, state, polyMarkets });
+    } catch (e) {
+      log.warn('svx.convergence.loop_error', { err: errMsg(e) });
     }
   }
 
@@ -886,6 +908,23 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             bounds: [cfg.polyMinEntryPrice, cfg.polyMaxEntryPrice],
           });
           ledger.updateSignalAction(sigId, 'failed', 'poly_entry_price_wing');
+          continue;
+        }
+        // EV-after-cost gate: the model's edge must clear the price we
+        // actually PAY. spreadThreshold compares two probabilities and is
+        // blind to the book — an 8-point prob edge on a 10¢-wide book still
+        // loses. modelProb − ask is the realized entry EV per $1 share.
+        const modelProb = outcome === 'yes' ? spread.predictUp : 1 - spread.predictUp;
+        const entryEvFrac = modelProb - polyEntryPrice;
+        if (entryEvFrac < cfg.polyMinEvFrac) {
+          log.debug('svx.poly.ev_blocked', {
+            outcome,
+            modelProb: modelProb.toFixed(3),
+            entryAsk: polyEntryPrice,
+            evFrac: entryEvFrac.toFixed(3),
+            min: cfg.polyMinEvFrac,
+          });
+          ledger.updateSignalAction(sigId, 'failed', 'poly_ev_below_min');
           continue;
         }
 
@@ -1343,18 +1382,24 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
  *
  *   1. List open poly trades (filled, not yet settled).
  *   2. For each: fetch the current order book, compute mark = bid × shares.
- *   3. Exit when EITHER side of the band is crossed:
- *        take-profit: (mark − cost) / cost ≥ `polyEarlyExitMinProfitFrac`
- *        stop-loss:   (mark − cost) / cost ≤ −`polyStopLossFrac`
- *      submitted as a market-sell for the full position via FOK.
+ *   3. Exit on either of two conditions:
+ *        stop-loss:      pnlFrac ≤ −`polyStopLossFrac` (cut losers)
+ *        trail-ratchet:  once the high-water pnlFrac crosses a multiple of
+ *                        `polyEarlyExitMinProfitFrac` (+20%, +40%, ...) that
+ *                        multiple becomes a locked floor; sell only when
+ *                        pnlFrac falls back below the highest locked floor.
+ *      Both are submitted as a market-sell for the full position via FOK.
  *   4. On a successful fill: mark the trade as exited (settled-early), and
  *      close any open HL hedge attached to the same trade row.
  *
- * The original design was take-profit-only ("hold to settlement on the way
- * down"). Two weeks of live data showed why that's wrong on binaries: every
- * winner got clipped at +10-20% of a $4 clip while every loser rode to $0 —
- * +$174 of exits swamped by ~$290 of expiry losses. The stop-loss bounds the
- * downside per clip to roughly what a win captures.
+ * Exit-style history: v1 was take-profit-only ("hold to settlement on the
+ * way down") — winners clipped at +20%, losers rode to $0; two weeks of
+ * live data showed +$174 of clips swamped by ~$290 of expiry losses. v2
+ * added the stop-loss. v3 (current) replaces the fixed clip with the
+ * ratchet so winners RIDE: a trade that runs clean to resolution never
+ * sells at all — it redeems at $1 — while every 20%-step it passes on the
+ * way is locked in against a reversal. High-water is persisted per trade
+ * (poly_high_water_frac) so locked floors survive restarts.
  */
 export async function walkPolyEarlyExits(args: {
   poly: PolymarketClient;
@@ -1395,15 +1440,27 @@ export async function walkPolyEarlyExits(args: {
     const pnlUsdc = markUsdc - trade.polyCostUsdc;
     const pnlFrac = pnlUsdc / trade.polyCostUsdc;
 
-    const takeProfit = pnlFrac >= cfg.polyEarlyExitMinProfitFrac;
+    // Trailing ratchet: persist the high-water mark, derive the highest
+    // locked floor (largest step multiple the high-water has crossed), and
+    // exit only when P&L falls back below it. A winner that never reverses
+    // holds to resolution and redeems at $1.
+    const step = cfg.polyEarlyExitMinProfitFrac;
+    const prevHighWater = trade.polyHighWaterFrac ?? 0;
+    const highWater = Math.max(prevHighWater, pnlFrac);
+    if (highWater > prevHighWater) {
+      ledger.updatePolyHighWater(trade.id, highWater);
+    }
+    const lockedFloor =
+      step > 0 && highWater >= step ? Math.floor(highWater / step + 1e-9) * step : null;
+    const ratchetHit = lockedFloor != null && pnlFrac < lockedFloor;
     const stopLoss = cfg.polyStopLossFrac > 0 && pnlFrac <= -cfg.polyStopLossFrac;
-    if (!takeProfit && !stopLoss) {
+    if (!ratchetHit && !stopLoss) {
       continue;
     }
 
     log.info('svx.poly.early_exit.submit', {
       tradeId: trade.id,
-      kind: takeProfit ? 'take_profit' : 'stop_loss',
+      kind: ratchetHit ? 'trail_ratchet' : 'stop_loss',
       tokenId: trade.polyTokenId.slice(0, 12) + '…',
       shares: trade.polyFilledShares,
       bestBid,
@@ -1411,9 +1468,8 @@ export async function walkPolyEarlyExits(args: {
       costUsdc: trade.polyCostUsdc.toFixed(4),
       pnlUsdc: pnlUsdc.toFixed(4),
       pnlPct: (pnlFrac * 100).toFixed(1),
-      threshPct: takeProfit
-        ? (cfg.polyEarlyExitMinProfitFrac * 100).toFixed(0)
-        : (-cfg.polyStopLossFrac * 100).toFixed(0),
+      highWaterPct: (highWater * 100).toFixed(1),
+      lockedFloorPct: lockedFloor != null ? (lockedFloor * 100).toFixed(0) : null,
     });
 
     let resp: unknown;
@@ -1544,6 +1600,194 @@ export async function walkPolyEarlyExits(args: {
  *      Best-effort — if a redeem reverts, we log + persist 'failed' so the
  *      operator can manually clear it.
  */
+/**
+ * Expiry-convergence walker — the strategy math lives in
+ * strategy/convergence.ts; this wires it to live books and the ledger.
+ *
+ * For each BTC daily expiring within [convergenceMinMinutes,
+ * convergenceMaxMinutes]: if spot sits ≥ convergenceMinSigma sigmas from the
+ * strike (realized vol from the HL mid sampler), buy the in-the-money side
+ * at 90-97¢ and hold to resolution. Settlement + auto-redeem handle the
+ * payout; the shared stop-loss walker cuts the position at −50% if BTC
+ * lurches toward the strike. Trades tag strategy='convergence'.
+ */
+async function walkExpiryConvergence(args: {
+  poly: PolymarketClient;
+  polyExec: PolymarketExecClient;
+  ledger: LedgerStore;
+  risk: RiskGate;
+  cfg: SvxConfig;
+  state: BotState;
+  polyMarkets: PolyStrikeMarket[];
+}): Promise<void> {
+  const { poly, polyExec, ledger, risk, cfg, state, polyMarkets } = args;
+  if (state.polyDisabledReason) return;
+
+  // Sigma from the vol-arb ticker's rolling HL mid history (always-on
+  // telemetry, ~2s cadence). No vol estimate → no trades. Never guess.
+  const sigma = computeRealizedVol(state.volArb.midHistory);
+  const lastMid = state.volArb.midHistory[state.volArb.midHistory.length - 1];
+  const spot = lastMid?.price ?? state.lastBtcSpot?.value;
+  if (!spot || !isFinite(sigma) || sigma <= 0) return;
+
+  const nowMs = Date.now();
+  for (const market of polyMarkets) {
+    const tMs = market.expiryMs - nowMs;
+    if (
+      tMs < cfg.convergenceMinMinutes * 60_000 ||
+      tMs > cfg.convergenceMaxMinutes * 60_000
+    ) {
+      continue;
+    }
+    const tYears = tMs / (365.25 * 24 * 3600 * 1000);
+    // Cheap sigma pre-gate before paying for a book fetch — most strikes
+    // near spot fail here and never generate an HTTP call.
+    if (sigmaDistance(spot, market.strike, sigma, tYears) < cfg.convergenceMinSigma) {
+      continue;
+    }
+
+    const side: 'yes' | 'no' = spot >= market.strike ? 'yes' : 'no';
+    const tokenId = side === 'yes' ? market.yesTokenId : market.noTokenId;
+
+    // Same per-token rails as the arb path: one open position per token,
+    // re-entry cooldown, failed-fill cooldown.
+    if (ledger.countOpenPolyForToken(tokenId) >= 1) continue;
+    const lastEntryAt = state.polyEntryAt.get(tokenId);
+    if (lastEntryAt && nowMs - lastEntryAt < cfg.polyReentryCooldownMs) continue;
+    const lastFailedAt = state.polyFillFailedAt.get(tokenId);
+    if (lastFailedAt && nowMs - lastFailedAt < cfg.polyFillFailedCooldownMs) continue;
+
+    let book;
+    try {
+      book = await poly.orderBook(market.conditionId, tokenId);
+    } catch (e) {
+      log.debug('svx.convergence.book_failed', {
+        conditionId: market.conditionId.slice(0, 10),
+        err: errMsg(e),
+      });
+      continue;
+    }
+    if (!book?.ask?.bestPrice || !book.ask.bestSize) continue;
+
+    const decision = decideConvergence({
+      spot,
+      strike: market.strike,
+      sigmaAnnual: sigma,
+      tYears,
+      itmAsk: book.ask.bestPrice,
+      cfg,
+    });
+    if (!decision.enter) {
+      log.debug('svx.convergence.skip', {
+        question: market.question,
+        reason: decision.reason,
+      });
+      continue;
+    }
+
+    const sized = sizePolyOrder({
+      maxOrderUsdc: cfg.maxConvergencePerTradeUsdc,
+      minOrderUsdc: cfg.polyMinOrderUsdc,
+      bookDepthShares: book.ask.bestSize,
+      ask: book.ask.bestPrice,
+    });
+    if (!sized.ok) continue;
+
+    // Shared risk rails: pause flag, per-trade cap, open-position count,
+    // daily poly loss limit — all of which now read truthful numbers.
+    const gate = risk.checkPoly({
+      costUsdc: sized.submitUsdc,
+      openPolyPositionCount: ledger.countOpenPolyPositions(),
+    });
+    if (!gate.ok) {
+      log.info('svx.convergence.risk_blocked', { reason: gate.reason });
+      return; // pause / daily-loss applies to every market — stop the scan
+    }
+
+    state.lastPolyAttemptAtMs = Date.now();
+    let resp: unknown;
+    try {
+      resp = await polyExec.marketBuy({ tokenId, usdcAmount: sized.submitUsdc });
+    } catch (e) {
+      log.warn('svx.convergence.buy_error', { tokenId: tokenId.slice(0, 12) + '…', err: errMsg(e) });
+      continue;
+    }
+    let fill: ReturnType<typeof parsePolyFillResponse>;
+    try {
+      fill = parsePolyFillResponse(resp, { requestedUsdc: sized.submitUsdc, side: 'buy' });
+    } catch (parseErr) {
+      log.error('svx.convergence.parse_failed', {
+        err: errMsg(parseErr),
+        rawResponse: resp,
+        note: 'Order MAY have been submitted on-chain — check the wallet history.',
+      });
+      continue;
+    }
+    if (fill.status === 'failed' || !fill.filledShares || fill.filledShares <= 0) {
+      const respErr =
+        (resp as { error?: unknown })?.error != null
+          ? String((resp as { error?: unknown }).error)
+          : '';
+      if (/not enough balance|not enough allowance/i.test(respErr)) {
+        if (!state.polyDisabledReason) {
+          log.error('svx.poly.insufficient_balance', {
+            rawResponse: resp,
+            hint: 'Polymarket wallet out of pUSD/allowance — Poly submits disabled until refill + restart.',
+          });
+        }
+        state.polyDisabledReason = 'poly wallet out of pUSD / allowance';
+        return;
+      }
+      state.polyFillFailedAt.set(tokenId, Date.now());
+      log.warn('svx.convergence.fill_failed', { raw: fill.raw });
+      continue;
+    }
+
+    state.polyEntryAt.set(tokenId, Date.now());
+    const tradeId = ledger.insertTrade({
+      signalId: 'convergence',
+      timestampMs: nowMs,
+      // mode describes the SUI leg (mainnet convention: paper). settled=true
+      // because there IS no Predict leg — keeps the row out of openTrades();
+      // the poly leg's lifecycle runs on poly_settled as usual.
+      mode: 'paper',
+      oracleId: `conv:${market.conditionId.slice(0, 16)}`,
+      underlyingAsset: 'BTC',
+      expiryMs: market.expiryMs,
+      strike: market.strike,
+      direction: side === 'yes' ? 'up' : 'down',
+      quantityDusdc: 0,
+      costPrice: fill.fillPrice ?? book.ask.bestPrice,
+      costUsdc: 0,
+      settled: true,
+      strategy: 'convergence',
+      polyNetwork: cfg.polyNetwork,
+      polyTokenId: tokenId,
+      polyConditionId: market.conditionId,
+      polySide: 'buy',
+      polyOutcome: side,
+      polyOrderId: fill.orderId,
+      polyFilledShares: fill.filledShares,
+      polyFillPrice: fill.fillPrice,
+      polyCostUsdc: fill.costUsdc,
+      polyTxHash: fill.txHash,
+      polyStatus: 'filled',
+    });
+    log.info('svx.convergence.opened', {
+      tradeId,
+      question: market.question,
+      side,
+      dSigma: decision.dSigma.toFixed(1),
+      pCross: decision.pCross.toExponential(1),
+      evPct: (decision.evFrac * 100).toFixed(1),
+      shares: fill.filledShares,
+      fillPrice: fill.fillPrice,
+      costUsdc: fill.costUsdc,
+      minutesToExpiry: (tMs / 60_000).toFixed(0),
+    });
+  }
+}
+
 export async function reconcilePolySettlements(
   poly: PolymarketClient,
   polyExec: PolymarketExecClient,

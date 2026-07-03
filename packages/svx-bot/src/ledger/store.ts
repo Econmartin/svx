@@ -965,6 +965,40 @@ export class LedgerStore {
     return r.changes;
   }
 
+  /**
+   * Reconcile poly_arb HL hedges whose Predict leg settled long ago but whose
+   * ledger hl_status is still 'open'. Cause: the HL-close path fires when the
+   * Poly leg settles via UMA — if UMA never confirms the market (orphaned /
+   * neg-risk cleanup), the HL close never happens and the row lingers as
+   * "open" in the ledger. On chain the position was long since flat.
+   *
+   * Marks hl_status=closed with 0 realized PnL and closePrice=hlOpenPrice so
+   * fees + funding numbers stay untouched and openHlExposureUsdc drops back
+   * to reality. Only touches poly_arb (vol_arb has its own close path). Only
+   * touches trades where the Predict leg is settled=1 and expiry is at least
+   * `minAgeMs` in the past — protects live-in-flight trades.
+   */
+  abandonStaleHlLegs(minAgeMs: number, nowMs: number): number {
+    const expiryCutoff = nowMs - minAgeMs;
+    const r = this.db
+      .prepare(
+        `UPDATE trades
+            SET hl_close_price = hl_open_price,
+                hl_pnl_usdc = 0,
+                hl_funding_paid_usdc = COALESCE(hl_funding_paid_usdc, 0),
+                hl_fees_usdc = COALESCE(hl_fees_usdc, 0),
+                hl_closed_at_ms = ?,
+                hl_status = 'closed'
+          WHERE hl_status = 'open'
+            AND hl_open_price IS NOT NULL
+            AND (strategy = 'poly_arb' OR strategy IS NULL)
+            AND settled = 1
+            AND expiry_ms < ?`,
+      )
+      .run(nowMs, expiryCutoff);
+    return r.changes;
+  }
+
   // ---- Read API for dashboard ----
 
   recentSignals(limit = 100): SignalRecord[] {

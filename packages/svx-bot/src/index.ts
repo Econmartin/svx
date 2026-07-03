@@ -226,6 +226,22 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     }
   }
 
+  // Also reconcile poly_arb HL hedges whose Predict expired long ago but whose
+  // ledger row still says hl_status='open'. Cause: the HL-close path only
+  // fires when Polymarket settles via UMA — if UMA never confirms (orphan
+  // markets, neg-risk cleanup), the HL leg lingers as "open" forever and
+  // openHlExposureUsdc reports phantom risk. Give expired Predict trades a
+  // 24h grace so we don't step on genuinely in-flight closes.
+  {
+    const reconciled = ledger.abandonStaleHlLegs(24 * 3600_000, Date.now());
+    if (reconciled > 0) {
+      log.warn('svx.boot.reconciled_stale_hl_legs', {
+        count: reconciled,
+        note: 'HL positions long since flat on-chain; ledger drift from orphan UMA settlements',
+      });
+    }
+  }
+
   const state: BotState = {
     startedAtMs: Date.now(),
     navUsdc: PAPER_INITIAL_NAV,

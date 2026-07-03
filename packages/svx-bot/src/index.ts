@@ -140,6 +140,10 @@ interface BotState {
   /** tokenId → ms of last fill_failed. Used to skip retries during the
    *  cooldown window so a stuck-on-thin-book signal doesn't spam the CLOB. */
   polyFillFailedAt: Map<string, number>;
+  /** tokenId → ms of last SUCCESSFUL entry. Enforces polyReentryCooldownMs:
+   *  an early exit frees the concentration slot, and without this gate the
+   *  very next loop re-bought the same market at a worse price. */
+  polyEntryAt: Map<string, number>;
   /** Set when the Polymarket leg needs an operator refill (wallet out of pUSD
    *  or allowance drained). Poly submits skip while set; vol-arb + Predict
    *  keep trading. Cleared on process restart after refill. Using a
@@ -242,6 +246,23 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     }
   }
 
+  // One-shot repair for the 2026-07 settlement incident: rows force-abandoned
+  // (booked as full-cost losses) while getMarketResolution was silently
+  // broken (missing closed=true — gamma hides closed markets by default, so
+  // resolution was NEVER observed; 0 of 307 lifetime closures came from UMA).
+  // Re-queue them through the now-working settlement poll: real losses
+  // re-book as losses within one cycle, and any abandoned WINNER gets its
+  // true payout booked + shares redeemed instead of written off.
+  {
+    const requeued = ledger.resetAbandonedPolyTrades();
+    if (requeued > 0) {
+      log.warn('svx.boot.requeued_abandoned_poly', {
+        count: requeued,
+        note: 'will re-settle with true outcomes via gamma closed=true within one settlement cycle',
+      });
+    }
+  }
+
   const state: BotState = {
     startedAtMs: Date.now(),
     navUsdc: PAPER_INITIAL_NAV,
@@ -254,6 +275,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastHlAttemptAtMs: 0,
     lastPolySettlementCheckMs: 0,
     polyFillFailedAt: new Map(),
+    polyEntryAt: new Map(),
     volArb: freshVolArbState(),
     marginLever: freshMarginLeverState(),
   };
@@ -633,6 +655,11 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
   // With dozens of matches per loop, an unchanging cap-hit reason would
   // otherwise log identically every 15s × every match — drowns real errors.
   const loggedRiskReasons = new Set<string>();
+  // One poly attempt per outcome token per loop. Two Predict oracles
+  // routinely match the same poly market (22 matches from 11 markets), and
+  // the per-(oracle,strike,direction) concentration key let both fire —
+  // every clip went out twice, same second, same price.
+  const polyTokensThisLoop = new Set<string>();
 
   for (const match of matches) {
     const oracleSnap = oracleSnapshots.get(match.oracle.oracleId);
@@ -824,6 +851,44 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         const polyDepth =
           outcome === 'yes' ? polySnap.yesAskSize : polySnap.noAskSize ?? polySnap.yesAskSize;
 
+        // ── Entry guards (2026-07 incident hardening) ──────────────────────
+        // One attempt per token per loop — two oracles matching the same poly
+        // market must not double-fire the same clip.
+        if (polyTokensThisLoop.has(polyTokenId)) {
+          ledger.updateSignalAction(sigId, 'failed', 'poly_dup_in_loop');
+          continue;
+        }
+        polyTokensThisLoop.add(polyTokenId);
+        // One OPEN position per token, keyed on the poly leg itself. The old
+        // per-(oracle,strike,direction) counter keyed on the Predict leg's
+        // settled flag — a paper leg that oracle-settles within minutes on
+        // mainnet, freeing the slot while real pUSD was still deployed.
+        if (ledger.countOpenPolyForToken(polyTokenId) >= 1) {
+          ledger.updateSignalAction(sigId, 'failed', 'poly_token_already_open');
+          continue;
+        }
+        // Re-entry cooldown — an early exit frees the slot, but re-buying the
+        // same market seconds later at a worse price was the churn engine.
+        const lastEntryAt = state.polyEntryAt.get(polyTokenId);
+        if (lastEntryAt && Date.now() - lastEntryAt < cfg.polyReentryCooldownMs) {
+          ledger.updateSignalAction(sigId, 'failed', 'poly_reentry_cooldown');
+          continue;
+        }
+        // Wing guard — a 1-2¢ ask means the market is ~99% sure; any "edge"
+        // the SVI wing claims out there is model junk, not information.
+        if (
+          polyEntryPrice <= cfg.polyMinEntryPrice ||
+          polyEntryPrice >= cfg.polyMaxEntryPrice
+        ) {
+          log.debug('svx.poly.entry_price_wing_blocked', {
+            outcome,
+            entryPrice: polyEntryPrice,
+            bounds: [cfg.polyMinEntryPrice, cfg.polyMaxEntryPrice],
+          });
+          ledger.updateSignalAction(sigId, 'failed', 'poly_entry_price_wing');
+          continue;
+        }
+
         const polyRisk = risk.checkPoly({
           costUsdc: cfg.maxPolyPositionUsdc,
           openPolyPositionCount: ledger.countOpenPolyPositions(),
@@ -972,8 +1037,10 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             ledger.updateSignalAction(sigId, 'failed', 'poly_fill_failed');
             continue;
           }
-          // Successful fill — clear any prior cooldown for this token.
+          // Successful fill — clear any prior cooldown for this token and
+          // start the re-entry clock.
           state.polyFillFailedAt.delete(polyTokenId);
+          state.polyEntryAt.set(polyTokenId, Date.now());
           log.info('svx.poly.filled', {
             orderId: fill.orderId,
             shares: fill.filledShares,
@@ -1276,14 +1343,18 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
  *
  *   1. List open poly trades (filled, not yet settled).
  *   2. For each: fetch the current order book, compute mark = bid × shares.
- *   3. If (mark − cost) / cost ≥ `polyEarlyExitMinProfitFrac`, submit a
- *      market-sell for the full position via FOK.
+ *   3. Exit when EITHER side of the band is crossed:
+ *        take-profit: (mark − cost) / cost ≥ `polyEarlyExitMinProfitFrac`
+ *        stop-loss:   (mark − cost) / cost ≤ −`polyStopLossFrac`
+ *      submitted as a market-sell for the full position via FOK.
  *   4. On a successful fill: mark the trade as exited (settled-early), and
  *      close any open HL hedge attached to the same trade row.
  *
- * No stop-loss — by design. The user asked for take-profit only; cutting
- * losses early on a binary that resolves binary at expiry just locks in
- * mark-noise losses. Hold to settlement on the way down; exit on the way up.
+ * The original design was take-profit-only ("hold to settlement on the way
+ * down"). Two weeks of live data showed why that's wrong on binaries: every
+ * winner got clipped at +10-20% of a $4 clip while every loser rode to $0 —
+ * +$174 of exits swamped by ~$290 of expiry losses. The stop-loss bounds the
+ * downside per clip to roughly what a win captures.
  */
 export async function walkPolyEarlyExits(args: {
   poly: PolymarketClient;
@@ -1324,12 +1395,15 @@ export async function walkPolyEarlyExits(args: {
     const pnlUsdc = markUsdc - trade.polyCostUsdc;
     const pnlFrac = pnlUsdc / trade.polyCostUsdc;
 
-    if (pnlFrac < cfg.polyEarlyExitMinProfitFrac) {
+    const takeProfit = pnlFrac >= cfg.polyEarlyExitMinProfitFrac;
+    const stopLoss = cfg.polyStopLossFrac > 0 && pnlFrac <= -cfg.polyStopLossFrac;
+    if (!takeProfit && !stopLoss) {
       continue;
     }
 
     log.info('svx.poly.early_exit.submit', {
       tradeId: trade.id,
+      kind: takeProfit ? 'take_profit' : 'stop_loss',
       tokenId: trade.polyTokenId.slice(0, 12) + '…',
       shares: trade.polyFilledShares,
       bestBid,
@@ -1337,7 +1411,9 @@ export async function walkPolyEarlyExits(args: {
       costUsdc: trade.polyCostUsdc.toFixed(4),
       pnlUsdc: pnlUsdc.toFixed(4),
       pnlPct: (pnlFrac * 100).toFixed(1),
-      threshPct: (cfg.polyEarlyExitMinProfitFrac * 100).toFixed(0),
+      threshPct: takeProfit
+        ? (cfg.polyEarlyExitMinProfitFrac * 100).toFixed(0)
+        : (-cfg.polyStopLossFrac * 100).toFixed(0),
     });
 
     let resp: unknown;

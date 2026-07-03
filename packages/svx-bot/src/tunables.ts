@@ -67,10 +67,11 @@ export const TUNABLES = {
   // captures more $$ per signal; total exposure cap (maxOpenPolyPositions)
   // stays at 1000 so we don't pin the queue.
   maxPolyPositionUsdc: 4,
-  /** Hard cap on concurrent open Polymarket positions. Cranked to 1000 for
-   *  hackathon-demo mode — effectively uncapped. The stale-row abandon
-   *  prune (see polyStaleSettlementDays) keeps this from drifting forever. */
-  maxOpenPolyPositions: 1000,
+  /** Hard cap on concurrent open Polymarket positions. Was 1000 ("demo
+   *  mode, effectively uncapped") — which meant nothing bounded total
+   *  concurrent exposure during the 2026-07 incident. 10 × $4 clips = $40
+   *  max at risk at any moment. */
+  maxOpenPolyPositions: 10,
   /** Min shares at top-of-book before we'll fill — avoids partial-fill drift. */
   polyMinBookDepthShares: 20,
   /** Floor on a sized poly order. The depth-clamp can shrink an order below
@@ -92,6 +93,24 @@ export const TUNABLES = {
    *  Marked with poly_settlement_outcome='abandoned' (still counts in
    *  PnL as a loss = full cost). Default 14 days. */
   polyStaleSettlementDays: 14,
+  /** Mid-life STOP-LOSS on the poly leg: sell when mark-to-market P&L frac
+   *  ≤ −this. 0.5 = cut the position once it's lost half its cost. The
+   *  original design was take-profit-only ("hold to settlement on the way
+   *  down") — that harvested negative skew: winners clipped at +10-20%,
+   *  losers ridden to $0. Set 0 to disable (not recommended). */
+  polyStopLossFrac: 0.5,
+  /** Min gap between entries on the SAME poly outcome token. An early exit
+   *  frees the concentration slot; without this the very next loop re-bought
+   *  the same market at a worse price (the July-2 $60k churn: 24¢ → 29¢ →
+   *  38¢ → 42¢, all torched at expiry). */
+  polyReentryCooldownMs: 30 * 60_000,
+  /** Refuse poly entries priced at/below this. A 1-2¢ ask means the market
+   *  is ~99% sure — any "edge" Predict's SVI wing claims out there is model
+   *  junk, not information (800 shares of No @ 1¢, RIP $8). */
+  polyMinEntryPrice: 0.03,
+  /** Refuse poly entries priced at/above this — near-certain side, no room
+   *  left to be paid for the risk. */
+  polyMaxEntryPrice: 0.97,
   /** Auto-abandon Predict (Sui) trades whose on-chain redeem keeps
    *  MoveAbort(1)-ing on decrease_position. Typical cause: oracle aged
    *  out and lost the position record, so the redeem can never succeed.

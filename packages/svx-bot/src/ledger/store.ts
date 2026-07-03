@@ -601,6 +601,25 @@ export class LedgerStore {
   }
 
   /**
+   * Open poly-leg positions on ONE outcome token. This is the concentration
+   * key that actually matters: the old per-(oracle,strike,direction) counter
+   * keyed on the Predict leg's `settled` flag, which on mainnet is a paper
+   * leg that oracle-settles within minutes — freeing the slot while the poly
+   * leg was still live. Two Predict oracles also routinely match the same
+   * poly market, so the per-oracle key let the same token fire twice in one
+   * loop. Counting open poly legs per token closes both holes.
+   */
+  countOpenPolyForToken(tokenId: string): number {
+    const r = this.db
+      .prepare<[string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM trades
+         WHERE poly_status = 'filled' AND poly_settled = 0 AND poly_token_id = ?`,
+      )
+      .get(tokenId);
+    return r?.c ?? 0;
+  }
+
+  /**
    * Trades whose Polymarket fill was successful but UMA hasn't resolved yet.
    * The settlement-poll loop iterates this each cycle, groups by conditionId,
    * and queries gamma for resolution status.
@@ -687,6 +706,33 @@ export class LedgerStore {
             AND ts_ms < ?`,
       )
       .run(nowMs, cutoff);
+    return r.changes;
+  }
+
+  /**
+   * One-shot boot repair for the 2026-07 settlement incident: rows that were
+   * force-abandoned (booked as full-cost losses) while getMarketResolution
+   * was silently broken. Re-queues them through the now-working settlement
+   * poll by flipping poly_settled back to 0 and clearing the abandon
+   * bookkeeping. Real losses re-book as losses within one poll cycle; any
+   * abandoned WINNER gets its true payout booked and its shares redeemed
+   * instead of being written off. Idempotent — re-settled rows no longer
+   * carry outcome='abandoned', so subsequent boots find nothing.
+   */
+  resetAbandonedPolyTrades(): number {
+    const r = this.db
+      .prepare(
+        `UPDATE trades
+            SET poly_settled = 0,
+                poly_settled_at_ms = NULL,
+                poly_settlement_outcome = NULL,
+                poly_payout_usdc = NULL,
+                poly_pnl_usdc = NULL,
+                poly_redeem_tx_hash = NULL,
+                poly_redeem_status = NULL
+          WHERE poly_settlement_outcome = 'abandoned'`,
+      )
+      .run();
     return r.changes;
   }
 

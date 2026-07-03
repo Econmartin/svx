@@ -118,6 +118,14 @@ const Schema = z.object({
   /** Auto-abandon stuck poly trades after this many days. */
   polyStaleSettlementDays: z.number().positive().default(14),
   predictStaleRedeemHours: z.number().positive().default(6),
+  /** Mid-life stop-loss: sell the poly leg at pnlFrac ≤ −this. 0 disables. */
+  polyStopLossFrac: z.number().min(0).max(1).default(0.5),
+  /** Min ms between entries on the same poly token — kills exit→re-buy churn. */
+  polyReentryCooldownMs: z.number().int().positive().default(30 * 60_000),
+  /** Refuse poly entries priced at/below this (deep-OTM lottery zone). */
+  polyMinEntryPrice: z.number().min(0).max(1).default(0.03),
+  /** Refuse poly entries priced at/above this (near-certain, no payoff room). */
+  polyMaxEntryPrice: z.number().min(0).max(1).default(0.97),
   /**
    * Polymarket signature mode:
    *   - 'EOA':              direct EOA — works only for whitelisted addresses.
@@ -315,6 +323,10 @@ export function loadConfig(): SvxConfig {
     polyFillTimeoutMs: TUNABLES.polyFillTimeoutMs,
     polyStaleSettlementDays: TUNABLES.polyStaleSettlementDays,
     predictStaleRedeemHours: TUNABLES.predictStaleRedeemHours,
+    polyStopLossFrac: TUNABLES.polyStopLossFrac,
+    polyReentryCooldownMs: TUNABLES.polyReentryCooldownMs,
+    polyMinEntryPrice: TUNABLES.polyMinEntryPrice,
+    polyMaxEntryPrice: TUNABLES.polyMaxEntryPrice,
     hlHedgeAsset: TUNABLES.hlHedgeAsset,
     hlMinOrderUsdc: TUNABLES.hlMinOrderUsdc,
     hlTakerFeeRate: TUNABLES.hlTakerFeeRate,

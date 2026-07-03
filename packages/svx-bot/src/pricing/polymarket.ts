@@ -199,8 +199,17 @@ export class PolymarketClient {
    */
   async getMarketResolution(conditionId: string): Promise<PolyMarketResolution | null> {
     try {
+      // `closed: true` is LOAD-BEARING. Gamma's /markets endpoint excludes
+      // closed markets by default, and this poll only ever cares about
+      // markets AFTER they close. Without the param the query returns []
+      // the moment a market resolves, so every trade held to expiry stays
+      // unsettled forever — losses invisible to PnL, to the daily-loss
+      // limit, and to the dashboard (the 2026-07 mainnet incident: ledger
+      // said +$122 while the wallet had lost $120). While a market is still
+      // open this returns [] → null → treated as unresolved, which is
+      // exactly the behavior we want.
       const { data } = await this.gamma.get<GammaMarket | GammaMarket[]>('/markets', {
-        params: { condition_ids: conditionId, limit: 1 },
+        params: { condition_ids: conditionId, limit: 1, closed: true },
       });
       const market = Array.isArray(data) ? data[0] : data;
       if (!market) return null;

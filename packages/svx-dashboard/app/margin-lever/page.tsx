@@ -129,6 +129,14 @@ export default function MarginLeverPage() {
             loop or the <strong>IV-RV</strong> 2s ticker. Independent
             risk gates, independent state, independent kill switch.
           </>,
+          <>
+            <strong>2026-07 audit verdict: kept OFF.</strong> The signal
+            decomposes to ln(F/S)/√w — a forward-basis z-score whose gain
+            diverges as the shortest oracle nears expiry, so it fires on
+            bps-scale noise from a testnet feed, and paper PnL is marked on
+            the same feed that generated the signal. It stays disabled until
+            the signal is redesigned; the page remains for transparency.
+          </>,
         ]}
       />
 

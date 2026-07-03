@@ -37,13 +37,23 @@ export class RiskGate {
     this.ledger.setPause(true, reason);
   }
 
-  resume(): void {
+  /**
+   * Clear pause state. The manual kill flag (`/tmp/svx-paused`) is only
+   * removed when the operator explicitly resumes (`svx resume`); automated
+   * callers (boot paths, tests) must pass `clearManualFlag: false` — the
+   * whole point of a filesystem kill flag is that no code path un-sets it
+   * on the operator's behalf.
+   */
+  resume(opts: { clearManualFlag?: boolean } = {}): void {
+    const clearManualFlag = opts.clearManualFlag ?? true;
     this.liveDailyLossLimitTriggered = false;
     this.circuitBreakerTriggered = false;
-    try {
-      if (fs.existsSync(this.killFlagPath)) fs.rmSync(this.killFlagPath);
-    } catch {
-      /* ignore */
+    if (clearManualFlag) {
+      try {
+        if (fs.existsSync(this.killFlagPath)) fs.rmSync(this.killFlagPath);
+      } catch {
+        /* ignore */
+      }
     }
     this.ledger.setPause(false);
     // Watermark consecutiveLosses() to NOW — otherwise the breaker re-trips
@@ -127,6 +137,17 @@ export class RiskGate {
         ok: false,
         reason: `24h poly loss ${polyPnl24h.toFixed(2)} ≤ −${this.cfg.dailyPolyLossLimitUsdc}`,
       };
+    }
+
+    // Consecutive-loss circuit breaker. Historically only check() (the
+    // Predict/dUSDC leg — paper on mainnet) consulted the streak, so the
+    // breaker never protected the leg with real money. The streak itself now
+    // counts real poly PnL (see consecutiveLosses()).
+    const losses = this.ledger.consecutiveLosses();
+    if (losses >= this.cfg.circuitBreakerLosses) {
+      this.circuitBreakerTriggered = true;
+      this.pause(`circuit breaker: ${losses} consecutive losses`);
+      return { ok: false, reason: `${losses} consecutive losses ≥ ${this.cfg.circuitBreakerLosses}` };
     }
 
     return { ok: true };

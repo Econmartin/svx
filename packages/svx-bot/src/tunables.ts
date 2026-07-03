@@ -88,6 +88,19 @@ export const TUNABLES = {
   /** After a fill_failed on a given token, skip that token for this long.
    *  Stops the bot from hammering the same FOK-failing book every 15s. */
   polyFillFailedCooldownMs: 5 * 60_000,
+  /** Failed on-chain redeems retry with this gap between attempts (transient
+   *  RPC failures self-heal; persistent reverts stop at the attempt cap and
+   *  stay visible via the unredeemed-payout total on /status). */
+  polyRedeemRetryGapMs: 30 * 60_000,
+  /** Give up retrying a failing redeem after this many attempts. */
+  polyRedeemMaxAttempts: 5,
+  /** Reconciliation invariant: pause the bot when the pUSD wallet balance
+   *  drifts from the ledger-implied expectation by more than this. The one
+   *  control that catches a silent booking bug (the July-incident class)
+   *  regardless of where the bug lives. Operator deposits/withdrawals move
+   *  the wallet legitimately — re-baseline after funding (delete the
+   *  `poly_reconcile_baseline` meta row or run `svx rebaseline`). */
+  reconcileDriftThresholdUsdc: 5,
   /** Bumped 50 → 100 alongside the per-trade doubling so a losing day
    *  doesn't trip the daily pause before the larger trade size has had
    *  a chance to play out. */
@@ -132,6 +145,19 @@ export const TUNABLES = {
   // ─────────────────────────────────────────────────────────────────────────
   // Risk caps — Hyperliquid hedge leg
   // ─────────────────────────────────────────────────────────────────────────
+  /** Master switch for OPENING new HL delta-hedge legs on poly fills.
+   *  DISABLED by the 2026-07 audit, twice over: (1) the hedge sized delta at
+   *  the 15-min Predict oracle's expiry instead of the Polymarket market's —
+   *  Δ scales ~1/√T, so a 15-min TTM on a 6-hour binary oversized the hedge
+   *  ~5×; (2) a CORRECT ATM hedge for a $4 clip at daily horizons is hundreds
+   *  of dollars of notional, which maxHlPerTradeUsdc rightly blocks — so the
+   *  hedge only ever fired far from the strike, where it matters least.
+   *  Poly-arb positions are therefore naked binaries bounded by the per-trade
+   *  clip; that is now the DOCUMENTED risk shape rather than a false
+   *  "delta-neutral by construction" claim. Close machinery for any legacy
+   *  open legs is unaffected by this switch. Re-enabling requires sizing at
+   *  the POLY expiry and caps that can actually accommodate the notional. */
+  hlHedgeEnabled: false,
   /** What asset to hedge (must match Hyperliquid's perp universe). */
   hlHedgeAsset: 'BTC',
   /** Hyperliquid enforces a $10 minimum order value protocol-side. Any HL
@@ -272,8 +298,33 @@ export const TUNABLES = {
    *  a fill there can't be managed if it goes wrong. */
   convergenceMinMinutes: 5,
   /** Spot must sit at least this many sigmas (realized vol, √T-scaled) from
-   *  the strike. 4σ ≈ 3e-5 crossing probability. */
+   *  the strike. 4σ ≈ 3e-5 terminal probability — under LOGNORMAL trailing
+   *  RV, which understates BTC tails badly (see convergenceSigmaSafetyMult). */
   convergenceMinSigma: 4,
+  /** Multiply trailing RV by this before computing sigma-distance. BTC
+   *  short-horizon returns are Student-t-fat (a "4σ" lognormal move is
+   *  ~0.7-1.4% likely, not 0.003%), a 1h trailing window misses vol-regime
+   *  breaks, and scheduled macro events are deterministic forward vol no
+   *  trailing sampler can see. 2× means the 4σ gate demands 8 trailing
+   *  sigmas of distance — it also makes the EV gate genuinely bind instead
+   *  of being auto-passed by the sigma gate. */
+  convergenceSigmaSafetyMult: 2,
+  /** Require at least this much mid-price history before trusting the RV
+   *  estimate. The sampler is memory-only; right after a restart the
+   *  estimator would otherwise run on a handful of 2s returns. */
+  convergenceMinRvHistoryMs: 15 * 60_000,
+  /** Strike must sit within [lo, hi] × spot. Kills the market-universe
+   *  contamination class outright: "Bitcoin dominance above 60" parses to
+   *  strike 60, which is 0.0005× spot — no real BTC price binary has a
+   *  strike outside this band. */
+  convergenceStrikeBandLoFrac: 0.5,
+  convergenceStrikeBandHiFrac: 2.0,
+  /** Convergence-specific stop-loss (P&L frac vs cost). The shared −50%
+   *  stop is miscalibrated here: a 93¢ entry down 50% means the market
+   *  already prices ~50/50 crossing odds — the thesis died long before.
+   *  −15% ≈ ask fell to ~79¢ ≈ market doubt has doubled; get out while a
+   *  bid still exists. */
+  convergenceStopLossFrac: 0.15,
   /** Ask below this means the crowd prices real doubt — trust the crowd
    *  over trailing RV and stand down. */
   convergenceMinPrice: 0.90,
@@ -292,11 +343,13 @@ export const TUNABLES = {
   // ─────────────────────────────────────────────────────────────────────────
   // Boot-time behaviour
   // ─────────────────────────────────────────────────────────────────────────
-  /** When true, the bot resumes (clears the persisted pause flag + removes
-   *  /tmp/svx-paused) on every startup. Makes redeploys a "push and see it
-   *  running" affair — a prior daily-loss/circuit-breaker trip won't carry
-   *  over into the next process. Flip to false for hands-off production. */
-  autoResumeOnBoot: true,
+  /** When true, the bot resumes (clears the persisted pause flag) on every
+   *  startup. FLIPPED TO FALSE by the 2026-07 audit: with real money on, a
+   *  crash-looping process must not clear a daily-loss pause, the circuit
+   *  breaker, or (worst) the operator's manual kill flag on every restart.
+   *  Resume deliberately via `svx resume` — that's the only path that
+   *  removes /tmp/svx-paused. */
+  autoResumeOnBoot: false,
 
   // ─────────────────────────────────────────────────────────────────────────
   // Polymarket API endpoints (stable URLs — override via env if needed)

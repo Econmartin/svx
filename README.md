@@ -1,10 +1,10 @@
 # SVX
 
-**A fully-automated cross-venue volatility-arbitrage bot for [DeepBook Predict](https://docs.sui.io/onchain-finance/deepbook-predict/).**
+**A fully-automated cross-venue trading bot for [DeepBook Predict](https://docs.sui.io/onchain-finance/deepbook-predict/).**
 
-SVX prices every BTC binary on Predict's continuous SVI surface, compares to Polymarket's discrete-strike order books, and executes the side that's mispriced. Built for the Sui Overflow 2026 DeepBook Predict track.
+SVX runs two live strategies on one risk stack. **Poly-arb** prices every BTC binary on Predict's continuous SVI surface, compares to Polymarket's discrete-strike order books, and buys the side that's mispriced (entry requires an 8pp probability spread AND ≥5% model edge over the ask actually paid). **Expiry-convergence** buys the deep-in-the-money side of BTC dailies in their final 5–90 minutes at 90–97¢ when live realized vol says the strike is out of reach. Built for the Sui Overflow 2026 DeepBook Predict track.
 
-Execution is live on Polymarket (Polygon mainnet) and ready to flip on Predict the moment Predict ships on Sui mainnet. The bot detects UMA settlement, auto-redeems winning shares back to pUSD, and tracks realized PnL end-to-end.
+Execution is live on Polymarket (Polygon mainnet) and ready to flip on Predict the moment Predict ships on Sui mainnet. The bot detects UMA settlement, auto-redeems winning shares back to pUSD (with retry + backoff), tracks realized PnL end-to-end, and continuously **reconciles the wallet against the ledger** — unexplained drift pauses trading.
 
 ## Live deployments
 
@@ -24,7 +24,8 @@ The DeepBook Predict problem statement explicitly names cross-venue vol-arb betw
 - **Single-operator, no users, no pooled funds.** It trades its own balance. No collective investment scheme, no tokenized shares, no securities-law exposure.
 - **Math-grade pricing.** Raw SVI evaluator + Black-Scholes binary pricing + Newton/bisection IV inversion, validated against Python `math.erf`-based reference vectors.
 - **Live on mainnet (Polymarket leg).** Trades on the Polygon mainnet Polymarket CLOB through the operator's own wallet, with auto-redeem of winning shares once UMA resolves. Predict leg stays paper until Sui mainnet ships — that's a single config change.
-- **Delta-neutral by construction (Hyperliquid hedge).** Every Polymarket fill opens a delta-sized BTC perp hedge on Hyperliquid. The hedge closes on the same poll loop that detects settlement. Three venues, one bot, pure-vol PnL.
+- **Honest risk shape (naked binaries, hard clips).** Positions are small naked binaries bounded by per-trade clips ($4), a 10-position cap, per-strategy stop-losses, and settlement-keyed daily loss limits. The earlier Hyperliquid delta hedge was disabled by the 2026-07 audit (sized at the wrong expiry, then capped into irrelevance — see Limitations); Hyperliquid remains connected as the live realized-vol feed and for legacy-leg cleanup.
+- **Ledger that can't quietly lie.** After the 2026-07 settlement incident, a wallet-vs-ledger reconciliation invariant runs every cycle: if the pUSD balance drifts from the ledger-implied expectation by more than a threshold, the bot pauses and says so. Deposits/withdrawals are acknowledged via `svx rebaseline`.
 
 ## Why two networks?
 
@@ -33,23 +34,26 @@ The dashboard shows a **testnet** bot and a **mainnet** bot side-by-side. They'r
 - **Testnet bot.** DeepBook Predict has no Sui mainnet deployment yet — testnet is the only place the protocol exists today. The testnet bot mints, settles, and redeems via real Move calls with faucet dUSDC. It's the on-chain proof that the entire Predict integration works end-to-end (the spec's minimum requirement: *"Work end-to-end if you are building a product, we will test the entire flow."*).
 - **Mainnet bot.** Uses testnet Predict as the **pricing brain** — reads the SVI surface live — while executing trades on **Polymarket (Polygon mainnet)** and hedging on **Hyperliquid (mainnet)**. The PnL on this bot is real money. The day Predict ships on Sui mainnet, `MAINNET_PAPER_TRADING=false` flips the Sui-mint leg from paper to live; no code change.
 
-This is what "mainnet-day-one" concretely means: the cross-venue spread logic, SVI-driven signal generation, order submission, settlement reconciliation, and delta-hedge are all running against real liquidity today.
+This is what "mainnet-day-one" concretely means: the cross-venue spread logic, SVI-driven signal generation, order submission, and settlement reconciliation are all running against real liquidity today.
 
-## Strategy 3: Margin-Lever (paper)
+## The strategy portfolio (post-2026-07 audit)
 
-A third strategy that lives entirely on Sui mainnet: borrow dUSDC on `deepbook_margin` against an `iron_bank` USDsui share, take a directional BTC spot position on DeepBook driven by Predict's SVI bias, repay from the close.
+A four-agent audit on 2026-07-03 reviewed every strategy before the mainnet relaunch. The portfolio decision: keep what has a defensible mechanism, cut what provably doesn't.
 
-- **Why a third strategy?** The other two arbs don't deploy Sui-mainnet capital — Predict is testnet, vol-arb is HL-only. Margin-Lever gives the three-protocol composition story (`predict` × `iron_bank` × `deepbook_margin`) the brief asks for.
-- **Paper-mode only in v1.** The strategy constructs the real PTBs for both `deepbook_margin::*` and `iron_bank::*` (see `packages/svx-bot/src/exec/{deepbook-margin,iron-bank}-client.ts`) and ledgers them, but never signs or submits. Flipping to live requires the operator to fund USDsui collateral on iron_bank first — a deliberate follow-up step, not a v1 promise.
-- **Independent loop.** Runs on its own ticker, decoupled from the poly-arb 15s loop and the IV-RV 2s ticker. Its own risk gates (per-trade notional, max borrow, daily loss limit, time-stop) live in `tunables.ts` under the `marginLever*` namespace.
-- **Dashboard.** `/margin-lever` renders simulated PnL, the open paper position, the decision log, and a closed-positions table.
-- **Disabled by default.** Set `MARGIN_LEVER_ENABLED=true` in the env to spin up the ticker.
+| Strategy | Status | Verdict |
+|---|---|---|
+| **Poly-arb** (Predict SVI vs Polymarket book) | **LIVE** | Entry math verified correct; hedge removed (see Limitations); gates raised to 8pp spread + 5% EV-after-cost after two weeks of healed data showed 3% divergences carried no edge. |
+| **Expiry-convergence** (deep-ITM dailies, final hour) | **LIVE** | The "late-certainty discount": holders dump near-certain positions early to recycle capital; nobody pins the book near resolution. Guards: strict question parser + strike sanity band, volume floor, 15-min RV warm-up, 2× fat-tail sigma multiplier (4σ gate demands 8 trailing sigmas), crowd-disagreement standdown, −15% stop, $4 clips. |
+| **Vol-arb** (Predict IV vs HL realized vol, perps) | **CUT** | A perp has no vega — an IV−RV spread cannot be harvested with a delta-one instrument. Reconciled to the cent against HL records: $29.12 fees, −$1.80 direction PnL over 5,219 fills. Hard-disabled in code (env ignored); its 2s ticker survives as the RV sampler feeding convergence. |
+| **Margin-Lever** (Sui three-protocol composition, paper) | **OFF** | The audit found its signal — N(d2) bias from the SVI surface — decomposes to a forward-basis z-score that diverges on noise as the shortest oracle nears expiry. Stays disabled (`MARGIN_LEVER_ENABLED=false`) until the signal is redesigned; the code and `/margin-lever` page remain for transparency. |
 
 ## Limitations & honest tradeoffs
 
 A few things we knowingly cut or accepted as structural constraints — better to say them out loud than paper over:
 
-- **The standalone HL strategy is IV-RV divergence, not classical vol-arb.** True vol-arb captures vol mispricing via gamma (options). Perps are linear, so the standalone Hyperliquid strategy is more accurately "directional perp triggered by IV-RV divergence" — surfaced as **IV-RV** in the dashboard nav for that reason. The Polymarket leg DOES capture vol edge (binaries have curvature); the standalone HL strategy needs directional conviction. The `/vol-arb` route slug is kept as a stable URL.
+- **Poly positions are naked binaries; the delta hedge is off.** The 2026-07 audit found the hedge sized delta at the 15-minute Predict oracle's expiry instead of the Polymarket market's (~5× oversize via 1/√T) — and a *correctly* sized at-the-money hedge for a $4 clip is hundreds of dollars of notional, which the per-trade HL cap rightly blocks. Rather than claim "delta-neutral by construction" while shipping something else, the hedge open path is disabled (`hlHedgeEnabled=false` in tunables) and the risk is bounded by clip size, position caps, stops, and daily limits instead. Re-enabling requires poly-expiry sizing and caps that fit the real notional.
+- **Vol-arb was cut — a perp cannot harvest an IV−RV spread.** True vol-arb captures vol mispricing via gamma (options). Perps are linear. Audit reconciliation against HL's records: $29.12 in fees for −$1.80 of direction PnL over 5,219 fills. Hard-disabled in code; the `/vol-arb` page documents the post-mortem and keeps rendering the IV/RV telemetry that now feeds the convergence sigma gate.
+- **Convergence trades correlated tail risk on purpose.** Every convergence clip is a variant of "BTC doesn't move X% this hour" — one violent move near the daily expiry cluster can stop out several clips at once. That's why clips are $4, the sigma gate uses a 2× fat-tail multiplier on trailing RV, and the strategy stands down whenever the crowd prices real doubt (ask < 90¢). Trailing RV cannot see scheduled events (CPI/FOMC); the multiplier is margin, not clairvoyance.
 - **Predict positions can't exit before settlement.** Protocol exposes `mint` and `redeem_permissionless` only — no `burn`, no secondary market. We compensate by adding mid-life exit on the Polymarket leg (sells back when mark P&L crosses +20% of cost). The Predict side still rides to expiry — protocol property, not bot bug.
 - **Cross-expiry reprice assumes flat-vol.** Predict expiries are sub-hour; Polymarket is daily/weekly. We treat Predict's IV as expiry-invariant and reprice the binary at the Polymarket expiry. Exact under the assumption, approximate with a sloped term structure. Adding a real term-structure model is future work.
 - **POLY_1271 Deposit-Wallet setup is manual.** New Polymarket accounts require a smart-contract Deposit Wallet. The bot supports the POLY_1271 signature mode, but deploying the DW + re-deriving the L2 API key against it is a one-time manual step at polymarket.com. Documented in the runbook; not automatable today.
@@ -88,7 +92,7 @@ A few things we knowingly cut or accepted as structural constraints — better t
    │  exec/{sizer,risk,ptb,keypair,                             │
    │        polymarket-client,hyperliquid-client,               │
    │        deepbook-margin-client,iron-bank-client}            │
-   │  strategy/{vol-arb,margin-lever}                           │
+   │  strategy/{convergence,vol-arb,margin-lever}               │
    │  ledger/{store}     ops/{kill}     api/{server}            │
    └────────────────────────────────────────────────────────────┘
                                  │
@@ -245,14 +249,15 @@ Each is a single-tx flush that proves the wallet, the API auth, and the bot's re
 
 ```bash
 pnpm svx pause              # halt new trades within one loop iteration
-pnpm svx resume             # clear the kill flag
+pnpm svx resume             # clear ALL pause sources (kill flag + ledger pause + breaker watermark)
+pnpm svx rebaseline         # acknowledge a deposit/withdrawal to the reconciliation invariant
 pnpm svx status             # current bot state from the local ledger
 pnpm svx report             # PnL summary
 
 pnpm tsx scripts/backtest.ts --threshold 0.04 --out data/backtest.csv
 ```
 
-Manual kill switch is a filesystem flag (`/tmp/svx-paused`); the bot checks it every loop iteration. Daily-loss limit, position-count cap, SVI staleness, and consecutive-loss circuit breaker are all enforced in `exec/risk.ts`.
+Manual kill switch is a filesystem flag (`/tmp/svx-paused`); the bot checks it every loop iteration and **no automated path ever removes it** — only `svx resume` does. Redeploys never clear a pause (`autoResumeOnBoot=false` since the 2026-07 audit). Daily-loss limits (keyed on settlement time), position-count caps, SVI staleness, the consecutive-loss circuit breaker (counts real poly PnL), and the wallet-vs-ledger reconciliation invariant are all enforced in `exec/risk.ts` + the main loop.
 
 ## Repository layout
 
@@ -268,8 +273,9 @@ packages/
                                     #   polymarket / hyperliquid / deepbook-margin
                                     #   / iron-bank protocol clients
       strategy/
-        vol-arb.ts                  # standalone IV-RV divergence ticker (HL only)
-        margin-lever.ts             # paper-mode three-protocol margin loop
+        convergence.ts              # expiry-convergence: deep-ITM BTC dailies, final hour
+        vol-arb.ts                  # CUT 2026-07 (perps have no vega); ticker = RV sampler
+        margin-lever.ts             # paper-mode three-protocol margin loop — OFF
                                     #   (Predict signal × deepbook_margin × iron_bank)
       ledger/store.ts               # SQLite, additive migrations
       ops/kill.ts                   # /tmp/svx-paused filesystem kill switch
@@ -303,7 +309,7 @@ docs/
 
 - **Predict integration.** Composes with `predict::create_manager`, `predict::mint`, `predict::redeem`, `predict::redeem_permissionless`, and `predict_manager::*` on the testnet `predict-testnet-4-16` deployment. Package + object IDs pinned in [packages/svx-shared/src/addresses.ts](packages/svx-shared/src/addresses.ts).
 - **Polymarket integration.** Live on Polygon mainnet — submits Yes/No outcome buys via the [Polymarket CLOB v2 SDK](https://github.com/Polymarket/clob-client), polls gamma for UMA resolution, redeems winning shares via the NegRiskAdapter / ConditionalTokens contracts. Wallet operations are documented in [docs/mainnet-runbook.md](docs/mainnet-runbook.md).
-- **Hyperliquid integration.** Live on Hyperliquid mainnet — opens delta-sized BTC perp hedges on every Polymarket fill via the [HL Node SDK](https://github.com/nktkas/hyperliquid). Closes on settlement; funding + fees tracked in the ledger and surfaced on the dashboard.
+- **Hyperliquid integration.** Live on Hyperliquid mainnet via the [HL Node SDK](https://github.com/nktkas/hyperliquid) — a 2s ticker samples the BTC perp mid continuously (the realized-vol feed for the convergence strategy) and the close/cleanup machinery manages any legacy hedge legs. New hedge opens are disabled post-audit (`hlHedgeEnabled=false`); funding + fees tracked in the ledger and surfaced on the dashboard.
 - **DeepBook Margin + Iron Bank composition.** The Margin-Lever strategy constructs real PTBs against `deepbook_margin::*` and `iron_bank::*` (Sui mainnet). Currently paper-mode: PTBs are built and ledgered, never signed. Flipping to live is a tunables change + USDsui collateral funding step.
 - **Submission category.** Bot/keeper. Not a vault, not a consumer app, not a tokenized share product. Single-operator architecture — no users, no pooled funds, no securities-law exposure.
 - **Mainnet-day-one claim.** Polymarket + Hyperliquid legs are mainnet today. The Sui Predict leg flips with a single config change documented in [docs/mainnet-runbook.md](docs/mainnet-runbook.md) once Predict ships on Sui mainnet.

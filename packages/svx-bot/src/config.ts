@@ -133,11 +133,25 @@ const Schema = z.object({
   convergenceMaxMinutes: z.number().positive().default(90),
   convergenceMinMinutes: z.number().min(0).default(5),
   convergenceMinSigma: z.number().positive().default(4),
+  /** RV multiplier applied before the sigma-distance test (fat-tail margin). */
+  convergenceSigmaSafetyMult: z.number().min(1).default(2),
+  /** Min mid-price history before the RV estimate is trusted. */
+  convergenceMinRvHistoryMs: z.number().int().positive().default(15 * 60_000),
+  /** Strike sanity band as fractions of spot — rejects non-price markets. */
+  convergenceStrikeBandLoFrac: z.number().positive().default(0.5),
+  convergenceStrikeBandHiFrac: z.number().positive().default(2.0),
+  /** Convergence-specific stop-loss fraction (tighter than the shared one). */
+  convergenceStopLossFrac: z.number().min(0).max(1).default(0.15),
   convergenceMinPrice: z.number().min(0).max(1).default(0.9),
   convergenceMaxPrice: z.number().min(0).max(1).default(0.97),
   convergenceMinEvFrac: z.number().min(0).max(1).default(0.02),
   maxConvergencePerTradeUsdc: z.number().positive().default(4),
   convergenceCheckIntervalMs: z.number().int().positive().default(60_000),
+  /** Redeem retry backoff + attempt cap. */
+  polyRedeemRetryGapMs: z.number().int().positive().default(30 * 60_000),
+  polyRedeemMaxAttempts: z.number().int().positive().default(5),
+  /** Wallet-vs-ledger reconciliation drift threshold (pUSD). */
+  reconcileDriftThresholdUsdc: z.number().positive().default(5),
   /**
    * Polymarket signature mode:
    *   - 'EOA':              direct EOA — works only for whitelisted addresses.
@@ -165,6 +179,10 @@ const Schema = z.object({
   /** Kill switch for the HL hedging leg. Defaults OFF — operator turns on
    *  after one-time bridge funding from Arbitrum. */
   hlExecutionEnabled: z.boolean().default(false),
+  /** Opens of NEW hedge legs on poly fills. Disabled by the 2026-07 audit
+   *  (delta was sized at the wrong expiry and capped into irrelevance) —
+   *  see tunables.ts. Close paths for legacy legs ignore this. */
+  hlHedgeEnabled: z.boolean().default(false),
   /** Hyperliquid network — `mainnet` or `testnet`. */
   hlNetwork: z.enum(['mainnet', 'testnet']).default('mainnet'),
   /** Asset to hedge (must match Hyperliquid's perp universe). */
@@ -306,8 +324,12 @@ export function loadConfig(): SvxConfig {
     polyClobHost: process.env.POLY_CLOB_HOST ?? '',
     polyRpcUrl: process.env.POLY_RPC_URL ?? '',
     polySignatureType:
-      (process.env.POLY_SIGNATURE_TYPE as 'EOA' | 'POLY_PROXY' | 'POLY_GNOSIS_SAFE' | undefined) ??
-      'EOA',
+      (process.env.POLY_SIGNATURE_TYPE as
+        | 'EOA'
+        | 'POLY_PROXY'
+        | 'POLY_GNOSIS_SAFE'
+        | 'POLY_1271'
+        | undefined) ?? 'EOA',
     polyFunderAddress: process.env.POLY_FUNDER_ADDRESS ?? '',
     hlNetwork: (process.env.HL_NETWORK as 'mainnet' | 'testnet' | undefined) ?? 'mainnet',
 
@@ -352,11 +374,20 @@ export function loadConfig(): SvxConfig {
     convergenceMaxMinutes: TUNABLES.convergenceMaxMinutes,
     convergenceMinMinutes: TUNABLES.convergenceMinMinutes,
     convergenceMinSigma: TUNABLES.convergenceMinSigma,
+    convergenceSigmaSafetyMult: TUNABLES.convergenceSigmaSafetyMult,
+    convergenceMinRvHistoryMs: TUNABLES.convergenceMinRvHistoryMs,
+    convergenceStrikeBandLoFrac: TUNABLES.convergenceStrikeBandLoFrac,
+    convergenceStrikeBandHiFrac: TUNABLES.convergenceStrikeBandHiFrac,
+    convergenceStopLossFrac: TUNABLES.convergenceStopLossFrac,
     convergenceMinPrice: TUNABLES.convergenceMinPrice,
     convergenceMaxPrice: TUNABLES.convergenceMaxPrice,
     convergenceMinEvFrac: TUNABLES.convergenceMinEvFrac,
     maxConvergencePerTradeUsdc: TUNABLES.maxConvergencePerTradeUsdc,
     convergenceCheckIntervalMs: TUNABLES.convergenceCheckIntervalMs,
+    polyRedeemRetryGapMs: TUNABLES.polyRedeemRetryGapMs,
+    polyRedeemMaxAttempts: TUNABLES.polyRedeemMaxAttempts,
+    reconcileDriftThresholdUsdc: TUNABLES.reconcileDriftThresholdUsdc,
+    hlHedgeEnabled: TUNABLES.hlHedgeEnabled,
     hlHedgeAsset: TUNABLES.hlHedgeAsset,
     hlMinOrderUsdc: TUNABLES.hlMinOrderUsdc,
     hlTakerFeeRate: TUNABLES.hlTakerFeeRate,

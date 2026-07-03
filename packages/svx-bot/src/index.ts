@@ -112,6 +112,18 @@ interface BotState {
   };
   /** Last time we refreshed the Polymarket balance from on-chain. */
   lastPolyBalanceAtMs: number;
+  /** Wallet-vs-ledger reconciliation invariant — recomputed on every poly
+   *  balance refresh. `driftUsdc` should hover near 0; breaching the
+   *  threshold pauses the bot (the July-incident class of silent booking
+   *  bug shows up HERE regardless of which query is broken). */
+  polyReconcile?: {
+    baselineUsdc: number;
+    baselineSetAtMs: number;
+    driftUsdc: number;
+    thresholdUsdc: number;
+    unredeemedPayoutUsdc: number;
+    checkedAtMs: number;
+  };
   /** Hyperliquid margin balance — populated when hlExec is configured.
    *  Surfaces on /status so the dashboard's health panel can show whether
    *  the HL leg is ready to fire. */
@@ -201,9 +213,10 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   const predict = new PredictClient();
   const poly = new PolymarketClient(cfg.polymarketGammaBase, cfg.polymarketClobBase);
 
-  // Clear any persisted pause flag if configured. Makes redeploys behave like
-  // "push and see it running" — a prior daily-loss / circuit-breaker trip
-  // from yesterday doesn't carry into today's process.
+  // Clear any persisted pause flag if configured (default OFF since the
+  // 2026-07 audit — a crash-looping process must not un-pause itself). Even
+  // when enabled, the boot path NEVER removes the operator's manual kill
+  // flag: /tmp/svx-paused only goes away via an explicit `svx resume`.
   if (cfg.autoResumeOnBoot) {
     const prior = risk.isPaused();
     if (prior.paused) {
@@ -212,7 +225,15 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
         note: 'autoResumeOnBoot=true in tunables.ts cleared a persisted pause',
       });
     }
-    risk.resume();
+    risk.resume({ clearManualFlag: false });
+  } else {
+    const prior = risk.isPaused();
+    if (prior.paused) {
+      log.warn('svx.boot.paused', {
+        reason: prior.reason ?? 'unknown',
+        note: 'persisted pause carried over from the previous process; run `svx resume` to trade',
+      });
+    }
   }
 
   // One-shot stale-redeem cleanup on boot. The periodic prune handles this
@@ -283,6 +304,16 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     volArb: freshVolArbState(),
     marginLever: freshMarginLeverState(),
   };
+
+  // Rebuild the re-entry cooldown map from the ledger so a redeploy can't
+  // bypass polyReentryCooldownMs — the in-memory map was the only thing
+  // standing between an early exit and an immediate worse-priced re-buy
+  // (the July-2 churn), and it used to die with the process.
+  for (const { tokenId, lastEntryMs } of ledger.recentPolyEntryTimes(
+    Date.now() - cfg.polyReentryCooldownMs,
+  )) {
+    state.polyEntryAt.set(tokenId, lastEntryMs);
+  }
 
   // If we have an operator key + manager record, read the real wallet balance
   // for the dashboard NAV display, even in paper mode. Live mode below uses
@@ -431,6 +462,15 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       minSamples: cfg.volArbMinSamples,
       oracleCacheMs: cfg.volArbOracleCacheMs,
       enabled: cfg.volArbEnabled,
+    });
+  }
+  // The convergence strategy's realized-vol input comes from this ticker's
+  // mid sampling. Without HL credentials the sampler never runs, sigma stays
+  // NaN, and convergence silently never trades — make that loud at boot.
+  if (!hlExec && cfg.convergenceEnabled && cfg.polyExecutionEnabled) {
+    log.warn('svx.convergence.no_rv_sampler', {
+      note:
+        'convergenceEnabled=true but no HL_PRIVATE_KEY — the RV sampler (vol-arb ticker) is not running, so the convergence strategy will never fire. Set HL creds (read-only is enough) or disable convergence.',
     });
   }
 
@@ -645,6 +685,68 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         updatedAtMs: Date.now(),
       };
       state.lastPolyBalanceAtMs = Date.now();
+
+      // ── Reconciliation invariant ──────────────────────────────────────
+      // If every ledger write is truthful, (wallet − ledgerOffset) is a
+      // constant (the baseline). Any silent booking bug — a settlement poll
+      // that stops seeing losses, a phantom payout, an invisible position —
+      // moves the wallet without moving the offset (or vice versa) and
+      // shows up as drift. This is the control that would have caught the
+      // 2026-07 incident weeks earlier, independent of WHERE the bug was.
+      // Operator deposits/withdrawals legitimately move the baseline:
+      // re-baseline after funding via `svx rebaseline`.
+      try {
+        const offset = ledger.polyLedgerOffsetUsdc();
+        const unredeemed = ledger.unredeemedPolyPayoutUsdc();
+        const impliedBaseline = pUsd.pUsd - offset;
+        const rawBaseline = ledger.getMeta('poly_reconcile_baseline');
+        if (rawBaseline === undefined) {
+          ledger.setMeta(
+            'poly_reconcile_baseline',
+            JSON.stringify({ baselineUsdc: impliedBaseline, setAtMs: Date.now() }),
+          );
+          log.info('svx.poly.reconcile.baseline_set', {
+            baselineUsdc: impliedBaseline.toFixed(2),
+            walletUsdc: pUsd.pUsd.toFixed(2),
+            ledgerOffsetUsdc: offset.toFixed(2),
+          });
+          state.polyReconcile = {
+            baselineUsdc: impliedBaseline,
+            baselineSetAtMs: Date.now(),
+            driftUsdc: 0,
+            thresholdUsdc: cfg.reconcileDriftThresholdUsdc,
+            unredeemedPayoutUsdc: unredeemed,
+            checkedAtMs: Date.now(),
+          };
+        } else {
+          const baseline = JSON.parse(rawBaseline) as { baselineUsdc: number; setAtMs: number };
+          const driftUsdc = impliedBaseline - baseline.baselineUsdc;
+          state.polyReconcile = {
+            baselineUsdc: baseline.baselineUsdc,
+            baselineSetAtMs: baseline.setAtMs,
+            driftUsdc,
+            thresholdUsdc: cfg.reconcileDriftThresholdUsdc,
+            unredeemedPayoutUsdc: unredeemed,
+            checkedAtMs: Date.now(),
+          };
+          if (Math.abs(driftUsdc) > cfg.reconcileDriftThresholdUsdc) {
+            log.error('svx.poly.reconcile.drift', {
+              driftUsdc: driftUsdc.toFixed(2),
+              thresholdUsdc: cfg.reconcileDriftThresholdUsdc,
+              walletUsdc: pUsd.pUsd.toFixed(2),
+              ledgerOffsetUsdc: offset.toFixed(2),
+              baselineUsdc: baseline.baselineUsdc.toFixed(2),
+              note:
+                'wallet and ledger disagree — trading paused. If YOU moved funds, re-baseline with `svx rebaseline`; otherwise audit recent settlements before resuming.',
+            });
+            risk.pause(
+              `reconciliation drift ${driftUsdc.toFixed(2)} pUSD exceeds ±${cfg.reconcileDriftThresholdUsdc} — wallet vs ledger mismatch`,
+            );
+          }
+        }
+      } catch (e) {
+        log.warn('svx.poly.reconcile_failed', { err: errMsg(e) });
+      }
     } catch (e) {
       log.warn('svx.poly.balance_refresh_failed', { err: errMsg(e) });
     }
@@ -889,6 +991,14 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           ledger.updateSignalAction(sigId, 'failed', 'poly_token_already_open');
           continue;
         }
+        // Never hold BOTH sides of one binary. Convergence and poly-arb trade
+        // the same books; without this check a signal flip (or the two
+        // strategies disagreeing) buys the sibling token and locks in a loss
+        // of the combined spread — both asks sum > $1.
+        if (ledger.hasOpenPolyForOtherToken(polySnap.conditionId, polyTokenId)) {
+          ledger.updateSignalAction(sigId, 'failed', 'poly_opposite_side_open');
+          continue;
+        }
         // Re-entry cooldown — an early exit frees the slot, but re-buying the
         // same market seconds later at a worse price was the churn engine.
         const lastEntryAt = state.polyEntryAt.get(polyTokenId);
@@ -1076,6 +1186,32 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             ledger.updateSignalAction(sigId, 'failed', 'poly_fill_failed');
             continue;
           }
+          // A non-failed parse WITHOUT extractable fill details means the SDK
+          // accepted the order but the response shape hid the numbers — money
+          // was (very likely) spent. This used to insert a row invisible to
+          // every lifecycle query (the July "ledger can't see the money"
+          // class). Record it as 'submitted' with conservative estimates so
+          // the position cap, stop-loss walker, settlement poll, and 14-day
+          // backstop all see it; settlement trues the numbers up at
+          // resolution.
+          if (fill.status === 'submitted' || !((fill.filledShares ?? 0) > 0)) {
+            const estShares = (fill.filledShares ?? 0) > 0
+              ? fill.filledShares!
+              : sized.submitUsdc / polyEntryPrice;
+            log.error('svx.poly.fill_details_unknown', {
+              rawResponse: fill.raw,
+              estimatedShares: estShares,
+              estimatedCostUsdc: sized.submitUsdc,
+              note: 'recorded as poly_status=submitted with estimates; verify against wallet history',
+            });
+            fill = {
+              ...fill,
+              status: 'submitted',
+              filledShares: estShares,
+              fillPrice: (fill.fillPrice ?? 0) > 0 ? fill.fillPrice : polyEntryPrice,
+              costUsdc: (fill.costUsdc ?? 0) > 0 ? fill.costUsdc : sized.submitUsdc,
+            };
+          }
           // Successful fill — clear any prior cooldown for this token and
           // start the re-entry clock.
           state.polyFillFailedAt.delete(polyTokenId);
@@ -1115,10 +1251,16 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             openPrice: number;
           }
         | undefined;
-      if (cfg.hlExecutionEnabled && hlExec && polyLeg) {
+      // hlHedgeEnabled is OFF by default since the 2026-07 audit: delta was
+      // sized at the 15-min ORACLE expiry instead of the poly market's
+      // (~5× oversize via 1/√T), and a correctly-sized ATM hedge exceeds the
+      // per-trade HL cap anyway. Poly positions are naked binaries bounded by
+      // the per-trade clip — documented in strategy-spec.md. The TTM below is
+      // fixed to the POLY expiry for whenever the hedge is re-enabled.
+      if (cfg.hlExecutionEnabled && cfg.hlHedgeEnabled && hlExec && polyLeg) {
         const ttmYears = Math.max(
           1e-6,
-          (oracleSnap.expiryMs - Date.now()) / (365.25 * 24 * 3600 * 1000),
+          (polySnap.expiryMs - Date.now()) / (365.25 * 24 * 3600 * 1000),
         );
         const hedge = hedgeSizeForPolyFill({
           spot: oracleSnap.spot,
@@ -1453,7 +1595,14 @@ export async function walkPolyEarlyExits(args: {
     const lockedFloor =
       step > 0 && highWater >= step ? Math.floor(highWater / step + 1e-9) * step : null;
     const ratchetHit = lockedFloor != null && pnlFrac < lockedFloor;
-    const stopLoss = cfg.polyStopLossFrac > 0 && pnlFrac <= -cfg.polyStopLossFrac;
+    // Strategy-specific stop. Convergence entries sit at 90-97¢ where the
+    // shared −50% stop is miscalibrated: by −50% the market already prices
+    // ~50/50 crossing odds and half the clip is gone. −15% (ask ≈ 79¢ on a
+    // 93¢ entry) means market doubt has ~tripled vs entry — thesis dead,
+    // exit while a bid still exists.
+    const stopFrac =
+      trade.strategy === 'convergence' ? cfg.convergenceStopLossFrac : cfg.polyStopLossFrac;
+    const stopLoss = stopFrac > 0 && pnlFrac <= -stopFrac;
     if (!ratchetHit && !stopLoss) {
       continue;
     }
@@ -1625,10 +1774,29 @@ async function walkExpiryConvergence(args: {
 
   // Sigma from the vol-arb ticker's rolling HL mid history (always-on
   // telemetry, ~2s cadence). No vol estimate → no trades. Never guess.
-  const sigma = computeRealizedVol(state.volArb.midHistory);
+  //
+  // Trust gates on the estimator itself (2026-07 audit):
+  //   - Require convergenceMinRvHistoryMs of actual history span. The buffer
+  //     is memory-only; seconds after a restart it holds a handful of 2s
+  //     returns and the RV number is noise in either direction.
+  //   - Multiply RV by convergenceSigmaSafetyMult before the distance test.
+  //     Trailing lognormal RV understates BTC tails by orders of magnitude
+  //     (Student-t tails, vol clustering, scheduled macro events invisible
+  //     to any trailing window). 2× means "4σ" demands 8 trailing sigmas.
+  const rawSigma = computeRealizedVol(state.volArb.midHistory);
+  const firstMid = state.volArb.midHistory[0];
   const lastMid = state.volArb.midHistory[state.volArb.midHistory.length - 1];
+  const historySpanMs = firstMid && lastMid ? lastMid.ts - firstMid.ts : 0;
   const spot = lastMid?.price ?? state.lastBtcSpot?.value;
-  if (!spot || !isFinite(sigma) || sigma <= 0) return;
+  if (!spot || !isFinite(rawSigma) || rawSigma <= 0) return;
+  if (historySpanMs < cfg.convergenceMinRvHistoryMs) {
+    log.debug('svx.convergence.rv_warming_up', {
+      historyMinutes: (historySpanMs / 60_000).toFixed(1),
+      requiredMinutes: (cfg.convergenceMinRvHistoryMs / 60_000).toFixed(0),
+    });
+    return;
+  }
+  const sigma = rawSigma * cfg.convergenceSigmaSafetyMult;
 
   const nowMs = Date.now();
   for (const market of polyMarkets) {
@@ -1639,6 +1807,24 @@ async function walkExpiryConvergence(args: {
     ) {
       continue;
     }
+    // Strike sanity band — the parser already rejects non-price questions,
+    // but this is the belt to that suspender: no genuine BTC price binary
+    // has a strike at 0.0005× or 3× spot. A strike outside the band means
+    // the universe filter mis-parsed something; skip AND log loudly.
+    if (
+      market.strike < spot * cfg.convergenceStrikeBandLoFrac ||
+      market.strike > spot * cfg.convergenceStrikeBandHiFrac
+    ) {
+      log.warn('svx.convergence.strike_out_of_band', {
+        question: market.question,
+        strike: market.strike,
+        spot,
+      });
+      continue;
+    }
+    // Volume floor — same rail the arb path applies via the signal filter.
+    // A dead book's 95¢ ask is not a discount, it's an absence of sellers.
+    if (market.volume24hr < cfg.polyMinVolume24hUsd) continue;
     const tYears = tMs / (365.25 * 24 * 3600 * 1000);
     // Cheap sigma pre-gate before paying for a book fetch — most strikes
     // near spot fail here and never generate an HTTP call.
@@ -1650,8 +1836,9 @@ async function walkExpiryConvergence(args: {
     const tokenId = side === 'yes' ? market.yesTokenId : market.noTokenId;
 
     // Same per-token rails as the arb path: one open position per token,
-    // re-entry cooldown, failed-fill cooldown.
+    // opposite-side block, re-entry cooldown, failed-fill cooldown.
     if (ledger.countOpenPolyForToken(tokenId) >= 1) continue;
+    if (ledger.hasOpenPolyForOtherToken(market.conditionId, tokenId)) continue;
     const lastEntryAt = state.polyEntryAt.get(tokenId);
     if (lastEntryAt && nowMs - lastEntryAt < cfg.polyReentryCooldownMs) continue;
     const lastFailedAt = state.polyFillFailedAt.get(tokenId);
@@ -1771,7 +1958,7 @@ async function walkExpiryConvergence(args: {
       polyFillPrice: fill.fillPrice,
       polyCostUsdc: fill.costUsdc,
       polyTxHash: fill.txHash,
-      polyStatus: 'filled',
+      polyStatus: fill.status,
     });
     log.info('svx.convergence.opened', {
       tradeId,
@@ -1903,11 +2090,12 @@ export async function reconcilePolySettlements(
 
     // Safe-mode limitation: the Safe (not the EOA we sign with) owns the
     // outcome shares. Direct EOA-signed redeem calls would revert with
-    // "no balance". Mark as pending-manual instead of failing — the
-    // operator clicks "Claim" on polymarket.com to redeem. Auto-redeem
-    // via Safe.execTransaction is follow-up work.
+    // "no balance". Marked 'pending' (NOT 'failed') — these are manual-claim
+    // rows, not errors: the retry queue skips them, but the unredeemed-payout
+    // total on /status keeps them loud until the operator clicks "Claim" on
+    // polymarket.com. Auto-redeem via Safe.execTransaction is follow-up work.
     if (polyExec.signatureMode !== 'EOA') {
-      for (const w of winners) ledger.markPolyRedeemed(w.id, null, 'failed');
+      for (const w of winners) ledger.markPolyRedeemed(w.id, null, 'pending');
       log.warn('svx.poly.redeem.skipped_safe_mode', {
         conditionId: conditionId.slice(0, 10),
         winnerCount: winners.length,
@@ -1918,29 +2106,102 @@ export async function reconcilePolySettlements(
       continue;
     }
 
-    try {
-      const txHash = await polyExec.redeemPolyWinnings({
-        conditionId,
-        negRisk: resolution.negRisk,
-        winningOutcome: resolution.winningOutcome,
-        shares: totalShares,
-      });
-      for (const w of winners) ledger.markPolyRedeemed(w.id, txHash, 'success');
-      log.info('svx.poly.redeem.success', {
+    await attemptPolyRedeem(polyExec, ledger, conditionId, resolution.negRisk, {
+      winningOutcome: resolution.winningOutcome,
+      winners,
+      totalShares,
+    });
+  }
+
+  // Retry pass for previously-FAILED redeems (transient RPC errors, a
+  // negRisk flag gamma omitted last time, …). Backoff + attempt cap live in
+  // the ledger query. Pre-2026-07 a failed redeem was parked forever behind
+  // one warn line; winnings stayed stranded until the operator noticed.
+  if (polyExec.signatureMode === 'EOA') {
+    const retryable = ledger
+      .unredeemedWinningPolyTrades({
+        maxAttempts: cfg?.polyRedeemMaxAttempts ?? 5,
+        retryGapMs: cfg?.polyRedeemRetryGapMs ?? 30 * 60_000,
+      })
+      .filter((t) => t.polyRedeemStatus === 'failed');
+    const retryByCondition = new Map<string, typeof retryable>();
+    for (const t of retryable) {
+      if (!t.polyConditionId) continue;
+      const list = retryByCondition.get(t.polyConditionId) ?? [];
+      list.push(t);
+      retryByCondition.set(t.polyConditionId, list);
+    }
+    for (const [conditionId, winners] of retryByCondition) {
+      const totalShares = winners.reduce((s, t) => s + (t.polyFilledShares ?? 0), 0);
+      const outcome = winners[0]?.polySettlementOutcome;
+      if (totalShares <= 0 || (outcome !== 'yes' && outcome !== 'no')) continue;
+      // Re-fetch resolution — the retry may exist precisely because negRisk
+      // was unknown on the previous attempt.
+      const resolution = await poly.getMarketResolution(conditionId);
+      log.info('svx.poly.redeem.retry', {
         conditionId: conditionId.slice(0, 10),
-        tx: txHash,
         winnerCount: winners.length,
+      });
+      await attemptPolyRedeem(polyExec, ledger, conditionId, resolution?.negRisk, {
+        winningOutcome: outcome,
+        winners,
         totalShares,
       });
-    } catch (e) {
-      const err = errMsg(e);
-      for (const w of winners) ledger.markPolyRedeemed(w.id, null, 'failed');
-      log.warn('svx.poly.redeem.failed', {
-        conditionId: conditionId.slice(0, 10),
-        winnerCount: winners.length,
-        err,
-      });
     }
+  }
+}
+
+/**
+ * Submit one redeem tx covering all winning trades on a conditionId, and
+ * persist the outcome. Refuses to submit when the negRisk flag is UNKNOWN —
+ * guessing routes NegRisk markets through the wrong contract (guaranteed
+ * revert, gas burned); marking 'failed' instead lets the retry pass re-fetch
+ * the flag later while the unredeemed total stays visible on /status.
+ */
+async function attemptPolyRedeem(
+  polyExec: PolymarketExecClient,
+  ledger: LedgerStore,
+  conditionId: string,
+  negRisk: boolean | undefined,
+  args: {
+    winningOutcome: 'yes' | 'no';
+    winners: Array<{ id: string }>;
+    totalShares: number;
+  },
+): Promise<void> {
+  const { winningOutcome, winners, totalShares } = args;
+  if (negRisk === undefined) {
+    for (const w of winners) ledger.markPolyRedeemed(w.id, null, 'failed');
+    log.error('svx.poly.redeem.negrisk_unknown', {
+      conditionId: conditionId.slice(0, 10),
+      winnerCount: winners.length,
+      note: 'gamma omitted the negRisk flag; refusing to guess the contract — will retry',
+    });
+    return;
+  }
+  try {
+    const txHash = await polyExec.redeemPolyWinnings({
+      conditionId,
+      negRisk,
+      winningOutcome,
+      shares: totalShares,
+    });
+    for (const w of winners) ledger.markPolyRedeemed(w.id, txHash, 'success');
+    log.info('svx.poly.redeem.success', {
+      conditionId: conditionId.slice(0, 10),
+      tx: txHash,
+      winnerCount: winners.length,
+      totalShares,
+    });
+  } catch (e) {
+    const err = errMsg(e);
+    for (const w of winners) ledger.markPolyRedeemed(w.id, null, 'failed');
+    log.error('svx.poly.redeem.failed', {
+      conditionId: conditionId.slice(0, 10),
+      winnerCount: winners.length,
+      err,
+      note: 'will retry with backoff; unredeemed total surfaced on /status',
+    });
   }
 }
 

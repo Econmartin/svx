@@ -150,7 +150,14 @@ export class HyperliquidExecClient {
           szi: Math.abs(szi),
           entryPx: Number(p.position.entryPx ?? 0),
           unrealizedPnlUsd: Number(p.position.unrealizedPnl ?? 0),
-          cumFundingUsdc: Number(p.position.cumFunding?.allTime ?? 0),
+          // sinceOpen, NOT allTime: allTime is the ACCOUNT-LIFETIME funding on
+          // this coin, and every leg close used to book the whole number as
+          // that one trade's cost — re-counting all historical funding on
+          // every close (and multiply so with concurrent legs). sinceOpen
+          // resets when the netted position opens; still approximate when
+          // several ledger legs share one net position, but bounded by the
+          // current position's life instead of the account's.
+          cumFundingUsdc: Number(p.position.cumFunding?.sinceOpen ?? 0),
         };
       });
   }

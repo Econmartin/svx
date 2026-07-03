@@ -94,7 +94,7 @@ export default function OverviewPage() {
       <PageIntro
         summary={
           isMainnet
-            ? 'Live mainnet snapshot — real money on Polymarket (Polygon CLOB) with a delta-sized Hyperliquid perp hedge on every fill. The Predict leg stays paper-only until Predict ships on Sui mainnet; we use its SVI surface as our pricing brain.'
+            ? 'Live mainnet snapshot — real money on Polymarket (Polygon CLOB) across two strategies: poly-arb (SVI-vs-book divergence) and expiry-convergence (deep-ITM dailies in the final hour). Positions are naked binaries bounded by hard per-trade clips; the HL hedge is disabled post-audit. The Predict leg stays paper-only until Predict ships on Sui mainnet; we use its SVI surface as our pricing brain.'
             : "Testnet snapshot — the bot mints binary positions on DeepBook Predict with dUSDC, paired with paper Polymarket signals. Useful for watching the full end-to-end loop without spending real money."
         }
         hints={[

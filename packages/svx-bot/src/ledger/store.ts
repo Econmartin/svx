@@ -168,7 +168,24 @@ CREATE TABLE IF NOT EXISTS pause_state (
   circuit_breaker_reset_at_ms INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO pause_state(id, paused, ts_ms) VALUES (1, 0, 0);
+
+/* One-row-per-key operational state that must survive restarts: one-shot
+   migration markers, the wallet-reconciliation baseline, etc. */
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;
+
+/**
+ * Poly-leg rows that represent money actually spent, whatever the parse said.
+ * 'filled' is the happy path; 'partial' spent less than requested but spent;
+ * 'submitted' means the SDK accepted the order but the response shape hid the
+ * fill details — the July incident class. All three MUST be visible to every
+ * lifecycle query (position caps, settlement poll, stop-loss walker, stale
+ * backstop) or a funded position becomes invisible to risk controls.
+ */
+const OPEN_POLY_STATUSES = `('filled', 'partial', 'submitted')`;
 
 export class LedgerStore {
   private readonly db: DB;
@@ -233,6 +250,10 @@ export class LedgerStore {
     // leg's mark-to-market P&L fraction; the early-exit walker sells when
     // P&L falls below the highest locked step. NULL on rows that predate it.
     ensureColumn('poly_high_water_frac', 'REAL');
+    // Redeem retry bookkeeping (additive 2026-07). Failed redeems are now
+    // retried with backoff instead of being parked forever behind one warn.
+    ensureColumn('poly_redeem_attempts', 'INTEGER');
+    ensureColumn('poly_redeem_last_attempt_ms', 'INTEGER');
     // Strategy tag (additive 2026-05-15). Existing rows are implicitly
     // 'poly_arb' (the original cross-venue strategy). New strategies tag
     // their trades so per-strategy PnL + positions can be segregated on
@@ -598,7 +619,7 @@ export class LedgerStore {
     const r = this.db
       .prepare<[], { c: number }>(
         `SELECT COUNT(*) AS c FROM trades
-         WHERE poly_status = 'filled' AND poly_settled = 0`,
+         WHERE poly_status IN ${OPEN_POLY_STATUSES} AND poly_settled = 0`,
       )
       .get();
     return r?.c ?? 0;
@@ -617,10 +638,28 @@ export class LedgerStore {
     const r = this.db
       .prepare<[string], { c: number }>(
         `SELECT COUNT(*) AS c FROM trades
-         WHERE poly_status = 'filled' AND poly_settled = 0 AND poly_token_id = ?`,
+         WHERE poly_status IN ${OPEN_POLY_STATUSES} AND poly_settled = 0 AND poly_token_id = ?`,
       )
       .get(tokenId);
     return r?.c ?? 0;
+  }
+
+  /**
+   * True if any strategy holds an open poly position on the SAME market
+   * (conditionId) but a DIFFERENT outcome token. Holding Yes and No of one
+   * binary simultaneously locks in a loss of the combined spread (both asks
+   * sum > $1), so entries must refuse when the sibling token is held —
+   * poly-arb vs convergence can otherwise take opposite sides of one market.
+   */
+  hasOpenPolyForOtherToken(conditionId: string, tokenId: string): boolean {
+    const r = this.db
+      .prepare<[string, string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM trades
+         WHERE poly_status IN ${OPEN_POLY_STATUSES} AND poly_settled = 0
+           AND poly_condition_id = ? AND poly_token_id != ?`,
+      )
+      .get(conditionId, tokenId);
+    return (r?.c ?? 0) > 0;
   }
 
   /**
@@ -630,7 +669,7 @@ export class LedgerStore {
    */
   unsettledPolyTrades(): TradeRecord[] {
     return this.tradeRows(
-      `WHERE poly_status = 'filled' AND poly_settled = 0 ORDER BY ts_ms ASC`,
+      `WHERE poly_status IN ${OPEN_POLY_STATUSES} AND poly_settled = 0 ORDER BY ts_ms ASC`,
     );
   }
 
@@ -716,7 +755,7 @@ export class LedgerStore {
                 poly_pnl_usdc = -COALESCE(poly_cost_usdc, 0),
                 poly_redeem_tx_hash = 'abandoned',
                 poly_redeem_status = 'success'
-          WHERE poly_status = 'filled'
+          WHERE poly_status IN ${OPEN_POLY_STATUSES}
             AND poly_settled = 0
             AND ts_ms < ?`,
       )
@@ -731,10 +770,17 @@ export class LedgerStore {
    * poll by flipping poly_settled back to 0 and clearing the abandon
    * bookkeeping. Real losses re-book as losses within one poll cycle; any
    * abandoned WINNER gets its true payout booked and its shares redeemed
-   * instead of being written off. Idempotent — re-settled rows no longer
-   * carry outcome='abandoned', so subsequent boots find nothing.
+   * instead of being written off.
+   *
+   * GENUINELY one-shot via a meta marker — the previous "idempotent" version
+   * ran on every boot, which resurrected rows the ongoing 14-day rule had
+   * *legitimately* abandoned post-fix: each redeploy re-opened them (pinning
+   * maxOpenPolyPositions slots), re-failed resolution, and re-abandoned them,
+   * flapping all-time PnL in the process.
    */
   resetAbandonedPolyTrades(): number {
+    const MARKER = 'abandoned_heal_2026_07_done';
+    if (this.getMeta(MARKER) !== undefined) return 0;
     const r = this.db
       .prepare(
         `UPDATE trades
@@ -748,59 +794,166 @@ export class LedgerStore {
           WHERE poly_settlement_outcome = 'abandoned'`,
       )
       .run();
+    this.setMeta(MARKER, String(Date.now()));
     return r.changes;
   }
 
+  /** Read a persisted operational-state value; undefined if unset. */
+  getMeta(key: string): string | undefined {
+    const row = this.db
+      .prepare<[string], { value: string }>(`SELECT value FROM meta WHERE key = ?`)
+      .get(key);
+    return row?.value;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.db
+      .prepare(`INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .run(key, value);
+  }
+
+  deleteMeta(key: string): void {
+    this.db.prepare(`DELETE FROM meta WHERE key = ?`).run(key);
+  }
+
   /**
-   * Winning Polymarket positions that haven't been redeemed on-chain yet.
-   * Losing positions (`poly_payout_usdc = 0`) are skipped — redeeming them
-   * just burns gas. Failed redeems (`poly_redeem_status='failed'`) are also
-   * skipped so we don't retry forever — operator clears them manually via
-   * the runbook (`pnpm --filter svx-bot retry-poly-redeem`).
+   * Winning Polymarket positions that haven't been redeemed on-chain yet,
+   * INCLUDING previously-failed redeems that are due a retry. A failed
+   * redeem is retried with linear backoff (`retryGapMs` since the last
+   * attempt) up to `maxAttempts` — the pre-2026-07 behaviour parked failed
+   * rows forever behind a single warn line, stranding winnings (a NegRisk
+   * market routed through the wrong contract reverts 100% of the time, but a
+   * transient RPC failure doesn't).
    */
-  unredeemedWinningPolyTrades(): TradeRecord[] {
+  unredeemedWinningPolyTrades(opts?: { maxAttempts?: number; retryGapMs?: number; nowMs?: number }): TradeRecord[] {
+    const maxAttempts = opts?.maxAttempts ?? 5;
+    const retryGapMs = opts?.retryGapMs ?? 30 * 60_000;
+    const nowMs = opts?.nowMs ?? Date.now();
     return this.tradeRows(
       `WHERE poly_settled = 1 AND poly_payout_usdc > 0
          AND poly_redeem_tx_hash IS NULL
-         AND (poly_redeem_status IS NULL OR poly_redeem_status != 'failed')
+         AND (
+           poly_redeem_status IS NULL
+           OR (
+             poly_redeem_status = 'failed'
+             AND COALESCE(poly_redeem_attempts, 0) < ?
+             AND COALESCE(poly_redeem_last_attempt_ms, 0) <= ?
+           )
+         )
        ORDER BY ts_ms ASC`,
+      [maxAttempts, nowMs - retryGapMs],
     );
+  }
+
+  /** Total pUSD of winning positions whose redeem hasn't landed on-chain —
+   *  money the ledger counts as realized but the wallet doesn't hold yet.
+   *  Surfaced on /status so stranded winnings are loud, not a log line. */
+  unredeemedPolyPayoutUsdc(): number {
+    const r = this.db
+      .prepare<[], { s: number }>(
+        `SELECT COALESCE(SUM(poly_payout_usdc), 0) AS s FROM trades
+         WHERE poly_settled = 1 AND poly_payout_usdc > 0
+           AND poly_redeem_tx_hash IS NULL`,
+      )
+      .get();
+    return r?.s ?? 0;
   }
 
   /**
    * Persist a CTF redeem tx hash + status on a single trade row.
    * Pass `txHash=null` on failure so the column stays NULL — `poly_redeem_status`
-   * carries the failure marker.
+   * carries the failure marker. Failures also bump the attempt counter +
+   * timestamp that drive the retry backoff in `unredeemedWinningPolyTrades`.
    */
   markPolyRedeemed(
     tradeId: string,
     txHash: string | null,
-    status: 'success' | 'failed' = 'success',
+    status: 'success' | 'failed' | 'pending' = 'success',
   ): void {
     this.db
-      .prepare(`UPDATE trades SET poly_redeem_tx_hash = ?, poly_redeem_status = ? WHERE id = ?`)
-      .run(txHash, status, tradeId);
+      .prepare(
+        `UPDATE trades SET poly_redeem_tx_hash = ?, poly_redeem_status = ?,
+                            poly_redeem_attempts = CASE WHEN ? = 'failed'
+                              THEN COALESCE(poly_redeem_attempts, 0) + 1
+                              ELSE poly_redeem_attempts END,
+                            poly_redeem_last_attempt_ms = ?
+         WHERE id = ?`,
+      )
+      .run(txHash, status, status, Date.now(), tradeId);
   }
 
   /**
-   * Sum of realized Polymarket-leg PnL across settled trades since `sinceMs`.
-   * Mirrors `realizedPnlSince` for the Predict leg. Feeds the daily-loss gate
-   * on `RiskGate.checkPoly` once Part 1's settlement loop has populated rows.
+   * Sum of realized Polymarket-leg PnL across trades SETTLED since `sinceMs`.
+   * Keyed on `poly_settled_at_ms` (when the money outcome became real), NOT
+   * the trade's open time — a position opened days ago that settles at a loss
+   * today must count toward today's limit. Keying on open time (`ts_ms`, the
+   * pre-2026-07 behaviour) silently excluded every loss on a market older
+   * than 24h, including all 14-day abandonments. Mirrors `realizedHlPnlSince`
+   * which keys on `hl_closed_at_ms`. Feeds the daily-loss gate on
+   * `RiskGate.checkPoly`.
    */
   realizedPolyPnlSince(sinceMs: number): number {
     const r = this.db
       .prepare<[number], { p: number }>(
         `SELECT COALESCE(SUM(poly_pnl_usdc), 0) AS p FROM trades
-         WHERE poly_settled = 1 AND ts_ms >= ?`,
+         WHERE poly_settled = 1 AND poly_settled_at_ms >= ?`,
       )
       .get(sinceMs);
     return r?.p ?? 0;
   }
 
+  /**
+   * Ledger-implied pUSD wallet offset — the reconciliation invariant's core
+   * number. If the ledger is telling the truth, the wallet balance moves in
+   * lockstep with:
+   *
+   *   Σ realized poly PnL (settled rows)
+   *   − Σ cost of currently-open positions   (cash left the wallet, no PnL yet)
+   *   − Σ payouts not yet redeemed on-chain  (PnL booked, cash not arrived)
+   *
+   * The bot snapshots (walletBalance − offset) as a baseline once, then on
+   * every settlement cycle asserts the current (walletBalance − offset) still
+   * equals it within a drift threshold. Operator deposits/withdrawals shift
+   * the baseline legitimately — re-baseline via `svx rebaseline` after moving
+   * funds. A silent settlement/booking bug (the July incident class) shows up
+   * as drift and pauses the bot instead of compounding.
+   */
+  polyLedgerOffsetUsdc(): number {
+    const r = this.db
+      .prepare<[], { pnl: number; open: number; unred: number }>(
+        `SELECT
+           COALESCE(SUM(CASE WHEN poly_settled = 1 THEN poly_pnl_usdc END), 0) AS pnl,
+           COALESCE(SUM(CASE WHEN poly_settled = 0 AND poly_status IN ${OPEN_POLY_STATUSES}
+                             THEN poly_cost_usdc END), 0) AS open,
+           COALESCE(SUM(CASE WHEN poly_settled = 1 AND poly_payout_usdc > 0
+                              AND poly_redeem_tx_hash IS NULL
+                             THEN poly_payout_usdc END), 0) AS unred
+         FROM trades`,
+      )
+      .get();
+    return (r?.pnl ?? 0) - (r?.open ?? 0) - (r?.unred ?? 0);
+  }
+
+  /**
+   * Most recent poly entry time per outcome token within the window — used at
+   * boot to rebuild the in-memory re-entry cooldown map, so a redeploy can't
+   * bypass `polyReentryCooldownMs` (the July-2 churn protection).
+   */
+  recentPolyEntryTimes(sinceMs: number): Array<{ tokenId: string; lastEntryMs: number }> {
+    const rows = this.db
+      .prepare<[number], { token: string; last: number }>(
+        `SELECT poly_token_id AS token, MAX(ts_ms) AS last FROM trades
+         WHERE poly_token_id IS NOT NULL AND ts_ms >= ?
+         GROUP BY poly_token_id`,
+      )
+      .all(sinceMs);
+    return rows.map((r) => ({ tokenId: r.token, lastEntryMs: r.last }));
+  }
+
   /** Closed Polymarket trades for the dashboard's "Closed positions" table. */
   closedPolyTrades(limit = 500): TradeRecord[] {
     return this.tradeRows(
-      `WHERE poly_status = 'filled' AND poly_settled = 1 ORDER BY poly_settled_at_ms DESC LIMIT ?`,
+      `WHERE poly_status IN ${OPEN_POLY_STATUSES} AND poly_settled = 1 ORDER BY poly_settled_at_ms DESC LIMIT ?`,
       [limit],
     );
   }
@@ -976,7 +1129,7 @@ export class LedgerStore {
     const r = this.db
       .prepare<[], { s: number }>(
         `SELECT COALESCE(SUM(poly_cost_usdc), 0) AS s FROM trades
-         WHERE settled = 0 AND poly_status = 'filled'`,
+         WHERE poly_settled = 0 AND poly_status IN ${OPEN_POLY_STATUSES}`,
       )
       .get();
     return r?.s ?? 0;
@@ -1177,12 +1330,22 @@ export class LedgerStore {
     // the watermark to NOW so a deliberate resume actually clears the breaker
     // state — otherwise the count just rebuilds on the next risk check and
     // re-pauses the bot before any new trade can clear it.
+    //
+    // Counts REAL-MONEY PnL first (poly leg) and falls back to the Predict
+    // leg for pure-Predict trades. Rows with no realized PnL at all (e.g.
+    // convergence rows before their poly leg settles — inserted settled=1,
+    // pnl_usdc NULL) are excluded in SQL rather than iterated: the old code
+    // read `NULL < 0` (false in JS) as "streak over", so any such row
+    // silently disabled the breaker.
     const watermark = this.getCircuitBreakerResetAtMs();
     const rows = this.db
       .prepare<[number], { pnl: number }>(
-        `SELECT pnl_usdc as pnl FROM trades
-         WHERE settled = 1 AND ts_ms > ?
-         ORDER BY ts_ms DESC LIMIT 50`,
+        `SELECT COALESCE(poly_pnl_usdc, pnl_usdc) AS pnl FROM trades
+         WHERE COALESCE(poly_pnl_usdc, pnl_usdc) IS NOT NULL
+           AND (poly_settled = 1 OR settled = 1)
+           AND COALESCE(poly_settled_at_ms, settled_at_ms, ts_ms) > ?
+         ORDER BY COALESCE(poly_settled_at_ms, settled_at_ms, ts_ms) DESC
+         LIMIT 100`,
       )
       .all(watermark);
     let n = 0;

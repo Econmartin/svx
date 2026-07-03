@@ -3,6 +3,27 @@
 This document is the source of truth for what SVX trades and why. Read it
 before changing the math or the risk controls.
 
+## Status (2026-07-03) — post-audit portfolio
+
+A four-agent audit on 2026-07-03 (before the mainnet relaunch) reviewed every
+strategy and the shared rails. Current portfolio:
+
+| Strategy | Status | One-line rationale |
+|---|---|---|
+| Poly-arb | **LIVE** | Entry math verified; gates raised to 8pp spread + 5% EV-after-ask; hedge removed (naked binaries, $4 clips). |
+| Expiry-convergence | **LIVE** | Late-certainty discount on BTC dailies; sigma gate runs on 2× trailing RV with strict universe filters. |
+| Vol-arb (IV−RV perps) | **CUT** | A perp has no vega. $29.12 fees vs −$1.80 direction PnL over 5,219 fills, reconciled to the cent. Hard-disabled in code. |
+| Margin-Lever | **OFF** | Signal = forward-basis z-score that diverges on noise near oracle expiry; testnet feed marks its own paper PnL. Needs a redesign. |
+
+Key rail changes shipped with the audit (details in [risk-controls.md](risk-controls.md)):
+daily poly loss limit keys on **settlement time**; circuit breaker counts
+**real poly PnL** and ignores NULL-pnl rows; `autoResumeOnBoot=false` (redeploys
+never clear pauses, and no automated path removes the manual kill flag);
+`submitted`/`partial` fills are visible to every lifecycle query; failed redeems
+retry with backoff and never guess the negRisk contract; and a **wallet-vs-ledger
+reconciliation invariant** pauses the bot on unexplained pUSD drift
+(`svx rebaseline` acknowledges deposits/withdrawals).
+
 ## Status (2026-05-11)
 
 **Polymarket leg: LIVE on Polygon mainnet.** The bot submits market-buy
@@ -120,13 +141,27 @@ bot:
 The realized pUSD PnL feeds the daily loss limit on every subsequent
 `risk.checkPoly()` — auto-pauses the bot for 24h on breach.
 
-## Hyperliquid delta hedge
+## Hyperliquid delta hedge — DISABLED (2026-07 audit)
+
+> **Status: hedge opens are OFF (`hlHedgeEnabled=false` in tunables.ts).**
+> The audit found two compounding defects: (1) delta was computed at the
+> 15-minute Predict oracle's TTM instead of the Polymarket market's — Δ
+> scales ~1/√T, so a 15-min TTM on a 6-hour binary oversized the hedge ~5×
+> (the TTM bug is now fixed in code for whenever the hedge returns); and
+> (2) a *correctly* sized ATM hedge for a $4 clip at daily horizons is
+> hundreds of dollars of notional, which `maxHlPerTradeUsdc` rightly blocks —
+> so the hedge only ever fired far from the strike, where it matters least.
+> "Delta-neutral by construction" was therefore false in practice. The honest
+> risk shape — small naked binaries bounded by clip size, position caps,
+> stops, and daily limits — is now the documented design. Close machinery for
+> legacy legs remains active. The original design below is retained for
+> reference and for a future re-enable with poly-expiry sizing + adequate caps.
 
 The Polymarket leg leaves directional exposure equal to `Δ × shares` where
-`Δ = ∂N(d2)/∂S = -φ(d2) / (S · √w)` evaluated at the snapshot's spot,
-strike, IV and TTM. After every successful Polymarket fill the bot opens a
-perp on Hyperliquid sized to exactly that delta, on the side that
-neutralizes it:
+`Δ = ∂N(d2)/∂S = φ(d2) / (S · √w)` evaluated at the snapshot's spot,
+strike, IV and **the Polymarket expiry's TTM**. After every successful
+Polymarket fill the bot opens a perp on Hyperliquid sized to exactly that
+delta, on the side that neutralizes it:
 
 | Polymarket side | Bot Δ exposure | Hyperliquid hedge |
 |---|---|---|
@@ -150,7 +185,55 @@ Implementation: [`pricing/binary-delta.ts`](../packages/svx-bot/src/pricing/bina
 hedge wiring in [`index.ts`](../packages/svx-bot/src/index.ts) after the
 Polymarket fill block.
 
-## Vol-arb (standalone Hyperliquid strategy, added 2026-05-15)
+## Expiry-convergence (Polymarket BTC dailies, final hour — added 2026-07)
+
+Buys the deep-in-the-money side of BTC daily binaries in their final
+5–90 minutes at 90–97¢, collecting the "late-certainty discount": holders
+dump near-certain positions early to recycle capital into the next market,
+and no market maker pins the book that close to resolution. First-hand proof
+the discount exists: during the 2026-07 incident the bot paid $8 to a
+counterparty running exactly this trade (the 800-shares-at-1¢ loss) — the
+strategy flips SVX to the collecting side.
+
+**Entry gates (all must pass):**
+
+- Strict question parser — strike must be a `$`-prefixed or `k`-suffixed
+  dollar amount, and dominance/holdings/no-touch ("stay above … through")
+  questions are rejected outright.
+- Strike sanity band: strike within [0.5, 2.0] × spot.
+- Volume floor: `polyMinVolume24hUsd` applies (a dead book's 95¢ ask is an
+  absence of sellers, not a discount).
+- RV warm-up: ≥15 min of mid history before the estimator is trusted.
+- Sigma distance: spot ≥ 4σ from the strike where σ = trailing HL realized
+  vol × **2 (fat-tail safety multiplier)** — i.e. 8 trailing sigmas. Trailing
+  lognormal RV understates BTC tails by orders of magnitude (Student-t tails,
+  vol clustering, scheduled macro events invisible to any trailing window).
+- Crowd-disagreement standdown: ask below 90¢ means the market prices real
+  doubt — trust the crowd over trailing RV, skip.
+- EV floor: `(1 − ask) − Φ(−dσ) ≥ 2%`, with pCross computed on the
+  safety-multiplied σ so the gate genuinely binds.
+
+**Risk shape:** win +3–10% per ~1h hold; loss ≈ −95% on a strike crossing
+(the −15% convergence-specific stop cuts earlier when a bid exists, but
+near-expiry books gap — size assuming full loss). Clips are $4 —
+**clip size IS the risk budget** — and all clips are correlated on "BTC
+doesn't move this hour", which is why the position cap and the sigma
+multiplier both matter. Positions hold to resolution (the trailing ratchet
+can't trigger below +20%) and settle/redeem through the same machinery as
+poly-arb. Implementation: [`strategy/convergence.ts`](../packages/svx-bot/src/strategy/convergence.ts),
+walker in `index.ts` (`walkExpiryConvergence`).
+
+## Vol-arb — CUT 2026-07 (standalone Hyperliquid strategy, added 2026-05-15)
+
+> **Status: hard-disabled in code — the `VOL_ARB_ENABLED` env var is
+> deliberately ignored.** The audit reconciled the strategy to the cent
+> against HL's own records: $29.12 in fees, −$1.80 direction PnL over 5,219
+> fills. A perp has no vega; an IV−RV spread cannot be harvested with a
+> delta-one instrument. The 2s ticker still runs for telemetry and as the
+> realized-vol sampler feeding the expiry-convergence sigma gate.
+> Re-enabling requires a code change and an instrument with gamma.
+
+Original design, retained for reference:
 
 Sibling strategy to the poly-arb cross-venue trade. Doesn't depend on
 Polymarket — useful while Polymarket's Deposit Wallet API rollout is

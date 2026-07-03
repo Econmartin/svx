@@ -64,6 +64,15 @@ const baseCfg: SvxConfig = {
   convergenceMinEvFrac: 0.02,
   maxConvergencePerTradeUsdc: 4,
   convergenceCheckIntervalMs: 60_000,
+  convergenceSigmaSafetyMult: 2,
+  convergenceMinRvHistoryMs: 15 * 60_000,
+  convergenceStrikeBandLoFrac: 0.5,
+  convergenceStrikeBandHiFrac: 2.0,
+  convergenceStopLossFrac: 0.15,
+  polyRedeemRetryGapMs: 30 * 60_000,
+  polyRedeemMaxAttempts: 5,
+  reconcileDriftThresholdUsdc: 5,
+  hlHedgeEnabled: true,
   polySignatureType: 'EOA',
   polyFunderAddress: '',
   hlExecutionEnabled: false,
@@ -148,7 +157,10 @@ describe('parseMarketResolution', () => {
     });
     expect(r.closed).toBe(true);
     expect(r.winningOutcome).toBe('no');
-    expect(r.negRisk).toBe(false); // default when flag is absent
+    // Absent flag = UNKNOWN, not false. Defaulting to false routed NegRisk
+    // markets through the plain CTF contract — guaranteed revert, stranded
+    // winnings. The redeem path refuses to guess and retries after re-fetch.
+    expect(r.negRisk).toBeUndefined();
   });
 
   it('treats a closed market with ambiguous prices as not-yet-resolved', () => {

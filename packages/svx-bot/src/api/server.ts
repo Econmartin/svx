@@ -61,6 +61,15 @@ interface ApiDeps {
       unrealizedPnlUsd: number;
       cumFundingUsdc: number;
     }>;
+    /** Wallet-vs-ledger reconciliation snapshot — see index.ts BotState. */
+    polyReconcile?: {
+      baselineUsdc: number;
+      baselineSetAtMs: number;
+      driftUsdc: number;
+      thresholdUsdc: number;
+      unredeemedPayoutUsdc: number;
+      checkedAtMs: number;
+    };
     /** When the bot last ATTEMPTED a Polymarket order (success or fail). */
     lastPolyAttemptAtMs?: number;
     /** When the bot last ATTEMPTED an HL hedge (success or fail). */
@@ -149,6 +158,14 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       realizedPolyPnlUsdc: realizedPolyAllTime,
       realizedPolyPnl24hUsdc: realizedPoly24h,
       dailyPolyLossLimitUsdc: deps.cfg.dailyPolyLossLimitUsdc,
+      // Winnings the ledger counts as realized but the wallet hasn't received
+      // (redeem failed / pending manual claim in Safe mode). Non-zero for
+      // long = stranded money; the redeem retry queue works this down.
+      unredeemedPolyPayoutUsdc: deps.ledger.unredeemedPolyPayoutUsdc(),
+      // Wallet-vs-ledger reconciliation invariant. driftUsdc near 0 = ledger
+      // truthful; |drift| > threshold auto-pauses the bot. Null until the
+      // first poly balance refresh after boot.
+      polyReconcile: deps.state.polyReconcile ?? null,
       // Hyperliquid hedge state.
       hlExecutionEnabled: deps.cfg.hlExecutionEnabled,
       hlNetwork: deps.cfg.hlNetwork,

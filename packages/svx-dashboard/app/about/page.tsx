@@ -13,11 +13,17 @@ export default function AboutPage() {
           <Badge variant="outline">Sui Overflow 2026</Badge>
         </div>
         <p className="text-muted-strong text-[14.5px] leading-relaxed">
-          SVX is a fully-automated cross-venue volatility arbitrage bot for the
-          DeepBook Predict track. It captures pricing disagreements between
+          SVX is a fully-automated cross-venue trading bot for the DeepBook
+          Predict track. Two live strategies share one risk stack:{' '}
+          <strong>poly-arb</strong> captures pricing disagreements between
           Predict's continuous SVI surface and Polymarket's discrete-strike
-          order book, then delta-hedges the residual exposure on Hyperliquid.
-          Three venues, one bot, pure-vol PnL.
+          order book, and <strong>expiry-convergence</strong> buys the
+          deep-in-the-money side of BTC dailies in their final hour when
+          realized vol says the strike is out of reach. Positions are small
+          naked binaries bounded by hard per-trade clips — the earlier
+          Hyperliquid delta hedge is disabled after the 2026-07 audit found it
+          mis-sized (see Limitations below); Hyperliquid still supplies the
+          live realized-vol feed.
         </p>
       </header>
 
@@ -42,8 +48,8 @@ export default function AboutPage() {
         />
         <Venue
           name="Hyperliquid"
-          subtitle="Delta hedge"
-          body="Every Polymarket fill triggers a delta-sized BTC perp on Hyperliquid — short when we bought Yes, long when we bought No. Closes on settlement. Strips directional BTC exposure."
+          subtitle="Realized-vol feed"
+          body="A 2s ticker samples the BTC perp mid continuously — that trailing realized vol drives the expiry-convergence sigma gate. The delta-hedge leg is DISABLED (2026-07 audit: hedge was sized at the wrong expiry and capped into irrelevance); close machinery remains for any legacy legs."
           tone="warn"
         />
       </div>
@@ -90,12 +96,14 @@ export default function AboutPage() {
             />
             <Step
               n={4}
-              title="Delta-sized HL hedge"
+              title="Expiry-convergence walker (every 60s)"
               body={
                 <>
-                  Compute <code className="code">|Δ| = φ(d₂) / (S · √w)</code> at the matched strike + Poly expiry. Open
-                  a BTC perp of size <code className="code">|Δ| × shares</code> on the opposite side. Risk gates: per-trade cap,
-                  total exposure cap, daily HL-loss limit.
+                  For BTC dailies in their final 5–90 minutes: if spot sits ≥{' '}
+                  <code className="code">minSigma × safetyMult</code> trailing sigmas from the strike
+                  (RV from the always-on HL sampler, ×2 fat-tail margin), buy the in-the-money side at
+                  90–97¢ and hold to resolution. Gates: strict question parser + strike sanity band,
+                  volume floor, RV warm-up, crowd-disagreement standdown, tight −15% stop.
                 </>
               }
             />
@@ -129,9 +137,20 @@ export default function AboutPage() {
             </p>
             <p>
               Every risk gate is mandatory: per-trade caps, daily loss limits
-              (separate dUSDC / pUSD / HL stacks), staleness checks, book-depth
-              floor, consecutive-loss circuit breaker, filesystem kill switch.
-              Auto-pauses on breach; resume is explicit operator action.
+              (separate dUSDC / pUSD / HL stacks, keyed on <em>settlement</em>{' '}
+              time so old positions can't dodge them), staleness checks,
+              book-depth floor, a consecutive-loss circuit breaker that counts
+              real-money PnL, and a filesystem kill switch. Auto-pauses on
+              breach; resume is explicit operator action — redeploys never
+              clear a pause.
+            </p>
+            <p>
+              Post-incident hardening (2026-07): a <strong>wallet-vs-ledger
+              reconciliation invariant</strong> compares the pUSD balance to the
+              ledger-implied expectation every cycle and pauses on drift — a
+              silent booking bug now surfaces in minutes, not weeks. Failed
+              redeems retry with backoff; stranded winnings are totalled on{' '}
+              <code className="code">/status</code>.
             </p>
           </CardContent>
         </Card>
@@ -194,7 +213,7 @@ export default function AboutPage() {
                 />
                 <SpecRow
                   req="Stretch: delta-hedge the binary on Hyperliquid perps"
-                  built="Every Polymarket fill triggers a binary-delta-sized BTC perp on the opposite side. PnL becomes pure-vol edge instead of directional bet."
+                  built="Built and exercised on mainnet, then disabled by the 2026-07 audit — the hedge was sized at the oracle expiry instead of the Polymarket expiry, and a correct ATM hedge exceeds the per-trade cap. HL infra now feeds realized vol to the convergence strategy instead."
                   stretch
                 />
                 <SpecRow
@@ -365,15 +384,28 @@ export default function AboutPage() {
         <CardContent>
           <ul className="space-y-3 text-sm leading-relaxed">
             <Limitation
-              title="Vol-arb on perps isn't classical vol-arb"
+              title="Vol-arb was cut — a perp cannot harvest an IV−RV spread"
               body={
                 <>
                   Classical vol-arb captures vol mispricing via <strong>gamma</strong>{' '}
-                  (long/short options). Perps are linear — they only profit on direction. So the
-                  Hyperliquid vol-arb strategy is more accurately "directional perp triggered by
-                  IV-RV divergence + surface skew." On the Polymarket leg we DO capture vol edge
-                  (binaries have curvature), but the standalone HL vol-arb relies on directional
-                  conviction. Calling it out so judges read the strategy correctly.
+                  (long/short options). Perps are linear — they only profit on direction. The
+                  audit reconciled the strategy to the cent against HL's records: $29.12 in fees,
+                  −$1.80 of direction PnL over 5,219 fills. It is now hard-disabled in code (the
+                  env var is deliberately ignored); its 2s ticker survives as the realized-vol
+                  sampler feeding the convergence strategy.
+                </>
+              }
+            />
+            <Limitation
+              title="Poly positions are naked binaries — the delta hedge is off"
+              body={
+                <>
+                  The audit found the hedge sized delta at the 15-minute Predict oracle's expiry
+                  instead of the Polymarket market's (~5× oversize via 1/√T), and a correctly
+                  sized at-the-money hedge exceeds the per-trade HL cap anyway. Rather than claim
+                  "delta-neutral by construction" while shipping something else, the hedge is
+                  disabled and the risk shape is stated honestly: each position risks at most its
+                  $4 clip, bounded further by the position cap, stop-losses, and daily limits.
                 </>
               }
             />
@@ -602,8 +634,9 @@ export default function AboutPage() {
             <RepoNode path="    src/signal/{match,spread,filter}" body="Cross-venue spread + filters." indent />
             <RepoNode path="    src/exec/{ptb,risk,sizer,polymarket-client,hyperliquid-client,deepbook-margin-client,iron-bank-client}" body="Order construction + risk gates for all four venues." indent />
             <RepoNode path="    src/ledger/store.ts" body="SQLite + additive migrations." indent />
-            <RepoNode path="    src/strategy/vol-arb.ts" body="Standalone HL IV-RV divergence strategy." indent />
-            <RepoNode path="    src/strategy/margin-lever.ts" body="Paper-mode Predict × deepbook_margin × iron_bank composition." indent />
+            <RepoNode path="    src/strategy/convergence.ts" body="Expiry-convergence: deep-ITM BTC dailies in the final hour, sigma-gated." indent />
+            <RepoNode path="    src/strategy/vol-arb.ts" body="CUT 2026-07 (perps have no vega) — ticker survives as the RV sampler." indent />
+            <RepoNode path="    src/strategy/margin-lever.ts" body="Paper-mode Predict × deepbook_margin × iron_bank composition. Off by default." indent />
             <RepoNode path="    src/api/server.ts" body="Read-only HTTP for the dashboard." indent />
             <RepoNode path="    scripts/" body="Operator scripts (setup, force-*, redeem, generate-wallet)." indent />
             <RepoNode path="    tests/" body="Vitest — 150+ tests covering math vectors + integration paths." indent />

@@ -91,8 +91,11 @@ export interface PolyMarketResolution {
   resolvedAtMs?: number;
   /** Underlying spot at resolution, if gamma exposes it. */
   resolvedPrice?: number;
-  /** True for NegRisk multi-outcome events (our BTC strike markets). */
-  negRisk: boolean;
+  /** True for NegRisk multi-outcome events (our BTC strike markets).
+   *  `undefined` when gamma omits the field — the redeem path must NOT
+   *  guess: routing a NegRisk market through the plain CTF contract
+   *  reverts 100% of the time and used to strand winnings forever. */
+  negRisk: boolean | undefined;
 }
 
 export interface PolyOrderBook {
@@ -104,8 +107,22 @@ export interface PolyOrderBook {
   timestamp: number;
 }
 
-const RGX_BTC_ABOVE = /(?:bitcoin|btc).*?above.*?\$?(\d{2,3}(?:[,_]?\d{3})?(?:k|K)?)/i;
-const RGX_BTC_BE_ABOVE = /price of bitcoin be above \$?(\d{2,3}(?:[,_]?\d{3})?(?:k|K)?)/i;
+// The strike number must be a DOLLAR amount: `$`-prefixed or `k`-suffixed.
+// The old pattern accepted any bare 2-3 digit number after "above", which
+// matched "Bitcoin dominance above 60%" (strike 60 → passes every sigma gate
+// as free money) and "MicroStrategy's bitcoin holdings above 500,000". A
+// dominance/holdings question never writes "$60" or "500k BTC above $…", so
+// requiring the currency marker kills the whole contamination class.
+const RGX_BTC_ABOVE =
+  /(?:bitcoin|btc).*?above\s+(?:\$(\d{2,3}(?:[,_]?\d{3})?(?:k|K)?)|(\d{2,3}(?:[,_]?\d{3})?[kK]))\b/i;
+const RGX_BTC_BE_ABOVE =
+  /price of bitcoin be above\s+(?:\$(\d{2,3}(?:[,_]?\d{3})?(?:k|K)?)|(\d{2,3}(?:[,_]?\d{3})?[kK]))\b/i;
+// Questions about a DIFFERENT quantity than the BTC spot price, or with
+// no-touch semantics ("stay above X through Friday" pays on the path, not
+// the terminal print — our terminal-probability model is wrong for those
+// by construction). Any match disqualifies the market.
+const RGX_NOT_SPOT_PRICE =
+  /dominance|holdings|treasur|reserve|hashrate|market\s*cap|etf|mining|supply|\b(?:stay|remain|hold)s?\s+above|\bthrough\b|\buntil\b/i;
 
 export class PolymarketClient {
   private readonly gamma: AxiosInstance;
@@ -310,9 +327,11 @@ function parseGammaMarket(m: GammaMarket): PolyStrikeMarket | null {
  * `outcomes` ("['Yes','No']"). Once UMA resolves, exactly one entry becomes
  * "1" / "1.0" and the other "0" / "0.0". We pick whichever is closer to 1.
  *
- * `negRisk` defaults to false when the field is absent — the gamma schema
- * sometimes omits it for older markets. Safe because the standard CTF
- * redeem path handles both cases; the NegRisk path requires the flag.
+ * `negRisk` is `undefined` when the field is absent — the gamma schema
+ * sometimes omits it. The old code defaulted to `false`, which routed
+ * NegRisk markets (our usual BTC strips) through the plain CTF contract:
+ * guaranteed revert, winnings stranded. The redeem path now refuses to
+ * guess and retries after re-fetching.
  */
 export function parseMarketResolution(market: GammaMarket): PolyMarketResolution {
   const closed = market.closed === true;
@@ -342,15 +361,20 @@ export function parseMarketResolution(market: GammaMarket): PolyMarketResolution
     winningOutcome,
     resolvedAtMs: isFinite(resolvedAtMs ?? NaN) ? resolvedAtMs : undefined,
     resolvedPrice: market.resolvedPrice ?? undefined,
-    negRisk: market.negRisk === true,
+    negRisk:
+      market.negRisk === true ? true : market.negRisk === false ? false : undefined,
   };
 }
 
-/** Extract a strike like "$80,000" or "$80k" from the question text. */
+/** Extract a strike like "$80,000" or "$80k" from the question text.
+ *  Returns null for questions that aren't terminal BTC-spot-price binaries
+ *  (dominance, holdings, no-touch "stay above" phrasing, …). */
 export function parseStrikeFromQuestion(question: string): number | null {
+  if (RGX_NOT_SPOT_PRICE.test(question)) return null;
   const m = question.match(RGX_BTC_BE_ABOVE) ?? question.match(RGX_BTC_ABOVE);
-  if (!m || !m[1]) return null;
-  const raw = m[1].replace(/[,_]/g, '').toLowerCase();
+  const captured = m?.[1] ?? m?.[2];
+  if (!captured) return null;
+  const raw = captured.replace(/[,_]/g, '').toLowerCase();
   if (raw.endsWith('k')) {
     return Number(raw.slice(0, -1)) * 1000;
   }

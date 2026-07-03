@@ -105,17 +105,17 @@ export default function VolArbPage() {
       <PageIntro
         summary={
           <>
-            Standalone Hyperliquid perp strategy keyed to <strong>volatility divergence</strong>:
-            when Predict's implied vol (from the SVI surface) drifts away from Hyperliquid's
-            realized vol (measured tick-by-tick), AND the surface skew points one way, the bot
-            takes a directional perp position. Independent of the Predict×Polymarket arb shown
-            on Overview.
+            <strong>Execution CUT by the 2026-07 audit — this page is telemetry only.</strong>{' '}
+            The strategy traded Hyperliquid perps on <strong>volatility divergence</strong>{' '}
+            (Predict implied vol vs HL realized vol), but a perp has no vega: an IV−RV spread
+            cannot be harvested with a delta-one instrument. Reconciled against HL's own
+            records the strategy paid $29.12 in fees for −$1.80 of direction PnL over 5,219
+            fills. Execution is hard-disabled in code — the env flag is deliberately ignored.
           </>
         }
         hints={[
-          <>The strategy runs on its <strong>own 2s ticker</strong>, decoupled from the 15s poly-arb loop, so signals don't get starved by HTTP latency.</>,
-          <>Open trigger: <code className="font-mono text-[10px]">|IV − RV| ≥ open threshold</code> AND <code className="font-mono text-[10px]">|P(↑) − 50%| ≥ bias threshold</code>. Close trigger: signal weakens below close threshold OR time-stop.</>,
-          <>This is a <strong>perp-only directional play</strong>, not classical vol-arb — capturing a vol mispricing requires gamma (options). PnL comes from being right on direction when vol signals say a move is overdue.</>,
+          <>The <strong>2s ticker still runs</strong>: it samples the HL BTC mid and computes the IV/RV series below. That realized-vol feed is a live input to the <strong>expiry-convergence</strong> strategy's sigma gate.</>,
+          <>Re-enabling would require a code change plus an actual edge argument — an instrument with gamma (options), not a linear perp.</>,
         ]}
       />
 

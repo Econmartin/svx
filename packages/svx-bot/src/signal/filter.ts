@@ -32,6 +32,12 @@ export function applyFilters(input: FilterInput): FilterReason | null {
   // refuses to extrapolate a 15-min oracle's IV to a year-out binary.
   if (Math.abs(expiryDeltaMs) > cfg.expiryToleranceSec * 1000) return 'expiry_mismatch';
 
+  // A market past its end time is DETERMINED even though UMA hasn't paid out
+  // yet — between end and resolution the model can still hallucinate "edge"
+  // against an already-decided book. spread.ts silently fell back to the
+  // oracle horizon when tPoly ≤ 0, which made these look tradeable.
+  if (p.expiryMs <= now) return 'expiry_mismatch';
+
   // Settled oracle = no live trade.
   if (o.isSettled) return 'expiry_mismatch';
 

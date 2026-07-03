@@ -136,10 +136,12 @@ export default function PolyArbPage() {
           isMainnet ? (
             <>
               Every 15s the bot prices each oracle/strike pair on both venues. When the
-              probability gap exceeds the threshold (default 3pp), it buys the cheap
-              side on Polymarket and opens a binary-delta-sized BTC perp on Hyperliquid
-              the opposite way. Combined PnL is the pure-vol edge — fees and funding
-              are already netted out below.
+              probability gap exceeds the threshold (8pp since the 2026-07 overhaul) AND
+              the model edge clears the entry ask by ≥5%, it buys the cheap side on
+              Polymarket. Positions are small naked binaries bounded by the per-trade
+              clip — the HL delta hedge is disabled post-audit (it was sized at the
+              wrong expiry). Exits: trailing +20% ratchet lets winners ride to
+              resolution; stop-loss cuts losers at −50%.
             </>
           ) : (
             <>

@@ -29,6 +29,8 @@ async function main(): Promise<void> {
       return;
     case 'resume':
       return resume();
+    case 'rebaseline':
+      return rebaseline();
     case 'status':
       return printStatus();
     case 'report':
@@ -52,14 +54,40 @@ function resume(): void {
   const before = ledger.getPause();
   clearKillFlag();
   ledger.setPause(false);
+  // Bump the streak watermark — same semantics as RiskGate.resume(). Without
+  // this the breaker re-trips off the identical prior streak on the next
+  // risk check, and the old "bump CIRCUIT_BREAKER_LOSSES" hint papered over
+  // the asymmetry between this path and the in-process one.
+  ledger.resetCircuitBreaker(Date.now());
   console.log(
     JSON.stringify({
       msg: 'svx.resume',
       killFlagCleared: true,
       ledgerWasPaused: before.paused,
       ledgerPauseReason: before.reason,
-      hint:
-        'If pause was due to the consecutive-loss circuit breaker, also bump CIRCUIT_BREAKER_LOSSES — the bot will re-pause on the next tick if the current loss streak is still ≥ threshold.',
+      circuitBreakerWatermarkReset: true,
+    }),
+  );
+  ledger.close();
+}
+
+/**
+ * Reset the wallet-vs-ledger reconciliation baseline. Run this after
+ * depositing/withdrawing pUSD — the invariant treats any unexplained wallet
+ * move as a booking bug and pauses, so a legitimate funding event needs an
+ * explicit acknowledgement. The bot re-snapshots the baseline on its next
+ * balance refresh.
+ */
+function rebaseline(): void {
+  const cfg = loadConfig();
+  const ledger = new LedgerStore(path.join(path.resolve(cfg.dataDir), 'svx.sqlite'));
+  const prior = ledger.getMeta('poly_reconcile_baseline');
+  ledger.deleteMeta('poly_reconcile_baseline');
+  console.log(
+    JSON.stringify({
+      msg: 'svx.rebaseline',
+      priorBaseline: prior ? JSON.parse(prior) : null,
+      hint: 'baseline cleared — the bot snapshots a fresh one on its next poly balance refresh (~60s after start)',
     }),
   );
   ledger.close();
@@ -74,7 +102,10 @@ Commands:
   pause             Set the manual kill flag (/tmp/svx-paused).
   resume            Clear ALL pause sources: kill flag + ledger pause state
                     (the latter is set by the daily-loss / consecutive-loss
-                    circuit breakers).
+                    circuit breakers) + circuit-breaker watermark.
+  rebaseline        Reset the wallet-vs-ledger reconciliation baseline. Run
+                    after depositing/withdrawing pUSD so the drift alarm
+                    doesn't read the funding event as a booking bug.
   status            Print current bot status from the ledger.
   report            Print PnL summary.
 `);

@@ -168,10 +168,6 @@ interface BotState {
   /** Last time we polled gamma for Polymarket settlement / ran auto-redeem.
    *  UMA resolves markets hours after expiry, so 5-min cadence is plenty. */
   lastPolySettlementCheckMs: number;
-  /** Last time we checked on-chain token balances for "unredeemed" rows to
-   *  detect manual UI claims the ledger never observed (non-EOA signature
-   *  modes). Read-only RPC calls, so an hourly cadence is plenty. */
-  lastOnchainRedeemCheckMs: number;
   /** Last time the expiry-convergence walker scanned near-expiry markets. */
   lastConvergenceCheckMs: number;
   /** Vol-arb strategy state — in-memory rolling buffer + last decision. */
@@ -191,7 +187,6 @@ const MANAGER_BALANCE_REFRESH_MS = 30_000;
 const POLY_BALANCE_REFRESH_MS = 60_000;
 const HL_BALANCE_REFRESH_MS = 60_000;
 const POLY_SETTLEMENT_CHECK_INTERVAL_MS = 5 * 60_000; // every 5 minutes — UMA resolution takes hours, no benefit polling faster
-const ONCHAIN_REDEEM_RECONCILE_INTERVAL_MS = 60 * 60_000; // hourly — read-only RPC balance checks, manual claims aren't that frequent
 
 const PRUNE_INTERVAL_MS = 6 * 3600_000; // every 6 hours
 const RETENTION = {
@@ -303,7 +298,6 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastPolyAttemptAtMs: 0,
     lastHlAttemptAtMs: 0,
     lastPolySettlementCheckMs: 0,
-    lastOnchainRedeemCheckMs: 0,
     lastConvergenceCheckMs: 0,
     polyFillFailedAt: new Map(),
     polyEntryAt: new Map(),
@@ -613,22 +607,6 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     state.lastPolySettlementCheckMs = Date.now();
   }
 
-  // 2b-2. Reconcile winnings claimed OUTSIDE the bot. In every signature
-  // mode except EOA, redemption requires the operator to click "Claim" on
-  // polymarket.com — the ledger can't observe that happening any other way.
-  // Cheap read-only balance check, hourly cadence.
-  if (
-    polyExec &&
-    Date.now() - state.lastOnchainRedeemCheckMs > ONCHAIN_REDEEM_RECONCILE_INTERVAL_MS
-  ) {
-    try {
-      await reconcileExternallyRedeemedPositions({ polyExec, ledger });
-    } catch (e) {
-      log.warn('svx.poly.onchain_redeem_reconcile_error', { err: errMsg(e) });
-    }
-    state.lastOnchainRedeemCheckMs = Date.now();
-  }
-
   // 2c. Mid-life Polymarket exits — walk open poly positions, sell back via
   // marketSell when mark-to-market P&L crosses the profit-take threshold.
   // Predict's leg has no exit primitive so it still waits for settlement,
@@ -660,47 +638,37 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     }
   }
 
-  // 3. Match by strike grid only — the expiry filter runs in step 4 and is
-  // recorded in the signal log so we can see the full consideration set.
-  const matches = matchOraclesToPoly(oracles, polyMarkets);
-  if (matches.length === 0) {
-    log.info('svx.loop.no_matches', {});
-    return;
-  }
-
-  log.info('svx.loop.matches', { count: matches.length });
-
-  // 4. For each match: snapshot oracle, snapshot poly book, compute spread.
-  // We deduplicate oracle snapshots by oracle_id to avoid hitting the indexer
-  // multiple times per loop.
-  const uniqueOracleIds = new Set(matches.map((m) => m.oracle.oracleId));
-  const oracleSnapshots = new Map<string, OracleSnapshot>();
-  await Promise.all(
-    [...uniqueOracleIds].map(async (oid) => {
-      const snap = await predict.snapshotOracle(oid);
-      if (snap) {
-        oracleSnapshots.set(oid, snap);
-        ledger.recordSviSnapshot(snap);
-      }
-    }),
-  );
-
-  // Stash the freshest spot we just pulled so /status can serve it.
-  let freshest: OracleSnapshot | undefined;
-  for (const s of oracleSnapshots.values()) {
-    if (!freshest || s.timestampMs > freshest.timestampMs) freshest = s;
-  }
-  if (freshest) {
-    state.lastBtcSpot = { value: freshest.spot, updatedAtMs: freshest.timestampMs };
-  }
-
   // Refresh Polymarket pUSD + gas balance every POLY_BALANCE_REFRESH_MS.
   // Cheap (two RPC reads) but we throttle to avoid hammering the public RPC.
+  //
+  // Deliberately runs BEFORE the match-and-possibly-return below (moved here
+  // 2026-07 alongside auto-redeem support) — this used to sit after the
+  // match step, which meant any loop tick with zero active oracle/poly
+  // matches skipped balance refresh AND the drift check entirely. With
+  // auto-redeem enabled on Polymarket, claims land continuously and
+  // silently; this must run on every tick regardless of match availability
+  // or the drift alarm goes stale exactly when it matters most.
   if (
     polyExec &&
     Date.now() - state.lastPolyBalanceAtMs > POLY_BALANCE_REFRESH_MS
   ) {
     try {
+      // Reconcile winnings claimed OUTSIDE the bot FIRST, before computing
+      // drift. In every signature mode except EOA (POLY_1271, Safe, Proxy),
+      // the bot cannot submit a redeem itself — Polymarket's UI or an
+      // auto-redeem setting is the only path, and the ledger has no way to
+      // observe that except by checking on-chain balance. Without this
+      // ordering, a fresh auto-redeem lands in the wallet a full cycle
+      // before the ledger's "unredeemed" total catches up, and the drift
+      // check below would misread real, already-expected money as an
+      // unexplained mismatch and pause the bot — the opposite of what
+      // enabling auto-redeem is for.
+      try {
+        await reconcileExternallyRedeemedPositions({ polyExec, ledger });
+      } catch (e) {
+        log.warn('svx.poly.onchain_redeem_reconcile_error', { err: errMsg(e) });
+      }
+
       const [pUsd, gas] = await Promise.all([
         polyExec.getCollateralBalance(),
         polyExec.getGasBalance(),
@@ -784,6 +752,40 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
     } catch (e) {
       log.warn('svx.poly.balance_refresh_failed', { err: errMsg(e) });
     }
+  }
+
+  // 3. Match by strike grid only — the expiry filter runs in step 4 and is
+  // recorded in the signal log so we can see the full consideration set.
+  const matches = matchOraclesToPoly(oracles, polyMarkets);
+  if (matches.length === 0) {
+    log.info('svx.loop.no_matches', {});
+    return;
+  }
+
+  log.info('svx.loop.matches', { count: matches.length });
+
+  // 4. For each match: snapshot oracle, snapshot poly book, compute spread.
+  // We deduplicate oracle snapshots by oracle_id to avoid hitting the indexer
+  // multiple times per loop.
+  const uniqueOracleIds = new Set(matches.map((m) => m.oracle.oracleId));
+  const oracleSnapshots = new Map<string, OracleSnapshot>();
+  await Promise.all(
+    [...uniqueOracleIds].map(async (oid) => {
+      const snap = await predict.snapshotOracle(oid);
+      if (snap) {
+        oracleSnapshots.set(oid, snap);
+        ledger.recordSviSnapshot(snap);
+      }
+    }),
+  );
+
+  // Stash the freshest spot we just pulled so /status can serve it.
+  let freshest: OracleSnapshot | undefined;
+  for (const s of oracleSnapshots.values()) {
+    if (!freshest || s.timestampMs > freshest.timestampMs) freshest = s;
+  }
+  if (freshest) {
+    state.lastBtcSpot = { value: freshest.spot, updatedAtMs: freshest.timestampMs };
   }
 
   // Refresh HL margin balance + on-chain positions every HL_BALANCE_REFRESH_MS.

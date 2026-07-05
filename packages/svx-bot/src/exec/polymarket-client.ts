@@ -39,6 +39,10 @@ const ERC20_ABI = parseAbi([
   'function decimals() view returns (uint8)',
 ]);
 
+const ERC1155_ABI = parseAbi([
+  'function balanceOf(address account, uint256 id) view returns (uint256)',
+]);
+
 /**
  * Polymarket multi-strike events (e.g. "Bitcoin above $80k/$82k/$84k on
  * May 11") are NegRisk markets. Redemption goes through the NegRiskAdapter,
@@ -188,6 +192,30 @@ export class PolymarketExecClient {
     const pub = createPublicClient({ chain, transport: http(this.endpoints.rpcUrl) });
     const wei = await pub.getBalance({ address: this.address });
     return { wei, eth: Number(wei) / 1e18 };
+  }
+
+  /**
+   * Read the funder's current on-chain ERC1155 balance for a single outcome
+   * token. Used by the redeem reconciler: our own `redeemPolyWinnings` can
+   * only succeed for `signatureMode='EOA'` — the docstring on that method
+   * calls out POLY_GNOSIS_SAFE, but the same limitation applies to
+   * POLY_1271 (EIP-1271 only validates off-chain order SIGNATURES; it does
+   * not let the EOA act as `msg.sender` for an on-chain `redeemPositions`
+   * call, which burns tokens from the caller's own balance). In every
+   * non-EOA mode, the operator has to claim manually through Polymarket's
+   * UI — which the ledger has no way to observe directly. Reading balance=0
+   * here after a market resolved and the ledger still shows it unredeemed
+   * is the tell that a manual claim already happened.
+   */
+  async getConditionalTokenBalance(tokenId: string): Promise<bigint> {
+    const chain = this.endpoints.network === 'amoy' ? polygonAmoy : polygon;
+    const pub = createPublicClient({ chain, transport: http(this.endpoints.rpcUrl) });
+    return pub.readContract({
+      address: CONDITIONAL_TOKENS,
+      abi: ERC1155_ABI,
+      functionName: 'balanceOf',
+      args: [this.funderAddress, BigInt(tokenId)],
+    });
   }
 
   /** Pass-through: full L2 order book for one outcome token. */

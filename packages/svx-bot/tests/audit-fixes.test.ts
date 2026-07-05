@@ -10,6 +10,7 @@ import path from 'node:path';
 import { LedgerStore } from '../src/ledger/store.js';
 import { parseStrikeFromQuestion, parseMarketResolution } from '../src/pricing/polymarket.js';
 import { applyFilters } from '../src/signal/filter.js';
+import { reconcileExternallyRedeemedPositions } from '../src/index.js';
 import type { SvxConfig } from '../src/config.js';
 import type { OracleSnapshot, PolymarketSnapshot } from 'svx-shared/types';
 
@@ -349,5 +350,77 @@ describe('expired-market gate in the signal filter', () => {
       nowMs: now,
     });
     expect(r).toBeNull();
+  });
+});
+
+describe('reconcileExternallyRedeemedPositions', () => {
+  it('marks a row redeemed when the funder holds zero of that token on-chain', async () => {
+    const id = insertPolyTrade({ tokenId: 'tok-claimed', shares: 10, costUsdc: 2 });
+    ledger.markPolySettled(id, 'yes', 10, 8, Date.now());
+    ledger.markPolyRedeemed(id, null, 'failed'); // pre-fix bot attempt that reverted
+
+    const fakePolyExec = { getConditionalTokenBalance: async () => 0n };
+    await reconcileExternallyRedeemedPositions({ polyExec: fakePolyExec, ledger });
+
+    expect(ledger.unredeemedPolyPayoutUsdc()).toBe(0);
+    const [row] = ledger.closedPolyTrades(10);
+    expect(row?.polyRedeemStatus).toBe('success');
+    expect(row?.polyRedeemTxHash).toBe('external-claim');
+  });
+
+  it('leaves a row alone when the funder still holds the token on-chain', async () => {
+    const id = insertPolyTrade({ tokenId: 'tok-still-held', shares: 10, costUsdc: 2 });
+    ledger.markPolySettled(id, 'yes', 10, 8, Date.now());
+
+    const fakePolyExec = { getConditionalTokenBalance: async () => 10_000_000n };
+    await reconcileExternallyRedeemedPositions({ polyExec: fakePolyExec, ledger });
+
+    expect(ledger.unredeemedPolyPayoutUsdc()).toBe(10);
+  });
+
+  it('groups multiple ledger rows sharing one outcome token into a single balance check', async () => {
+    let calls = 0;
+    const a = insertPolyTrade({ tokenId: 'tok-shared', shares: 5, costUsdc: 1, conditionId: '0xshared' });
+    const b = insertPolyTrade({ tokenId: 'tok-shared', shares: 5, costUsdc: 1, conditionId: '0xshared' });
+    ledger.markPolySettled(a, 'yes', 5, 4, Date.now());
+    ledger.markPolySettled(b, 'yes', 5, 4, Date.now());
+
+    const fakePolyExec = {
+      getConditionalTokenBalance: async () => {
+        calls++;
+        return 0n;
+      },
+    };
+    await reconcileExternallyRedeemedPositions({ polyExec: fakePolyExec, ledger });
+
+    expect(calls).toBe(1);
+    expect(ledger.unredeemedPolyPayoutUsdc()).toBe(0);
+  });
+
+  it('is a no-op when there is nothing unredeemed', async () => {
+    let calls = 0;
+    const fakePolyExec = {
+      getConditionalTokenBalance: async () => {
+        calls++;
+        return 0n;
+      },
+    };
+    await reconcileExternallyRedeemedPositions({ polyExec: fakePolyExec, ledger });
+    expect(calls).toBe(0);
+  });
+
+  it('does not retry-backoff-gate the balance check (unlike the submit-retry queue)', async () => {
+    // A row that failed a submit attempt seconds ago would be excluded from
+    // the SUBMIT retry queue by polyRedeemRetryGapMs, but the read-only
+    // balance check must still see it — it costs no gas and isn't rate
+    // limited by Polymarket.
+    const id = insertPolyTrade({ tokenId: 'tok-recent-fail', shares: 10, costUsdc: 2 });
+    ledger.markPolySettled(id, 'yes', 10, 8, Date.now());
+    ledger.markPolyRedeemed(id, null, 'failed');
+
+    const fakePolyExec = { getConditionalTokenBalance: async () => 0n };
+    await reconcileExternallyRedeemedPositions({ polyExec: fakePolyExec, ledger });
+
+    expect(ledger.unredeemedPolyPayoutUsdc()).toBe(0);
   });
 });

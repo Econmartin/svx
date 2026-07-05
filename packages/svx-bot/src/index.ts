@@ -168,6 +168,10 @@ interface BotState {
   /** Last time we polled gamma for Polymarket settlement / ran auto-redeem.
    *  UMA resolves markets hours after expiry, so 5-min cadence is plenty. */
   lastPolySettlementCheckMs: number;
+  /** Last time we checked on-chain token balances for "unredeemed" rows to
+   *  detect manual UI claims the ledger never observed (non-EOA signature
+   *  modes). Read-only RPC calls, so an hourly cadence is plenty. */
+  lastOnchainRedeemCheckMs: number;
   /** Last time the expiry-convergence walker scanned near-expiry markets. */
   lastConvergenceCheckMs: number;
   /** Vol-arb strategy state — in-memory rolling buffer + last decision. */
@@ -187,6 +191,7 @@ const MANAGER_BALANCE_REFRESH_MS = 30_000;
 const POLY_BALANCE_REFRESH_MS = 60_000;
 const HL_BALANCE_REFRESH_MS = 60_000;
 const POLY_SETTLEMENT_CHECK_INTERVAL_MS = 5 * 60_000; // every 5 minutes — UMA resolution takes hours, no benefit polling faster
+const ONCHAIN_REDEEM_RECONCILE_INTERVAL_MS = 60 * 60_000; // hourly — read-only RPC balance checks, manual claims aren't that frequent
 
 const PRUNE_INTERVAL_MS = 6 * 3600_000; // every 6 hours
 const RETENTION = {
@@ -298,6 +303,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastPolyAttemptAtMs: 0,
     lastHlAttemptAtMs: 0,
     lastPolySettlementCheckMs: 0,
+    lastOnchainRedeemCheckMs: 0,
     lastConvergenceCheckMs: 0,
     polyFillFailedAt: new Map(),
     polyEntryAt: new Map(),
@@ -414,6 +420,18 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       perTradeCapUsdc: cfg.maxPolyPositionUsdc,
       maxOpenPositions: cfg.maxOpenPolyPositions,
     });
+
+    // One-shot backlog cleanup: rows the ledger still calls "unredeemed"
+    // whose on-chain balance is already zero — money claimed manually
+    // through Polymarket's UI (the only path in non-EOA signature modes;
+    // see reconcileExternallyRedeemedPositions doc comment) that the ledger
+    // never observed. Runs again periodically from the main loop for
+    // anything claimed after boot.
+    try {
+      await reconcileExternallyRedeemedPositions({ polyExec, ledger });
+    } catch (e) {
+      log.warn('svx.boot.onchain_redeem_reconcile_error', { err: errMsg(e) });
+    }
   }
 
   // Boot the API server for the dashboard. The server is read-only.
@@ -593,6 +611,22 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       log.warn('svx.poly.settlement_loop_error', { err: errMsg(e) });
     }
     state.lastPolySettlementCheckMs = Date.now();
+  }
+
+  // 2b-2. Reconcile winnings claimed OUTSIDE the bot. In every signature
+  // mode except EOA, redemption requires the operator to click "Claim" on
+  // polymarket.com — the ledger can't observe that happening any other way.
+  // Cheap read-only balance check, hourly cadence.
+  if (
+    polyExec &&
+    Date.now() - state.lastOnchainRedeemCheckMs > ONCHAIN_REDEEM_RECONCILE_INTERVAL_MS
+  ) {
+    try {
+      await reconcileExternallyRedeemedPositions({ polyExec, ledger });
+    } catch (e) {
+      log.warn('svx.poly.onchain_redeem_reconcile_error', { err: errMsg(e) });
+    }
+    state.lastOnchainRedeemCheckMs = Date.now();
   }
 
   // 2c. Mid-life Polymarket exits — walk open poly positions, sell back via
@@ -2202,6 +2236,81 @@ async function attemptPolyRedeem(
       err,
       note: 'will retry with backoff; unredeemed total surfaced on /status',
     });
+  }
+}
+
+/**
+ * Reconcile ledger rows the bot still calls "unredeemed" against the
+ * funder's ACTUAL on-chain ERC1155 balance.
+ *
+ * In every non-EOA signature mode (POLY_1271, POLY_GNOSIS_SAFE, POLY_PROXY)
+ * `redeemPolyWinnings` can never succeed as a bot-submitted transaction: the
+ * EOA can sign order messages on the Deposit Wallet / Safe's behalf (that's
+ * what EIP-1271 / Safe-owner signatures are for), but `redeemPositions`
+ * burns tokens from `msg.sender`'s own balance and pays out to
+ * `msg.sender` — there's no "redeem on behalf of" parameter. The Deposit
+ * Wallet itself has to be the caller, which requires the operator to claim
+ * manually through Polymarket's UI (its "Redeem" button constructs that
+ * transaction). The ledger has no event feed for that — a manual claim is
+ * on-chain, but nothing pings the bot when it happens.
+ *
+ * So: for every row still marked unredeemed, check whether the funder
+ * already holds zero of that outcome token. If a market resolved and we're
+ * not holding the winning side anymore, and we never sold it early either,
+ * the only way that happens is redemption — done outside the bot. Mark it
+ * redeemed with a sentinel hash so `/status`'s unredeemed total and the
+ * reconciliation invariant stop treating already-claimed money as pending.
+ *
+ * Runs regardless of signatureMode (harmless no-op for EOA rows, which
+ * clear their own tx hash via `attemptPolyRedeem` before ever reaching this
+ * check). Ignores the submit-retry backoff/attempt cap entirely — this is a
+ * read-only balance check, not a resubmission, so there's no reason to
+ * throttle it the same way.
+ */
+export async function reconcileExternallyRedeemedPositions(args: {
+  polyExec: Pick<PolymarketExecClient, 'getConditionalTokenBalance'>;
+  ledger: LedgerStore;
+}): Promise<void> {
+  const { polyExec, ledger } = args;
+  const rows = ledger.unredeemedWinningPolyTrades({
+    maxAttempts: Number.MAX_SAFE_INTEGER,
+    retryGapMs: 0,
+  });
+  if (rows.length === 0) return;
+
+  // Group by outcome token — balance is per-token, and repeat buys on the
+  // same market produce multiple ledger rows sharing one token.
+  const byToken = new Map<string, typeof rows>();
+  for (const r of rows) {
+    if (!r.polyTokenId) continue;
+    const list = byToken.get(r.polyTokenId) ?? [];
+    list.push(r);
+    byToken.set(r.polyTokenId, list);
+  }
+
+  for (const [tokenId, group] of byToken) {
+    let balance: bigint;
+    try {
+      balance = await polyExec.getConditionalTokenBalance(tokenId);
+    } catch (e) {
+      log.debug('svx.poly.redeem.onchain_check_failed', {
+        tokenId: tokenId.slice(0, 12) + '…',
+        err: errMsg(e),
+      });
+      continue;
+    }
+    if (balance === 0n) {
+      const totalPayout = group.reduce((s, t) => s + (t.polyPayoutUsdc ?? 0), 0);
+      for (const row of group) {
+        ledger.markPolyRedeemed(row.id, 'external-claim', 'success');
+      }
+      log.info('svx.poly.redeem.reconciled_external_claim', {
+        tokenId: tokenId.slice(0, 12) + '…',
+        rows: group.length,
+        totalPayoutUsdc: totalPayout.toFixed(2),
+        note: 'on-chain balance already 0 — claimed manually outside the bot; ledger now matches reality',
+      });
+    }
   }
 }
 

@@ -147,7 +147,10 @@ export interface TradeRecord {
   // Polymarket settlement (populated once UMA resolves the market).
   polySettled?: boolean;
   polySettledAtMs?: number;
-  polySettlementOutcome?: 'yes' | 'no';
+  /** 'yes'/'no' = UMA resolution; 'early_exit' = mid-life sell-back
+   *  (ratchet or stop — sign of polyPnlUsdc tells which); 'abandoned' =
+   *  14-day stale backstop. */
+  polySettlementOutcome?: 'yes' | 'no' | 'early_exit' | 'abandoned';
   polyPayoutUsdc?: number;
   polyPnlUsdc?: number;
   polyRedeemTxHash?: string;

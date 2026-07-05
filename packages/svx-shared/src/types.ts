@@ -176,8 +176,11 @@ export interface TradeRecord {
   polySettled?: boolean;
   /** Wall-clock when we recorded settlement (ms). */
   polySettledAtMs?: number;
-  /** Winning outcome — 'yes' = "BTC above strike", 'no' = the other side. */
-  polySettlementOutcome?: 'yes' | 'no';
+  /** How the poly leg closed. 'yes'/'no' = UMA resolution (the winning
+   *  outcome); 'early_exit' = mid-life sell-back (trailing ratchet or
+   *  stop-loss — sign of polyPnlUsdc tells which); 'abandoned' = the 14-day
+   *  stale-settlement backstop wrote it off. */
+  polySettlementOutcome?: 'yes' | 'no' | 'early_exit' | 'abandoned';
   /** pUSD payout = filled_shares * (won ? 1 : 0). */
   polyPayoutUsdc?: number;
   /** Realized Poly-leg PnL = payout - poly_cost_usdc. Drives daily-loss gate. */

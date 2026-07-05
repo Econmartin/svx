@@ -430,12 +430,20 @@ function ClosedTable({
       <TableBody>
         {closed.map((t) => {
           const combined = combinedPnl(t, isMainnet);
+          // 'early_exit' rows never touched UMA — the walker sold back
+          // mid-life. Sign of the poly PnL says which walker: the trailing
+          // ratchet only sells above its locked profit floor, the stop-loss
+          // only sells under water.
           const exit =
-            t.polySettlementOutcome === undefined && t.polyRedeemStatus
-              ? t.polyRedeemStatus
-              : t.polySettled
-                ? 'uma'
-                : '—';
+            t.polySettlementOutcome === 'early_exit'
+              ? (t.polyPnlUsdc ?? 0) >= 0
+                ? 'ratchet'
+                : 'stop'
+              : t.polySettlementOutcome === 'abandoned'
+                ? 'abandoned'
+                : t.polySettlementOutcome === 'yes' || t.polySettlementOutcome === 'no'
+                  ? 'uma'
+                  : t.polyRedeemStatus ?? '—';
           return (
             <TableRow key={t.id} className={combined >= 0 ? 'text-win' : 'text-loss'}>
               <TableCell className="text-muted text-xs">

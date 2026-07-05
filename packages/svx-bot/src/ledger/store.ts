@@ -1474,7 +1474,7 @@ export class LedgerStore {
       polySettled: r.poly_settled === 1,
       polySettledAtMs: r.poly_settled_at_ms ?? undefined,
       polySettlementOutcome:
-        (r.poly_settlement_outcome as 'yes' | 'no' | undefined) ?? undefined,
+        (r.poly_settlement_outcome as TradeRecord['polySettlementOutcome']) ?? undefined,
       polyPayoutUsdc: r.poly_payout_usdc ?? undefined,
       polyPnlUsdc: r.poly_pnl_usdc ?? undefined,
       polyRedeemTxHash: r.poly_redeem_tx_hash ?? undefined,

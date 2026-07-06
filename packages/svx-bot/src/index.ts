@@ -124,6 +124,15 @@ interface BotState {
     unredeemedPayoutUsdc: number;
     checkedAtMs: number;
   };
+  /** Consecutive balance-refresh cycles the drift has exceeded the
+   *  threshold. A single breach is usually settlement latency — the ledger
+   *  marks an early-exit/redeem closed the instant the sell/redeem call
+   *  returns, but the actual pUSD credit can lag a poll cycle. Only pausing
+   *  on a CONFIRMED (2nd consecutive) breach filters that out without
+   *  weakening the check against a real, persistent booking bug — one
+   *  costs an extra ~60s of exposure, the other means real drift and
+   *  real trading resume every day. */
+  polyReconcileBreachStreak: number;
   /** Hyperliquid margin balance — populated when hlExec is configured.
    *  Surfaces on /status so the dashboard's health panel can show whether
    *  the HL leg is ready to fire. */
@@ -294,6 +303,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastManagerBalanceAtMs: 0,
     lastPruneAtMs: 0,
     lastPolyBalanceAtMs: 0,
+    polyReconcileBreachStreak: 0,
     lastHlBalanceAtMs: 0,
     lastPolyAttemptAtMs: 0,
     lastHlAttemptAtMs: 0,
@@ -732,18 +742,39 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             checkedAtMs: Date.now(),
           };
           if (Math.abs(driftUsdc) > cfg.reconcileDriftThresholdUsdc) {
-            log.error('svx.poly.reconcile.drift', {
-              driftUsdc: driftUsdc.toFixed(2),
-              thresholdUsdc: cfg.reconcileDriftThresholdUsdc,
-              walletUsdc: pUsd.pUsd.toFixed(2),
-              ledgerOffsetUsdc: offset.toFixed(2),
-              baselineUsdc: baseline.baselineUsdc.toFixed(2),
-              note:
-                'wallet and ledger disagree — trading paused. If YOU moved funds, re-baseline with `svx rebaseline`; otherwise audit recent settlements before resuming.',
-            });
-            risk.pause(
-              `reconciliation drift ${driftUsdc.toFixed(2)} pUSD exceeds ±${cfg.reconcileDriftThresholdUsdc} — wallet vs ledger mismatch`,
-            );
+            state.polyReconcileBreachStreak++;
+            if (state.polyReconcileBreachStreak < 2) {
+              // First breach — very often just settlement latency: the
+              // ledger marks an early-exit sell or redeem closed the
+              // instant the call returns success, but the actual pUSD
+              // credit can take a poll cycle to land on-chain. Confirm on
+              // the NEXT cycle before pausing so a trade settling cleanly
+              // one cycle late doesn't force a manual resume every time it
+              // happens to land in that window.
+              log.warn('svx.poly.reconcile.drift_unconfirmed', {
+                driftUsdc: driftUsdc.toFixed(2),
+                thresholdUsdc: cfg.reconcileDriftThresholdUsdc,
+                walletUsdc: pUsd.pUsd.toFixed(2),
+                ledgerOffsetUsdc: offset.toFixed(2),
+                note: 'breach #1 — will pause if it repeats next cycle (~60s); likely settlement latency if it clears on its own',
+              });
+            } else {
+              log.error('svx.poly.reconcile.drift', {
+                driftUsdc: driftUsdc.toFixed(2),
+                thresholdUsdc: cfg.reconcileDriftThresholdUsdc,
+                walletUsdc: pUsd.pUsd.toFixed(2),
+                ledgerOffsetUsdc: offset.toFixed(2),
+                baselineUsdc: baseline.baselineUsdc.toFixed(2),
+                confirmedCycles: state.polyReconcileBreachStreak,
+                note:
+                  'wallet and ledger disagree across 2 consecutive checks — trading paused. If YOU moved funds, re-baseline with `svx rebaseline`; otherwise audit recent settlements before resuming.',
+              });
+              risk.pause(
+                `reconciliation drift ${driftUsdc.toFixed(2)} pUSD exceeds ±${cfg.reconcileDriftThresholdUsdc} — wallet vs ledger mismatch (confirmed across 2 checks)`,
+              );
+            }
+          } else {
+            state.polyReconcileBreachStreak = 0;
           }
         }
       } catch (e) {

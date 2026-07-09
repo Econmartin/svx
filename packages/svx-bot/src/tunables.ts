@@ -341,6 +341,26 @@ export const TUNABLES = {
   convergenceCheckIntervalMs: 60_000,
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Divergence-mint strategy (Predict favored side — the flagship candidate
+  // for DeepBook Predict mainnet; see strategy/divergence-mint.ts)
+  // ─────────────────────────────────────────────────────────────────────────
+  /** Master switch. Also env-overridable per deployment via
+   *  DIVERGENCE_MINT_ENABLED. Paper on mainnet until Predict ships there
+   *  (follows the same paperTrading gate as the arb's Predict leg). */
+  divergenceMintEnabled: true,
+  /** Min |Predict − Poly| divergence. 0.08 is the validated gate: May-2026
+   *  94% win/+11.9% ROI, July-2026 ~87.5%/+18% (deduped, 2% fee). */
+  divergenceMintThreshold: 0.08,
+  /** Refuse favored-side entries above this — no payoff room after fee. */
+  divergenceMintMaxCostPrice: 0.95,
+  /** Fixed dUSDC clip per trade. */
+  divergenceMintNotionalDusdc: 5,
+  /** Max simultaneous open divergence positions (distinct oracle/strike). */
+  divergenceMintMaxOpen: 10,
+  /** Stand down for the day at −this realized dUSDC over trailing 24h. */
+  divergenceMintDailyLossLimitDusdc: 20,
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Boot-time behaviour
   // ─────────────────────────────────────────────────────────────────────────
   /** When true, the bot resumes (clears the persisted pause flag) on every

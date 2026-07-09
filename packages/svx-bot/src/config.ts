@@ -147,6 +147,13 @@ const Schema = z.object({
   convergenceMinEvFrac: z.number().min(0).max(1).default(0.02),
   maxConvergencePerTradeUsdc: z.number().positive().default(4),
   convergenceCheckIntervalMs: z.number().int().positive().default(60_000),
+  // ── Divergence-mint strategy (see strategy/divergence-mint.ts) ──
+  divergenceMintEnabled: z.boolean().default(true),
+  divergenceMintThreshold: z.number().min(0).max(1).default(0.08),
+  divergenceMintMaxCostPrice: z.number().min(0.5).max(1).default(0.95),
+  divergenceMintNotionalDusdc: z.number().positive().default(5),
+  divergenceMintMaxOpen: z.number().int().positive().default(10),
+  divergenceMintDailyLossLimitDusdc: z.number().positive().default(20),
   /** Redeem retry backoff + attempt cap. */
   polyRedeemRetryGapMs: z.number().int().positive().default(30 * 60_000),
   polyRedeemMaxAttempts: z.number().int().positive().default(5),
@@ -370,6 +377,17 @@ export function loadConfig(): SvxConfig {
     polyMinEntryPrice: TUNABLES.polyMinEntryPrice,
     polyMaxEntryPrice: TUNABLES.polyMaxEntryPrice,
     polyMinEvFrac: TUNABLES.polyMinEvFrac,
+    // Env override is an execution gate: lets one deployment (e.g. mainnet
+    // while Predict is testnet-only) switch the strategy without a rebuild.
+    divergenceMintEnabled: parseBool(
+      process.env.DIVERGENCE_MINT_ENABLED,
+      TUNABLES.divergenceMintEnabled,
+    ),
+    divergenceMintThreshold: TUNABLES.divergenceMintThreshold,
+    divergenceMintMaxCostPrice: TUNABLES.divergenceMintMaxCostPrice,
+    divergenceMintNotionalDusdc: TUNABLES.divergenceMintNotionalDusdc,
+    divergenceMintMaxOpen: TUNABLES.divergenceMintMaxOpen,
+    divergenceMintDailyLossLimitDusdc: TUNABLES.divergenceMintDailyLossLimitDusdc,
     convergenceEnabled: TUNABLES.convergenceEnabled,
     convergenceMaxMinutes: TUNABLES.convergenceMaxMinutes,
     convergenceMinMinutes: TUNABLES.convergenceMinMinutes,

@@ -10,6 +10,7 @@ strategy and the shared rails. Current portfolio:
 
 | Strategy | Status | One-line rationale |
 |---|---|---|
+| Divergence-mint | **LIVE** (testnet dUSDC; paper on mainnet) | Predict's favorite at ≥8pp divergence is underconfident (~74–84¢ quoted, 84–94% realized); two disjoint validation windows — see [backtest-report.md](backtest-report.md). Added 2026-07-10. |
 | Poly-arb | **LIVE** | Entry math verified; gates raised to 8pp spread + 5% EV-after-ask; hedge removed (naked binaries, $4 clips). |
 | Expiry-convergence | **LIVE** | Late-certainty discount on BTC dailies; sigma gate runs on 2× trailing RV with strict universe filters. |
 | Vol-arb (IV−RV perps) | **CUT** | A perp has no vega. $29.12 fees vs −$1.80 direction PnL over 5,219 fills, reconciled to the cent. Hard-disabled in code. |
@@ -184,6 +185,36 @@ Implementation: [`pricing/binary-delta.ts`](../packages/svx-bot/src/pricing/bina
 [`exec/hyperliquid-client.ts`](../packages/svx-bot/src/exec/hyperliquid-client.ts),
 hedge wiring in [`index.ts`](../packages/svx-bot/src/index.ts) after the
 Polymarket fill block.
+
+## Divergence-mint (Predict favored side — added 2026-07-10)
+
+Mints the side **Predict prices above 50¢** whenever Predict's SVI-implied
+probability and the Polymarket book disagree by ≥ 8pp on the same
+(strike, expiry). Predict-side only — no Polymarket leg, no hedge. One bet
+per (oracle, strike): the 15s loop re-observes the same opportunity dozens of
+times, and a second entry would be leverage on the same coin flip.
+
+Mechanism: at large divergences Predict's favorite is directionally right but
+underconfident — quoted ~74–84¢, it realizes 84–94%. Validated on two
+disjoint windows (May-2026: n=50, 94% win, +11.9% ROI; July-2026: n=24,
+87.5%, ≈+18.5%; deduped, 2% fee haircut). The formulation matters: betting
+the arb's Predict leg or its mirror both flip sign between those windows —
+which side the leg points at depends on which venue is quoting rich that
+month. Full method and caveats: [backtest-report.md](backtest-report.md).
+
+Gates (all in `strategy/divergence-mint.ts`, pure + unit-tested): divergence
+≥ `divergenceMintThreshold` (0.08), favored price ≤ 0.95, one open position
+per (oracle, strike), `divergenceMintMaxOpen` cap (10), 24h realized-loss
+standdown (−20 dUSDC), data-integrity filters from the shared pipeline
+(stale SVI, expiry mismatch) still apply. Fixed clip
+(`divergenceMintNotionalDusdc`, 5 dUSDC). Settlement, PnL, and
+permissionless redeem ride the existing oracle-settlement machinery; trades
+are tagged `strategy='divergence_mint'`.
+
+Runs live on testnet dUSDC today; paper on the mainnet instance until
+DeepBook Predict ships on Sui mainnet (then the same
+`MAINNET_PAPER_TRADING=false` + address-swap flip as the arb leg). Kill:
+`DIVERGENCE_MINT_ENABLED=false` per deployment.
 
 ## Expiry-convergence (Polymarket BTC dailies, final hour — added 2026-07)
 

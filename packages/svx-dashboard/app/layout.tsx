@@ -9,7 +9,7 @@ import { StatusTicker } from '@/components/StatusTicker';
 export const metadata: Metadata = {
   title: 'SVX — Cross-venue vol-arb on DeepBook Predict',
   description:
-    'A fully-automated bot that trades the spread between DeepBook Predict (SVI surface) and Polymarket BTC binaries, delta-hedged on Hyperliquid.',
+    'A fully-automated bot that trades the spread between DeepBook Predict (SVI surface) and Polymarket BTC binaries, with a Hyperliquid realized-vol feed.',
 };
 
 // Without this, mobile browsers render the page at the default ~980px

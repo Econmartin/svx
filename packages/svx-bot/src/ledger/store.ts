@@ -346,7 +346,7 @@ export class LedgerStore {
       predictIvAtExec?: number;
       edgeAtExec?: number;
       /** Strategy tag. Defaults to 'poly_arb' for backwards compatibility. */
-      strategy?: 'poly_arb' | 'vol_arb' | 'convergence';
+      strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint';
     },
   ): string {
     const id = t.id ?? randomUUID();
@@ -586,6 +586,52 @@ export class LedgerStore {
       )
       .get(oracleId, strike, direction);
     return r?.c ?? 0;
+  }
+
+  /**
+   * True if a strategy already holds an open (unsettled) trade on this
+   * (oracleId, strike) — either direction. Divergence-mint dedupe: the 15s
+   * loop re-observes the same opportunity dozens of times; a second entry is
+   * leverage on the same coin flip, not a second bet.
+   */
+  hasOpenStrategyTradeForSignal(
+    oracleId: string,
+    strike: number,
+    strategy: string,
+  ): boolean {
+    const r = this.db
+      .prepare<[string, number, string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM trades
+         WHERE settled = 0 AND oracle_id = ? AND strike = ? AND strategy = ?`,
+      )
+      .get(oracleId, strike, strategy);
+    return (r?.c ?? 0) > 0;
+  }
+
+  /** Count of open (unsettled) Predict-side trades for one strategy. */
+  countOpenStrategyTrades(strategy: string): number {
+    const r = this.db
+      .prepare<[string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM trades WHERE settled = 0 AND strategy = ?`,
+      )
+      .get(strategy);
+    return r?.c ?? 0;
+  }
+
+  /**
+   * Realized Predict-side PnL for one strategy since `sinceMs`, keyed on
+   * settlement time (same convention as the shared daily-loss window — a
+   * position opened yesterday that dies today counts against today).
+   */
+  realizedStrategyPnlSince(strategy: string, sinceMs: number): number {
+    const r = this.db
+      .prepare<[string, number], { pnl: number | null }>(
+        `SELECT SUM(pnl_usdc) AS pnl FROM trades
+         WHERE strategy = ? AND settled = 1 AND pnl_usdc IS NOT NULL
+           AND COALESCE(settled_at_ms, ts_ms) >= ?`,
+      )
+      .get(strategy, sinceMs);
+    return r?.pnl ?? 0;
   }
 
   /**

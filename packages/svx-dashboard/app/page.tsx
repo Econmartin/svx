@@ -60,9 +60,11 @@ export default function LandingPage() {
           A single-operator, fully-automated cross-venue volatility-arbitrage
           bot for the Sui Overflow DeepBook Predict track. It uses Predict's
           SVI surface as a pricing brain, takes the opposing side on
-          Polymarket when the implied probabilities disagree, and
-          delta-hedges the residual exposure on Hyperliquid perps. Three
-          venues, one bot, pure-vol PnL.
+          Polymarket when the implied probabilities disagree, and samples
+          realized vol from Hyperliquid's BTC perp to gate the
+          expiry-convergence strategy. The delta-hedge leg was built,
+          exercised on mainnet, and disabled after the 2026-07 audit (it
+          sized delta at the oracle expiry). Three venues, one bot.
         </p>
         <p className="text-muted text-sm max-w-3xl">
           The dashboard you're on is a read-only window onto the operator's
@@ -88,9 +90,9 @@ export default function LandingPage() {
           />
           <Pillar
             icon={<ShieldCheck className="h-5 w-5 text-loss" />}
-            title="Delta hedge"
+            title="Realized-vol engine"
             kicker="Hyperliquid perps (mainnet)"
-            body="Every Polymarket fill triggers a binary-delta-sized BTC perp on the opposite side. Strips directional BTC exposure so realised PnL is the vol edge alone."
+            body="A 2s BTC perp mid ticker feeds trailing realized vol into the convergence strategy's sigma gate. The delta-hedge leg was built and exercised, then disabled after the 2026-07 audit found it mis-sized at the oracle expiry."
           />
         </div>
       </section>

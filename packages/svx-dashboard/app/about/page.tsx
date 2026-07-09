@@ -147,10 +147,16 @@ export default function AboutPage() {
             <p>
               Post-incident hardening (2026-07): a <strong>wallet-vs-ledger
               reconciliation invariant</strong> compares the pUSD balance to the
-              ledger-implied expectation every cycle and pauses on drift — a
-              silent booking bug now surfaces in minutes, not weeks. Failed
-              redeems retry with backoff; stranded winnings are totalled on{' '}
-              <code className="code">/status</code>.
+              ledger-implied expectation every cycle and pauses trading on
+              &gt;$5 of unexplained drift — two consecutive breaches are
+              required before pausing, so settlement latency doesn't trip
+              false positives, but a silent booking bug still surfaces in
+              minutes, not weeks. Failed redeems retry with backoff; stranded
+              winnings are totalled on <code className="code">/status</code>.
+              A <code className="code">GET /backtest</code> endpoint lets the
+              deployed bot replay its own recorded signal stream server-side
+              (<code className="code">side=predict|flip|favored</code>) to
+              check strategy variants against actual history.
             </p>
           </CardContent>
         </Card>
@@ -269,11 +275,12 @@ export default function AboutPage() {
             <p className="text-muted mt-1.5">
               The mainnet bot uses Predict (testnet) as its <strong>pricing brain</strong> — the
               SVI surface drives every signal — while executing the resulting trades on{' '}
-              <strong>Polymarket (Polygon mainnet)</strong> and hedging on{' '}
-              <strong>Hyperliquid (mainnet)</strong>. PnL on this bot is real money. This is what
+              <strong>Polymarket (Polygon mainnet)</strong>, with{' '}
+              <strong>Hyperliquid (mainnet)</strong> supplying the realized-vol feed (the delta
+              hedge is disabled post-audit). PnL on this bot is real money. This is what
               <em> "mainnet-day-one"</em> actually means: the cross-venue logic, the SVI-driven
-              spread detection, the order submission, the settlement reconciliation, and the
-              delta-hedge are all <strong>live today</strong> against real liquidity. The only
+              spread detection, the order submission, and the settlement reconciliation are
+              all <strong>live today</strong> against real liquidity. The only
               piece waiting on Predict's Sui-mainnet launch is the on-chain Sui mint — that's a
               single config flip (<code className="code">MAINNET_PAPER_TRADING=false</code>), not
               a code change.

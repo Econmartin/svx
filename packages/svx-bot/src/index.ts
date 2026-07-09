@@ -73,6 +73,7 @@ import {
   type MarginLeverState,
 } from './strategy/margin-lever.js';
 import { decideConvergence, sigmaDistance } from './strategy/convergence.js';
+import { decideDivergenceMint } from './strategy/divergence-mint.js';
 import { startApiServer } from './api/server.js';
 import { log } from './util/log.js';
 
@@ -1517,6 +1518,38 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         filterReason,
       });
     }
+
+    // === Divergence-mint (favored side) — independent of the arb path ===
+    // Bet the side Predict prices above 50¢ when the venues disagree by
+    // ≥ divergenceMintThreshold. Predict-side only: no Poly leg, no hedge.
+    // Data-integrity filters (stale SVI, expiry mismatch) still gate entry;
+    // poly-book-quality reasons don't — the mint never touches the book.
+    // (Slightly tighter than the backtest population, which had no filters.)
+    if (
+      cfg.divergenceMintEnabled &&
+      (filterReason === null ||
+        filterReason === 'poly_one_sided' ||
+        filterReason === 'poly_wide_spread' ||
+        filterReason === 'poly_low_volume')
+    ) {
+      try {
+        await maybeDivergenceMint({
+          ledger,
+          cfg,
+          live,
+          state,
+          sigId,
+          oracleSnap,
+          polySnap,
+          predictUp: spread.predictUp,
+          polyYesAsk: spread.polyYesAsk,
+          predictIv: spread.predictIv,
+          divergence: observedSpread,
+        });
+      } catch (e) {
+        log.warn('svx.divergence.error', { err: errMsg(e), stack: errStack(e) });
+      }
+    }
   }
 
   // Refresh on-chain manager balance every ~30s (live mode only). Manager
@@ -2589,6 +2622,143 @@ async function runVolArbStep(args: {
   }
 
   recordVolArbDecision(state.volArb, decision, acted);
+}
+
+/**
+ * Divergence-mint execution — bet the side Predict prices above 50¢ when the
+ * venues disagree by ≥ divergenceMintThreshold. Predict-side only (no Poly
+ * leg, no hedge); dedupe/caps/daily-loss live in decideDivergenceMint.
+ * Settlement, PnL, and redeem ride the existing oracle-settlement machinery —
+ * the trade row is a normal Predict trade tagged strategy='divergence_mint'.
+ */
+async function maybeDivergenceMint(args: {
+  ledger: LedgerStore;
+  cfg: SvxConfig;
+  live?: LiveContext;
+  state: BotState;
+  sigId: string;
+  oracleSnap: OracleSnapshot;
+  polySnap: PolymarketSnapshot;
+  predictUp: number;
+  polyYesAsk: number;
+  predictIv: number;
+  divergence: number;
+}): Promise<void> {
+  const { ledger, cfg, live, state, oracleSnap, polySnap } = args;
+  const nowMs = Date.now();
+
+  const decision = decideDivergenceMint({
+    predictUp: args.predictUp,
+    divergence: args.divergence,
+    expiryMs: oracleSnap.expiryMs,
+    nowMs,
+    hasOpenForSignal: ledger.hasOpenStrategyTradeForSignal(
+      oracleSnap.oracleId,
+      polySnap.strike,
+      'divergence_mint',
+    ),
+    openStrategyCount: ledger.countOpenStrategyTrades('divergence_mint'),
+    dailyStrategyPnlUsdc: ledger.realizedStrategyPnlSince(
+      'divergence_mint',
+      nowMs - 24 * 3600_000,
+    ),
+    cfg,
+  });
+
+  if (!decision.enter) {
+    // Only surface skips that were live candidates (past the divergence
+    // gate) — sub-threshold skips are the boring 99% of the stream.
+    if (args.divergence >= cfg.divergenceMintThreshold) {
+      log.debug('svx.divergence.skip', {
+        oracle: oracleSnap.oracleId.slice(0, 10),
+        strike: polySnap.strike,
+        reason: decision.reason,
+      });
+    }
+    return;
+  }
+
+  const quantityDusdc = cfg.divergenceMintNotionalDusdc;
+  const costUsdc = quantityDusdc * decision.costPrice;
+  let txDigest: string | undefined;
+  let mode: 'paper' | 'live' = 'paper';
+
+  if (!cfg.paperTrading && live) {
+    // Mirror the arb leg's top-up rule: refill the manager from the wallet
+    // only when the wallet can actually cover it (testnet wallets hold dust).
+    const wantedTopUpDusdc = Math.min(costUsdc * 1.5, quantityDusdc);
+    const walletCoinIds = await getOperatorDusdcCoinIds(live);
+    const walletDusdc =
+      walletCoinIds.length > 0
+        ? Number(
+            (
+              await live.sui.getBalance({
+                owner: live.operatorAddress,
+                coinType: ADDRESSES.dusdcType,
+              })
+            ).totalBalance,
+          ) / Number(QUOTE_UNIT)
+        : 0;
+    const shouldTopUp = walletDusdc >= wantedTopUpDusdc;
+    const tx = buildMintTx({
+      oracleId: oracleSnap.oracleId,
+      expiryMs: oracleSnap.expiryMs,
+      strike: polySnap.strike,
+      direction: decision.direction,
+      quantityDusdc,
+      managerId: live.managerId,
+      topUpDusdc: shouldTopUp ? wantedTopUpDusdc : 0,
+      dusdcCoinObjectIds: shouldTopUp ? walletCoinIds : undefined,
+    });
+    const result = await submitTx(live.sui, tx, live.keypair);
+    if (!result.ok) {
+      log.warn('svx.divergence.live_failed', {
+        digest: result.digest,
+        error: result.error,
+        status: result.status,
+      });
+      return;
+    }
+    txDigest = result.digest;
+    mode = 'live';
+    state.navUsdc = await readManagerBalance(live);
+  }
+
+  ledger.insertTrade({
+    signalId: args.sigId,
+    timestampMs: nowMs,
+    mode,
+    oracleId: oracleSnap.oracleId,
+    underlyingAsset: oracleSnap.underlyingAsset,
+    expiryMs: oracleSnap.expiryMs,
+    strike: polySnap.strike,
+    direction: decision.direction,
+    quantityDusdc,
+    costPrice: decision.costPrice,
+    costUsdc,
+    txDigest,
+    settled: false,
+    msToExpiryAtExec: oracleSnap.expiryMs - nowMs,
+    predictProbAtExec: args.predictUp,
+    polyAskAtExec: args.polyYesAsk,
+    predictIvAtExec: args.predictIv,
+    edgeAtExec: args.divergence,
+    strategy: 'divergence_mint',
+  });
+  if (mode === 'paper') {
+    state.navUsdc -= costUsdc;
+  }
+  log.info(`svx.divergence.${mode}_executed`, {
+    oracleId: oracleSnap.oracleId,
+    strike: polySnap.strike,
+    dir: decision.direction,
+    costPrice: decision.costPrice,
+    notional: quantityDusdc,
+    cost: costUsdc,
+    divergence: args.divergence,
+    reason: decision.reason,
+    ...(txDigest && { txDigest }),
+  });
 }
 
 async function reconcileSettlements(

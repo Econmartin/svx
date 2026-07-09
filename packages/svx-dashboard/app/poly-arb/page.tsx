@@ -107,9 +107,10 @@ export default function PolyArbPage() {
         </div>
         <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
           The cross-venue arbitrage strategy — buy mispriced Polymarket
-          binaries when Predict's SVI surface disagrees by &gt; threshold, then
-          delta-hedge with a BTC perp on Hyperliquid. Pure-vol PnL after the
-          two legs net out. Independent from the standalone HL{' '}
+          binaries when Predict's SVI surface disagrees by &gt; threshold.
+          Positions are naked binaries under hard per-trade clips; the
+          Hyperliquid delta hedge is disabled post-audit (HL now supplies
+          the realized-vol feed). Independent from the standalone HL{' '}
           <a href="/vol-arb" className="underline hover:text-accent">
             IV-RV divergence strategy
           </a>
@@ -126,7 +127,7 @@ export default function PolyArbPage() {
       <OperatorBanner
         context={
           isMainnet
-            ? 'real money in flight on Polymarket + Hyperliquid'
+            ? 'real money in flight on Polymarket'
             : 'paper signals on testnet'
         }
       />

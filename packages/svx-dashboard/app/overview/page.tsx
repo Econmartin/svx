@@ -78,7 +78,7 @@ export default function OverviewPage() {
         </div>
         <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
           {isMainnet
-            ? 'Polymarket execution on Polygon with delta-hedged Hyperliquid perp legs. Predict signals priced from testnet SVI surface.'
+            ? 'Polymarket execution on Polygon; Hyperliquid supplies the realized-vol feed (delta hedge disabled post-audit). Predict signals priced from testnet SVI surface.'
             : 'Cross-venue vol-arb on DeepBook Predict testnet, paired with paper Polymarket signals.'}
         </p>
       </header>

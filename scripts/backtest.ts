@@ -26,6 +26,20 @@ interface Args {
   threshold: number;
   outFile: string;
   notional: number; // simulated dUSDC notional per trade
+  /** Bet the side Predict FAVORS (opposite of predict_direction) at the
+   *  complementary cost. The default (hedge-side) direction backtested at
+   *  −49% ROI on May-2026 data — which mathematically implies the favored
+   *  side was +EV: at big divergences from Polymarket, Predict's surface is
+   *  directionally right but UNDERCONFIDENT (quotes ~76¢ on outcomes that
+   *  realize ~84–88%). This flag measures that edge directly. */
+  flip: boolean;
+  /** One bet per (oracle, strike, direction) — first observation only.
+   *  Without this, the 15s signal loop re-logs the same opportunity dozens
+   *  of times and the trade count (and confidence) is fiction. */
+  dedupe: boolean;
+  /** Cost markup fraction to approximate the Predict protocol fee
+   *  (UP + DOWN > 1). E.g. 0.02 = pay 2% over the quoted probability. */
+  fee: number;
 }
 
 function parseArgs(): Args {
@@ -33,12 +47,18 @@ function parseArgs(): Args {
     threshold: 0.03,
     outFile: 'data/backtest.csv',
     notional: 0.5,
+    flip: false,
+    dedupe: false,
+    fee: 0,
   };
   for (let i = 2; i < process.argv.length; i++) {
     const a = process.argv[i];
     if (a === '--threshold') args.threshold = Number(process.argv[++i]);
     else if (a === '--notional') args.notional = Number(process.argv[++i]);
     else if (a === '--out') args.outFile = process.argv[++i] ?? args.outFile;
+    else if (a === '--flip') args.flip = true;
+    else if (a === '--dedupe') args.dedupe = true;
+    else if (a === '--fee') args.fee = Number(process.argv[++i]);
   }
   return args;
 }
@@ -98,17 +118,38 @@ async function main(): Promise<void> {
   // Filter to signals whose absolute spread crosses the configured threshold.
   // The recorded `spread` is the *edge* — already absolute-valued by the
   // computeSpread engine.
-  const wouldFire = signals.filter((s) => s.spread >= args.threshold);
+  let wouldFire = signals.filter((s) => s.spread >= args.threshold);
+
+  // Dedupe to independent opportunities: the 15s loop re-logs the same
+  // (oracle, strike, direction) every iteration until it fades. Keeping the
+  // FIRST observation per key is the honest bet count — without it the
+  // aggregate stats are dominated by whichever opportunities lingered
+  // longest, and n is inflated ~40×.
+  if (args.dedupe) {
+    const seen = new Set<string>();
+    wouldFire = wouldFire.filter((s) => {
+      const key = `${s.oracle_id}|${s.strike}|${s.predict_direction}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
 
   const trades = wouldFire.map((s) => {
-    const costPrice = s.predict_direction === 'up' ? s.predict_prob : 1 - s.predict_prob;
+    // Default: bet predict_direction (the hedge-side mint the live strategy
+    // used). --flip: bet the side Predict FAVORS at the complementary cost.
+    const betDirection: 'up' | 'down' = args.flip
+      ? s.predict_direction === 'up' ? 'down' : 'up'
+      : s.predict_direction;
+    const rawCostPrice = betDirection === 'up' ? s.predict_prob : 1 - s.predict_prob;
+    const costPrice = rawCostPrice * (1 + args.fee);
     const cost = args.notional * costPrice;
     const settlement = settlements.get(s.oracle_id);
     let outcome: 'win' | 'loss' | 'open' = 'open';
     let payout = 0;
     if (settlement !== undefined) {
       const upWon = settlement > s.strike;
-      const won = s.predict_direction === 'up' ? upWon : !upWon;
+      const won = betDirection === 'up' ? upWon : !upWon;
       outcome = won ? 'win' : 'loss';
       payout = won ? args.notional : 0;
     }
@@ -116,7 +157,7 @@ async function main(): Promise<void> {
       ts: s.ts_ms,
       oracleId: s.oracle_id,
       strike: s.strike,
-      direction: s.predict_direction,
+      direction: betDirection,
       predictProb: s.predict_prob,
       polyProb: s.poly_prob,
       spread: s.spread,
@@ -139,6 +180,9 @@ async function main(): Promise<void> {
   const summary = {
     msg: 'backtest.summary',
     threshold: args.threshold,
+    flip: args.flip,
+    dedupe: args.dedupe,
+    fee: args.fee,
     notional_per_trade: args.notional,
     total_signals_observed: totalSignals,
     signals_with_spread: signals.length,

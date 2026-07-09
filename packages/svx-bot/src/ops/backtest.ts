@@ -5,13 +5,18 @@
  * bot's OWN ledger can be backtested without pulling the sqlite file off
  * the server).
  *
- * Two directions:
- *  - default: bet `predict_direction` (the hedge-side mint the original
- *    strategy used). Backtested at −49% ROI on May-2026 data.
- *  - flip:    bet the side Predict FAVORS at the complementary cost. At
- *    large divergences from Polymarket, Predict's surface is directionally
- *    right but UNDERCONFIDENT (quotes ~76¢ on outcomes that realize
- *    ~84–88%) — the "divergence-mint" candidate strategy.
+ * Three sides:
+ *  - predict: bet `predict_direction` — the Predict leg of the cross-venue
+ *    arb. Which side that is depends on which venue is quoting rich, so its
+ *    performance flips sign between regimes (−49% on May-2026 data, +19% on
+ *    July-2026 data). Kept as the baseline, not a strategy.
+ *  - flip:    bet the opposite of `predict_direction`. Same regime problem,
+ *    mirrored (+8% May, −56% July).
+ *  - favored: bet whichever side Predict prices ABOVE 50¢. This is the
+ *    regime-stable formulation of the divergence edge: at ≥8pp divergence
+ *    from Polymarket, Predict's favorite is directionally right but
+ *    UNDERCONFIDENT (quoted ~74–76¢, realizes ~84–88%) in BOTH windows —
+ *    the "divergence-mint" candidate strategy.
  */
 
 export interface BacktestSignalRow {
@@ -25,11 +30,13 @@ export interface BacktestSignalRow {
   spread: number;
 }
 
+export type BacktestSide = 'predict' | 'flip' | 'favored';
+
 export interface BacktestArgs {
   /** Min |spread| for a signal to fire. */
   threshold: number;
-  /** Bet Predict's favored side (opposite of predict_direction). */
-  flip: boolean;
+  /** Which side of the divergence to bet — see module doc. */
+  side: BacktestSide;
   /** One bet per (oracle, strike, direction) — first observation only.
    *  Without this the 15s loop's re-logging inflates n ~40×. */
   dedupe: boolean;
@@ -57,7 +64,7 @@ export interface BacktestTrade {
 
 export interface BacktestSummary {
   threshold: number;
-  flip: boolean;
+  side: BacktestSide;
   dedupe: boolean;
   fee: number;
   notional_per_trade: number;
@@ -96,9 +103,12 @@ export function computeBacktest(
   }
 
   const trades: BacktestTrade[] = wouldFire.map((s) => {
-    const betDirection: 'up' | 'down' = args.flip
-      ? s.predictDirection === 'up' ? 'down' : 'up'
-      : s.predictDirection;
+    const betDirection: 'up' | 'down' =
+      args.side === 'favored'
+        ? s.predictProb >= 0.5 ? 'up' : 'down'
+        : args.side === 'flip'
+          ? s.predictDirection === 'up' ? 'down' : 'up'
+          : s.predictDirection;
     const rawCostPrice = betDirection === 'up' ? s.predictProb : 1 - s.predictProb;
     const costPrice = rawCostPrice * (1 + args.fee);
     const cost = args.notional * costPrice;
@@ -146,7 +156,7 @@ export function computeBacktest(
   return {
     summary: {
       threshold: args.threshold,
-      flip: args.flip,
+      side: args.side,
       dedupe: args.dedupe,
       fee: args.fee,
       notional_per_trade: args.notional,

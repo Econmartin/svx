@@ -21,19 +21,18 @@ import path from 'node:path';
 import fs from 'node:fs';
 import Database from 'better-sqlite3';
 import { loadConfig } from '../packages/svx-bot/src/config.js';
-import { computeBacktest } from '../packages/svx-bot/src/ops/backtest.js';
+import { computeBacktest, type BacktestSide } from '../packages/svx-bot/src/ops/backtest.js';
 
 interface Args {
   threshold: number;
   outFile: string;
   notional: number; // simulated dUSDC notional per trade
-  /** Bet the side Predict FAVORS (opposite of predict_direction) at the
-   *  complementary cost. The default (hedge-side) direction backtested at
-   *  −49% ROI on May-2026 data — which mathematically implies the favored
-   *  side was +EV: at big divergences from Polymarket, Predict's surface is
-   *  directionally right but UNDERCONFIDENT (quotes ~76¢ on outcomes that
-   *  realize ~84–88%). This flag measures that edge directly. */
-  flip: boolean;
+  /** Which side of the divergence to bet — 'predict' (the arb's Predict
+   *  leg, regime-dependent), 'flip' (its mirror), or 'favored' (the side
+   *  Predict prices above 50¢ — the regime-stable divergence-mint edge:
+   *  quoted ~74–76¢, realizes ~84–88% on both May and July 2026 data).
+   *  --flip is kept as an alias for --side flip. */
+  side: BacktestSide;
   /** One bet per (oracle, strike, direction) — first observation only.
    *  Without this, the 15s signal loop re-logs the same opportunity dozens
    *  of times and the trade count (and confidence) is fiction. */
@@ -48,7 +47,7 @@ function parseArgs(): Args {
     threshold: 0.03,
     outFile: 'data/backtest.csv',
     notional: 0.5,
-    flip: false,
+    side: 'predict',
     dedupe: false,
     fee: 0,
   };
@@ -57,8 +56,15 @@ function parseArgs(): Args {
     if (a === '--threshold') args.threshold = Number(process.argv[++i]);
     else if (a === '--notional') args.notional = Number(process.argv[++i]);
     else if (a === '--out') args.outFile = process.argv[++i] ?? args.outFile;
-    else if (a === '--flip') args.flip = true;
-    else if (a === '--dedupe') args.dedupe = true;
+    else if (a === '--flip') args.side = 'flip';
+    else if (a === '--side') {
+      const s = process.argv[++i];
+      if (s !== 'predict' && s !== 'flip' && s !== 'favored') {
+        console.error(`--side must be predict|flip|favored, got ${s}`);
+        process.exit(1);
+      }
+      args.side = s;
+    } else if (a === '--dedupe') args.dedupe = true;
     else if (a === '--fee') args.fee = Number(process.argv[++i]);
   }
   return args;
@@ -131,7 +137,7 @@ async function main(): Promise<void> {
     settlements,
     {
       threshold: args.threshold,
-      flip: args.flip,
+      side: args.side,
       dedupe: args.dedupe,
       fee: args.fee,
       notional: args.notional,

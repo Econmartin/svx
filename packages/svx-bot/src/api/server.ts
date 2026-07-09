@@ -18,7 +18,7 @@ import {
   wingNoArb,
 } from '../pricing/svi-arb.js';
 import type { MarginLeverState } from '../strategy/margin-lever.js';
-import { computeBacktest } from '../ops/backtest.js';
+import { computeBacktest, type BacktestSide } from '../ops/backtest.js';
 import { log } from '../util/log.js';
 
 interface ApiDeps {
@@ -364,17 +364,25 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
    * box. Read-only; the data window is bounded by signal retention (check
    * `data_window` in the response before trusting the stats).
    *
-   *   GET /backtest?threshold=0.08&flip=true&dedupe=true&fee=0.02
+   *   GET /backtest?threshold=0.08&side=favored&dedupe=true&fee=0.02
+   *
+   * side=predict|flip|favored (favored = the regime-stable divergence-mint
+   * formulation; flip=true is accepted as a legacy alias for side=flip).
    */
   app.get('/backtest', (req, res) => {
     const threshold = clampFloat(req.query.threshold, 0, 1, 0.08);
     const fee = clampFloat(req.query.fee, 0, 0.2, 0);
-    const flip = req.query.flip === 'true' || req.query.flip === '1';
+    const side: BacktestSide =
+      req.query.side === 'flip' || req.query.side === 'favored'
+        ? req.query.side
+        : req.query.flip === 'true' || req.query.flip === '1'
+          ? 'flip'
+          : 'predict';
     const dedupe = req.query.dedupe === 'true' || req.query.dedupe === '1';
     const { summary } = computeBacktest(
       deps.ledger.backtestSignals(),
       deps.ledger.allSettlements(),
-      { threshold, flip, dedupe, fee, notional: 1 },
+      { threshold, side, dedupe, fee, notional: 1 },
     );
     res.json(summary);
   });

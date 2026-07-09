@@ -21,6 +21,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import Database from 'better-sqlite3';
 import { loadConfig } from '../packages/svx-bot/src/config.js';
+import { computeBacktest } from '../packages/svx-bot/src/ops/backtest.js';
 
 interface Args {
   threshold: number;
@@ -115,89 +116,35 @@ async function main(): Promise<void> {
     settlements.set(r.oracle_id, r.settlement_price);
   }
 
-  // Filter to signals whose absolute spread crosses the configured threshold.
-  // The recorded `spread` is the *edge* — already absolute-valued by the
-  // computeSpread engine.
-  let wouldFire = signals.filter((s) => s.spread >= args.threshold);
-
-  // Dedupe to independent opportunities: the 15s loop re-logs the same
-  // (oracle, strike, direction) every iteration until it fades. Keeping the
-  // FIRST observation per key is the honest bet count — without it the
-  // aggregate stats are dominated by whichever opportunities lingered
-  // longest, and n is inflated ~40×.
-  if (args.dedupe) {
-    const seen = new Set<string>();
-    wouldFire = wouldFire.filter((s) => {
-      const key = `${s.oracle_id}|${s.strike}|${s.predict_direction}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }
-
-  const trades = wouldFire.map((s) => {
-    // Default: bet predict_direction (the hedge-side mint the live strategy
-    // used). --flip: bet the side Predict FAVORS at the complementary cost.
-    const betDirection: 'up' | 'down' = args.flip
-      ? s.predict_direction === 'up' ? 'down' : 'up'
-      : s.predict_direction;
-    const rawCostPrice = betDirection === 'up' ? s.predict_prob : 1 - s.predict_prob;
-    const costPrice = rawCostPrice * (1 + args.fee);
-    const cost = args.notional * costPrice;
-    const settlement = settlements.get(s.oracle_id);
-    let outcome: 'win' | 'loss' | 'open' = 'open';
-    let payout = 0;
-    if (settlement !== undefined) {
-      const upWon = settlement > s.strike;
-      const won = betDirection === 'up' ? upWon : !upWon;
-      outcome = won ? 'win' : 'loss';
-      payout = won ? args.notional : 0;
-    }
-    return {
-      ts: s.ts_ms,
+  // Shared engine — identical math to the GET /backtest API endpoint, so the
+  // CLI and the deployed bot can never drift apart.
+  const { summary, trades } = computeBacktest(
+    signals.map((s) => ({
+      tsMs: s.ts_ms,
       oracleId: s.oracle_id,
       strike: s.strike,
-      direction: betDirection,
+      predictDirection: s.predict_direction,
       predictProb: s.predict_prob,
       polyProb: s.poly_prob,
       spread: s.spread,
-      costPrice,
-      cost,
-      settlement,
-      outcome,
-      payout,
-      pnl: outcome === 'open' ? null : payout - cost,
-    };
-  });
+    })),
+    settlements,
+    {
+      threshold: args.threshold,
+      flip: args.flip,
+      dedupe: args.dedupe,
+      fee: args.fee,
+      notional: args.notional,
+    },
+  );
 
-  const closed = trades.filter((t) => t.outcome !== 'open');
-  const wins = closed.filter((t) => t.outcome === 'win').length;
-  const losses = closed.filter((t) => t.outcome === 'loss').length;
-  const totalPnl = closed.reduce((acc, t) => acc + (t.pnl ?? 0), 0);
-  const totalCost = closed.reduce((acc, t) => acc + t.cost, 0);
-  const stillOpen = trades.length - closed.length;
-
-  const summary = {
-    msg: 'backtest.summary',
-    threshold: args.threshold,
-    flip: args.flip,
-    dedupe: args.dedupe,
-    fee: args.fee,
-    notional_per_trade: args.notional,
-    total_signals_observed: totalSignals,
-    signals_with_spread: signals.length,
-    would_fire: wouldFire.length,
-    fire_rate: signals.length > 0 ? wouldFire.length / signals.length : 0,
-    settled_trades: closed.length,
-    still_open: stillOpen,
-    wins,
-    losses,
-    win_rate: closed.length ? wins / closed.length : null,
-    total_cost_usdc: round(totalCost, 4),
-    total_pnl_usdc: round(totalPnl, 4),
-    roi: totalCost > 0 ? round(totalPnl / totalCost, 4) : null,
-  };
-  console.log(JSON.stringify(summary, null, 2));
+  console.log(
+    JSON.stringify(
+      { msg: 'backtest.summary', total_signals_observed: totalSignals, ...summary },
+      null,
+      2,
+    ),
+  );
 
   const csvHeader =
     'ts_iso,oracle_id,strike,direction,predict_prob,poly_prob,spread,cost_price,cost,settlement,outcome,payout,pnl';
@@ -213,11 +160,6 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({ msg: 'backtest.written', file: args.outFile, rows: trades.length }));
 
   db.close();
-}
-
-function round(x: number, decimals: number): number {
-  const m = 10 ** decimals;
-  return Math.round(x * m) / m;
 }
 
 main().catch((e) => {

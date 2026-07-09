@@ -199,7 +199,12 @@ const POLY_SETTLEMENT_CHECK_INTERVAL_MS = 5 * 60_000; // every 5 minutes — UMA
 
 const PRUNE_INTERVAL_MS = 6 * 3600_000; // every 6 hours
 const RETENTION = {
-  signalsKeep: 50_000, // ~few weeks of high-signal rows after the log floor
+  // Bumped 50k → 250k for the 2026-07 prize week: at ~20k signals/day the
+  // old cap held only ~2.5 days, which starves the /backtest endpoint of a
+  // meaningful validation window for the divergence-mint strategy (each
+  // independent ≥8pp opportunity needs its oracle to also SETTLE inside the
+  // window). 250k ≈ 12 days ≈ ~100MB of sqlite — fine on the volume.
+  signalsKeep: 250_000,
   sviSnapshotsKeep: 20_000, // surface viewer history
   polySnapshotsKeep: 50_000,
   navSnapshotsKeep: 10_000,

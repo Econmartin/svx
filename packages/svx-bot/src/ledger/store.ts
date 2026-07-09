@@ -1302,6 +1302,57 @@ export class LedgerStore {
     }));
   }
 
+  /**
+   * Raw signal rows for the backtest engine (ops/backtest.ts) — every
+   * observed signal with a spread, bounded by retention pruning.
+   */
+  backtestSignals(): Array<{
+    tsMs: number;
+    oracleId: string;
+    strike: number;
+    predictDirection: 'up' | 'down';
+    predictProb: number;
+    polyProb: number;
+    spread: number;
+  }> {
+    const rows = this.db
+      .prepare<[], {
+        ts_ms: number;
+        oracle_id: string;
+        strike: number;
+        predict_direction: 'up' | 'down';
+        predict_prob: number;
+        poly_prob: number;
+        spread: number;
+      }>(
+        `SELECT ts_ms, oracle_id, strike, predict_direction, predict_prob, poly_prob, spread
+         FROM signals WHERE spread IS NOT NULL`,
+      )
+      .all();
+    return rows.map((r) => ({
+      tsMs: r.ts_ms,
+      oracleId: r.oracle_id,
+      strike: r.strike,
+      predictDirection: r.predict_direction,
+      predictProb: r.predict_prob,
+      polyProb: r.poly_prob,
+      spread: r.spread,
+    }));
+  }
+
+  /** All recorded oracle settlements, keyed by oracleId — backtest input. */
+  allSettlements(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const r of this.db
+      .prepare<[], { oracle_id: string; settlement_price: number }>(
+        `SELECT oracle_id, settlement_price FROM settlements`,
+      )
+      .all()) {
+      out.set(r.oracle_id, r.settlement_price);
+    }
+    return out;
+  }
+
   countSignalsSince(sinceMs: number): number {
     const r = this.db
       .prepare<[number], { c: number }>(`SELECT COUNT(*) AS c FROM signals WHERE ts_ms >= ?`)

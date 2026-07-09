@@ -18,6 +18,7 @@ import {
   wingNoArb,
 } from '../pricing/svi-arb.js';
 import type { MarginLeverState } from '../strategy/margin-lever.js';
+import { computeBacktest } from '../ops/backtest.js';
 import { log } from '../util/log.js';
 
 interface ApiDeps {
@@ -356,6 +357,28 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     res.json(deps.ledger.recentSignals(limit));
   });
 
+  /**
+   * Replay the recorded signal stream against recorded oracle settlements —
+   * the same engine as scripts/backtest.ts, run server-side against the
+   * deployed bot's OWN ledger so nobody has to pull the sqlite file off the
+   * box. Read-only; the data window is bounded by signal retention (check
+   * `data_window` in the response before trusting the stats).
+   *
+   *   GET /backtest?threshold=0.08&flip=true&dedupe=true&fee=0.02
+   */
+  app.get('/backtest', (req, res) => {
+    const threshold = clampFloat(req.query.threshold, 0, 1, 0.08);
+    const fee = clampFloat(req.query.fee, 0, 0.2, 0);
+    const flip = req.query.flip === 'true' || req.query.flip === '1';
+    const dedupe = req.query.dedupe === 'true' || req.query.dedupe === '1';
+    const { summary } = computeBacktest(
+      deps.ledger.backtestSignals(),
+      deps.ledger.allSettlements(),
+      { threshold, flip, dedupe, fee, notional: 1 },
+    );
+    res.json(summary);
+  });
+
   app.get('/positions/open', (_req, res) => {
     res.json(deps.ledger.openTrades());
   });
@@ -530,6 +553,12 @@ function clampInt(v: unknown, lo: number, hi: number, def: number): number {
   const n = Number(v);
   if (!Number.isFinite(n)) return def;
   return Math.min(hi, Math.max(lo, Math.floor(n)));
+}
+
+function clampFloat(v: unknown, lo: number, hi: number, def: number): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return def;
+  return Math.min(hi, Math.max(lo, n));
 }
 
 // Tiny erf duplicate to avoid pulling bs.ts into the API surface explicitly.

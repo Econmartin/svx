@@ -164,6 +164,10 @@ const Schema = z.object({
   calibrationHarvestNotionalDusdc: z.number().positive().default(5),
   calibrationHarvestMaxOpen: z.number().int().positive().default(10),
   calibrationHarvestDailyLossLimitDusdc: z.number().positive().default(20),
+  // ── Butterfly telemetry (see strategy/butterfly.ts) ──
+  butterflyCheckIntervalMs: z.number().int().positive().default(60_000),
+  butterflyMinMarginFrac: z.number().min(0).max(1).default(0.01),
+  butterflyTradeableMarginFrac: z.number().min(0).max(1).default(0.05),
   /** Redeem retry backoff + attempt cap. */
   polyRedeemRetryGapMs: z.number().int().positive().default(30 * 60_000),
   polyRedeemMaxAttempts: z.number().int().positive().default(5),
@@ -408,6 +412,9 @@ export function loadConfig(): SvxConfig {
     calibrationHarvestNotionalDusdc: TUNABLES.calibrationHarvestNotionalDusdc,
     calibrationHarvestMaxOpen: TUNABLES.calibrationHarvestMaxOpen,
     calibrationHarvestDailyLossLimitDusdc: TUNABLES.calibrationHarvestDailyLossLimitDusdc,
+    butterflyCheckIntervalMs: TUNABLES.butterflyCheckIntervalMs,
+    butterflyMinMarginFrac: TUNABLES.butterflyMinMarginFrac,
+    butterflyTradeableMarginFrac: TUNABLES.butterflyTradeableMarginFrac,
     convergenceEnabled: TUNABLES.convergenceEnabled,
     convergenceMaxMinutes: TUNABLES.convergenceMaxMinutes,
     convergenceMinMinutes: TUNABLES.convergenceMinMinutes,

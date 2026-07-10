@@ -393,6 +393,20 @@ export const TUNABLES = {
   calibrationHarvestDailyLossLimitDusdc: 20,
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Butterfly-harvester TELEMETRY (see strategy/butterfly.ts) — counts
+  // digital-monotonicity violations on the fitted surface before any
+  // execution is considered. "We trade the surface's own arbitrage
+  // violations" starts by proving they exist.
+  // ─────────────────────────────────────────────────────────────────────────
+  /** Scan cadence. Violations are transient; the loop already holds fresh
+   *  snapshots every 15s, so 60s sampling is plenty for telemetry. */
+  butterflyCheckIntervalMs: 60_000,
+  /** Record floor — ignore sub-1pp wiggles (numerical noise). */
+  butterflyMinMarginFrac: 0.01,
+  /** "Tradeable" label: margin that would survive ~2× the protocol fee. */
+  butterflyTradeableMarginFrac: 0.05,
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Boot-time behaviour
   // ─────────────────────────────────────────────────────────────────────────
   /** When true, the bot resumes (clears the persisted pause flag) on every

@@ -202,6 +202,29 @@ export interface BacktestSummary {
   data_window: { firstTsIso: string | null; lastTsIso: string | null };
 }
 
+/** Response of `GET /butterfly` — digital-monotonicity violations found on
+ *  the fitted SVI surface (butterfly-harvester telemetry). */
+export interface ButterflyReport {
+  stats: {
+    scans: number;
+    violations: number;
+    tradeable: number;
+    bestMarginFrac: number | null;
+    lastEventTsMs: number | null;
+  };
+  recent: Array<{
+    tsMs: number;
+    oracleId: string;
+    expiryMs: number;
+    lowerStrike: number;
+    higherStrike: number;
+    upLower: number;
+    upHigher: number;
+    marginFrac: number;
+    tradeable: boolean;
+  }>;
+}
+
 /** One quoted-price band of the SVI calibration report. */
 export interface CalibrationBucket {
   lo: number;
@@ -507,6 +530,7 @@ export function createApi(base: string) {
       ),
     calibration: (threshold = 0.08) =>
       get<CalibrationReport>(`/calibration?threshold=${threshold}`),
+    butterfly: (limit = 50) => get<ButterflyReport>(`/butterfly?limit=${limit}`),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
     surfaceHistory: (oracleId: string, limit = 200) =>
       get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),

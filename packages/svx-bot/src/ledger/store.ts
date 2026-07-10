@@ -169,6 +169,23 @@ CREATE TABLE IF NOT EXISTS pause_state (
 );
 INSERT OR IGNORE INTO pause_state(id, paused, ts_ms) VALUES (1, 0, 0);
 
+/* Butterfly-harvester telemetry: digital-monotonicity violations found on
+   the fitted SVI surface. Telemetry only - counts real opportunities (and
+   whether the margin survives fees) before any execution is wired. */
+CREATE TABLE IF NOT EXISTS butterfly_events (
+  id TEXT PRIMARY KEY,
+  ts_ms INTEGER NOT NULL,
+  oracle_id TEXT NOT NULL,
+  expiry_ms INTEGER NOT NULL,
+  lower_strike REAL NOT NULL,
+  higher_strike REAL NOT NULL,
+  up_lower REAL NOT NULL,
+  up_higher REAL NOT NULL,
+  margin_frac REAL NOT NULL,
+  tradeable INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_butterfly_ts ON butterfly_events(ts_ms);
+
 /* One-row-per-key operational state that must survive restarts: one-shot
    migration markers, the wallet-reconciliation baseline, etc. */
 CREATE TABLE IF NOT EXISTS meta (
@@ -947,6 +964,110 @@ export class LedgerStore {
 
   deleteMeta(key: string): void {
     this.db.prepare(`DELETE FROM meta WHERE key = ?`).run(key);
+  }
+
+  // ── Butterfly-harvester telemetry ─────────────────────────────────────────
+
+  /** Bump the scan counter (persisted so restarts don't zero the denominator). */
+  bumpButterflyChecks(byOracleScans: number): void {
+    const cur = Number(this.getMeta('butterfly_checks_total') ?? '0');
+    this.setMeta('butterfly_checks_total', String(cur + byOracleScans));
+  }
+
+  recordButterflyEvent(ev: {
+    tsMs: number;
+    oracleId: string;
+    expiryMs: number;
+    lowerStrike: number;
+    higherStrike: number;
+    upLower: number;
+    upHigher: number;
+    marginFrac: number;
+    tradeable: boolean;
+  }): string {
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO butterfly_events (id, ts_ms, oracle_id, expiry_ms, lower_strike,
+           higher_strike, up_lower, up_higher, margin_frac, tradeable)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        ev.tsMs,
+        ev.oracleId,
+        ev.expiryMs,
+        ev.lowerStrike,
+        ev.higherStrike,
+        ev.upLower,
+        ev.upHigher,
+        ev.marginFrac,
+        ev.tradeable ? 1 : 0,
+      );
+    return id;
+  }
+
+  recentButterflyEvents(limit = 50): Array<{
+    tsMs: number;
+    oracleId: string;
+    expiryMs: number;
+    lowerStrike: number;
+    higherStrike: number;
+    upLower: number;
+    upHigher: number;
+    marginFrac: number;
+    tradeable: boolean;
+  }> {
+    return this.db
+      .prepare<
+        [number],
+        {
+          ts_ms: number;
+          oracle_id: string;
+          expiry_ms: number;
+          lower_strike: number;
+          higher_strike: number;
+          up_lower: number;
+          up_higher: number;
+          margin_frac: number;
+          tradeable: number;
+        }
+      >(`SELECT * FROM butterfly_events ORDER BY ts_ms DESC LIMIT ?`)
+      .all(limit)
+      .map((r) => ({
+        tsMs: r.ts_ms,
+        oracleId: r.oracle_id,
+        expiryMs: r.expiry_ms,
+        lowerStrike: r.lower_strike,
+        higherStrike: r.higher_strike,
+        upLower: r.up_lower,
+        upHigher: r.up_higher,
+        marginFrac: r.margin_frac,
+        tradeable: r.tradeable === 1,
+      }));
+  }
+
+  butterflyStats(): {
+    scans: number;
+    violations: number;
+    tradeable: number;
+    bestMarginFrac: number | null;
+    lastEventTsMs: number | null;
+  } {
+    const agg = this.db
+      .prepare<[], { c: number; t: number | null; best: number | null; last: number | null }>(
+        `SELECT COUNT(*) AS c, SUM(tradeable) AS t, MAX(margin_frac) AS best,
+                MAX(ts_ms) AS last
+         FROM butterfly_events`,
+      )
+      .get();
+    return {
+      scans: Number(this.getMeta('butterfly_checks_total') ?? '0'),
+      violations: agg?.c ?? 0,
+      tradeable: agg?.t ?? 0,
+      bestMarginFrac: agg?.best ?? null,
+      lastEventTsMs: agg?.last ?? null,
+    };
   }
 
   /**

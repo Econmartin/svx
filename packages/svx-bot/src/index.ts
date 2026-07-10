@@ -74,6 +74,9 @@ import {
 } from './strategy/margin-lever.js';
 import { decideConvergence, sigmaDistance } from './strategy/convergence.js';
 import { decideFavoredMint, type FavoredMintGates } from './strategy/divergence-mint.js';
+import { findCrossedStrikes } from './strategy/butterfly.js';
+import { sviTotalVariance } from './pricing/svi-arb.js';
+import { erf } from './pricing/bs.js';
 import { startApiServer } from './api/server.js';
 import { log } from './util/log.js';
 
@@ -94,6 +97,8 @@ interface BotState {
   lastManagerBalanceAtMs: number;
   /** Last time we ran prune+vacuum on the SQLite ledger. */
   lastPruneAtMs: number;
+  /** Last butterfly-telemetry surface scan. */
+  lastButterflyCheckMs: number;
   /** Most recent BTC spot from the freshest oracle snapshot. Populated by the
    *  main loop on each iteration so the dashboard can colour open positions
    *  ITM/OTM without making its own oracle calls. */
@@ -315,6 +320,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     lastHlAttemptAtMs: 0,
     lastPolySettlementCheckMs: 0,
     lastConvergenceCheckMs: 0,
+    lastButterflyCheckMs: 0,
     polyFillFailedAt: new Map(),
     polyEntryAt: new Map(),
     volArb: freshVolArbState(),
@@ -1592,6 +1598,59 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
           log.warn('svx.divergence.error', { err: errMsg(e), stack: errStack(e) });
         }
       }
+    }
+  }
+
+  // Butterfly telemetry - scan each fitted surface for digital-monotonicity
+  // violations (P_up rising in strike = crossed strikes = a near-riskless
+  // structure). TELEMETRY ONLY: we count opportunities and whether their
+  // margin survives fees before wiring any execution. Uses the snapshots
+  // this loop already pulled - zero extra indexer calls.
+  if (
+    oracleSnapshots.size > 0 &&
+    Date.now() - state.lastButterflyCheckMs > cfg.butterflyCheckIntervalMs
+  ) {
+    state.lastButterflyCheckMs = Date.now();
+    try {
+      let scans = 0;
+      for (const snap of oracleSnapshots.values()) {
+        if (snap.expiryMs <= Date.now()) continue;
+        const F = snap.forward;
+        const points: Array<{ strike: number; up: number }> = [];
+        for (let pct = -0.1; pct <= 0.1001; pct += 0.005) {
+          const strike = F * (1 + pct);
+          const k = Math.log(strike / F);
+          const w = sviTotalVariance(k, snap.svi);
+          if (!(w > 0)) continue;
+          const d2 = -(k + w / 2) / Math.sqrt(w);
+          points.push({ strike, up: 0.5 * (1 + erf(d2 / Math.SQRT2)) });
+        }
+        scans++;
+        for (const c of findCrossedStrikes(points, cfg.butterflyMinMarginFrac)) {
+          const tradeable = c.marginFrac >= cfg.butterflyTradeableMarginFrac;
+          ledger.recordButterflyEvent({
+            tsMs: Date.now(),
+            oracleId: snap.oracleId,
+            expiryMs: snap.expiryMs,
+            lowerStrike: c.lowerStrike,
+            higherStrike: c.higherStrike,
+            upLower: c.upLower,
+            upHigher: c.upHigher,
+            marginFrac: c.marginFrac,
+            tradeable,
+          });
+          log.info('svx.butterfly.violation', {
+            oracleId: snap.oracleId.slice(0, 10),
+            lowerStrike: Math.round(c.lowerStrike),
+            higherStrike: Math.round(c.higherStrike),
+            marginPp: (c.marginFrac * 100).toFixed(2),
+            tradeable,
+          });
+        }
+      }
+      ledger.bumpButterflyChecks(scans);
+    } catch (e) {
+      log.warn('svx.butterfly.scan_error', { err: errMsg(e) });
     }
   }
 

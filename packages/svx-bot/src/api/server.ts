@@ -409,6 +409,19 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     );
   });
 
+  /**
+   * Butterfly-harvester telemetry — digital-monotonicity violations found on
+   * the fitted SVI surface ("the surface's own arbitrage violations").
+   * Telemetry only; execution is gated on this count being nonzero.
+   */
+  app.get('/butterfly', (req, res) => {
+    const limit = clampInt(req.query.limit, 1, 500, 50);
+    res.json({
+      stats: deps.ledger.butterflyStats(),
+      recent: deps.ledger.recentButterflyEvents(limit),
+    });
+  });
+
   app.get('/positions/open', (_req, res) => {
     res.json(deps.ledger.openTrades());
   });

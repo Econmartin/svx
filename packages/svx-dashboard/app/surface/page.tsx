@@ -48,6 +48,10 @@ export default function SurfacePage() {
     [client, selectedId],
   );
   const { data: history } = usePolling(historyFetcher, 15_000);
+  const { data: butterfly } = usePolling(
+    useCallback(() => client.butterfly(10).catch(() => null), [client]),
+    30_000,
+  );
 
   return (
     <div className="space-y-6">
@@ -262,6 +266,46 @@ export default function SurfacePage() {
 
           {surface.arb && (
             <SurfaceArbPanel arb={surface.arb} points={surface.points} />
+          )}
+
+          {butterfly && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Butterfly harvester — telemetry</CardTitle>
+                <p className="text-xs text-muted mt-0.5 leading-relaxed">
+                  If the fitted surface ever prices a higher-strike UP above a
+                  lower-strike UP, the crossed strikes form a near-riskless
+                  structure. This counts real occurrences before any execution
+                  is wired — "we trade the surface's own arbitrage violations"
+                  starts by proving they exist.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm font-mono tabular-nums">
+                  <span><span className="text-muted text-xs uppercase tracking-wider">scans</span>{' '}{butterfly.stats.scans.toLocaleString()}</span>
+                  <span><span className="text-muted text-xs uppercase tracking-wider">violations</span>{' '}{butterfly.stats.violations}</span>
+                  <span><span className="text-muted text-xs uppercase tracking-wider">tradeable (&gt;5pp)</span>{' '}{butterfly.stats.tradeable}</span>
+                  <span><span className="text-muted text-xs uppercase tracking-wider">best margin</span>{' '}{butterfly.stats.bestMarginFrac != null ? `${(butterfly.stats.bestMarginFrac * 100).toFixed(2)}pp` : '—'}</span>
+                </div>
+                {butterfly.recent.length > 0 && (
+                  <div className="mt-3 text-xs text-muted space-y-1">
+                    {butterfly.recent.slice(0, 5).map((e, i) => (
+                      <div key={`${e.tsMs}-${i}`} className="font-mono tabular-nums">
+                        {new Date(e.tsMs).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{' '}
+                        ${Math.round(e.lowerStrike).toLocaleString()} ↔ ${Math.round(e.higherStrike).toLocaleString()}{' '}
+                        margin {(e.marginFrac * 100).toFixed(2)}pp{e.tradeable ? ' · TRADEABLE' : ''}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {butterfly.stats.violations === 0 && (
+                  <p className="text-xs text-muted mt-3">
+                    Zero violations so far — the SVI fit is holding its own
+                    no-arbitrage constraints. That's also a finding.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           )}
 
           <Card>

@@ -1,138 +1,143 @@
-# SVX demo script (≤5 minutes)
+# SVX demo script (5:00, hard cap)
 
-Target: a Sui Overflow judge with finance background. Goal: convince them
-this is the most realistic mainnet-day-one strategy in the DeepBook Predict
-track.
+Target: a Sui Overflow judge with a finance background. The pitch in one
+sentence: **everything works end to end on real infrastructure, the strategy
+built FOR Predict is profitable and validated out-of-sample, and along the
+way we measured the SVI feeder's calibration and can hand Mysten the
+numbers.** The failures are not hidden — they're the middle act, each with
+the data that killed it.
 
-## 0:00–0:20 — Hook
+The site is ordered as the demo. Start at the landing page and walk the
+numbered "build, in order" steps top to bottom — the nav bar follows the
+same sequence, so if a judge grabs the mouse they land in the same story.
 
-> "DeepBook Predict prices every BTC strike continuously, every few seconds,
-> via an SVI volatility surface. Polymarket prices a few discrete strikes via
-> a human-driven order book. When they disagree by more than three percentage
-> points, there's a trade. Here is a bot that takes those trades
-> automatically — and is already trading them on Polygon mainnet today."
+Every claim links to a live page or an API URL. Nothing is a slide.
 
-Show the dashboard landing page. Point to the live status badge, the
-realized-PnL chart, and the recent-signals table. Open `/mainnet` for the
-Polygon side.
+---
 
-## 0:20–1:00 — The math, briefly
+## 0:00–0:30 — Hook (landing page)
 
-Switch to the **Surface** page. Show:
+> "DeepBook Predict prices every BTC strike continuously via an on-chain SVI
+> volatility surface. Polymarket prices a few hand-listed strikes via a
+> human order book. This bot reads Predict's surface, finds the
+> disagreements, and trades them — on testnet against Predict itself with
+> dUSDC, and with real money on Polygon mainnet. Everything you're about to
+> see is live; you can verify any number from your own laptop."
 
-- The IV smile for the soonest-expiring oracle.
-- The UP-probability curve descending across strikes.
-- "This is the curve we evaluate at every Polymarket strike."
+Stay on the landing page. The numbered journey below the hero IS the agenda
+— read the five step titles aloud, ten seconds, then start walking.
 
-Don't go deeper than necessary; the writeup carries the rigor. If pressed:
-*"Raw SVI, w(k) = a + b·(ρ(k − m) + √((k − m)² + σ²)). Same parameterization
-as Predict's on-chain oracle. Validated against Python `math.erf` reference
-to within 1e-6."*
+## 0:30–1:15 — Step 1: the pricing brain (`/surface`)
 
-## 1:00–2:30 — Live trading log
+- Live SVI smile for the soonest oracle; UP-probability curve across strikes.
+- "We back-solve implied vol from the on-chain `OracleSVI` params and
+  reprice any strike at any expiry. The butterfly arbitrage-free checker
+  runs on every update."
+- If pressed on math: raw SVI `w(k) = a + b(ρ(k−m) + √((k−m)²+σ²))`,
+  validated against a Python `math.erf` reference to 1e-6; 36 math tests.
 
-Switch to the **Signals** page. Filter to `live_executed` (mainnet) or
-`paper_executed` (testnet view).
+## 1:15–2:15 — Step 2: real money against the surface (`/poly-arb`)
 
-> "Every row is a real signal generated from real Predict + real Polymarket
-> data. Each one names the oracle, the strike, the Predict probability, the
-> Polymarket Yes price, the spread, and the side we'd take."
+- Flip the network toggle to **mainnet**: real fills on the Polygon CLOB,
+  UMA settlement detection, on-chain auto-redeem via the NegRiskAdapter.
+- Point at one settled trade row: entry price, exit, realized PnL.
+- The credibility beat, verbatim:
+  > "This bot trades the operator's own real money. Every cent is
+  > reconciled: a wallet-vs-ledger invariant recomputes what the wallet
+  > SHOULD hold on every tick and pauses trading on unexplained drift. When
+  > our exits were realizing five to ten points below the tape, we caught
+  > it in this data and replaced the market orders with a floor-priced
+  > exit ladder."
 
-Click a row, point to the `predict_iv` column ("0.65 → Predict thinks the
-strike is 65% likely") and the `poly_iv` column ("0.59 → Polymarket implies
-59%; the 6% gap is the trade").
+## 2:15–2:55 — Step 3: the post-mortems (`/vol-arb`, gesture at `/margin-lever`)
 
-Switch to the **/mainnet** page. Point to:
+> "Three strategies did not survive contact with real money, and we can say
+> exactly why. The IV-RV perp strategy paid $29.12 in fees for $1.80 of
+> direction PnL over five thousand fills — a perp has no vega; the
+> instrument cannot harvest a vol signal. It's hard-disabled in code, and
+> this page is its post-mortem. The delta hedge and the margin-lever signal
+> got the same treatment: measured, documented, off."
 
-- The pUSD balance + wallet address (link to polygonscan).
-- **Open Polymarket positions** — the bot's current Yes/No share holdings.
-- **Closed Polymarket positions** — settled trades with payout, PnL, and a
-  polygonscan link to the auto-redeem tx.
-- The realized pUSD PnL (24h / all-time) StatRow values — those are the
-  numbers the daily-loss gate enforces against.
+One breath, then the pivot line: **"We kill losers with data. Which is why
+you can believe the next two pages."**
 
-> "Each closed row is the full lifecycle: signal → buy on Polymarket → wait
-> for UMA → auto-redeem winning shares for pUSD. The redeem tx is on
-> polygonscan, the PnL is recorded, the daily-loss gate updates."
+## 2:55–3:40 — Step 4: the finding (landing-page calibration table)
 
-## 2:30–3:30 — Risk controls demo
+- Scroll to the quoted-vs-realized calibration table (live from
+  `GET /calibration`, recomputed from the bot's own ledger).
+- The brief called this bot "a live stress test of the SVI feeder" — deliver
+  the test result:
+  > "Against every recorded oracle settlement: above 90 cents Predict's
+  > surface is well calibrated. Below 90 it is systematically
+  > underconfident — favorites quoted at 55 to 80 cents realize 19 to 24
+  > points higher. And the gap concentrates exactly where Polymarket
+  > disagrees with the surface. That's protocol-grade feedback on the SVI
+  > feeder, computed live, reproducible with one curl."
 
-Open a terminal. Run:
+## 3:40–4:40 — Step 5: the strategy that finding implies (`/divergence-mint`)
 
-```bash
-pnpm svx pause
-```
+- "If Predict's favorite is underpriced when the venues diverge, buy the
+  favorite ON Predict. That's divergence-mint — the Predict-native strategy."
+- Point at: live testnet positions with Sui tx digests (real `predict::mint`,
+  real `redeem_permissionless`), the win-rate stat, the live-replay card.
+- The validation beat:
+  > "94 percent win rate, +11.9 percent ROI on May data. 93.5 and +11.5 on
+  > July data. Two disjoint windows, deduped to independent bets, two
+  > percent fee haircut — and the bot recomputes it from its own ledger on
+  > demand; the URL is on screen."
+- The mainnet-day-one beat:
+  > "This runs live with dUSDC on testnet right now. The day Predict ships
+  > on Sui mainnet it's an address swap and one config flip — the exact
+  > redeploy-on-day-one the track asks for."
 
-Refresh the dashboard — the status badge flips to red `paused`. New signals
-keep being logged but `risk_blocked` reasons appear.
+## 4:40–5:00 — Close (`/about`, requirements card at the top)
 
-```bash
-pnpm svx resume
-```
+> "Testnet contract integration: live, tx digests on every row. End-to-end:
+> you just watched it. Simulation results: two API endpoints you can curl
+> right now. And the one strategy that's profitable is the one built for
+> Predict — which is the venue this track is about."
 
-Walk through the risk control table from
-[risk-controls.md](risk-controls.md). Emphasize the "non-negotiable" framing
-and the manual kill switch.
+---
 
-> "Every control here is a hard gate. None is a knob. You can shut the bot
-> down from the command line in under a second. That's why this is a bot you
-> can run on mainnet."
+## Parking-lot answers (if asked)
 
-## 3:30–4:30 — Mainnet readiness
+- **"Why is poly-arb only breakeven?"** The entry edge was real but
+  execution slippage ate it — measured at 5–10pp on stops via minute-level
+  prices-history. The exit ladder shipped this week; re-measuring over the
+  next ~20 trades. We publish the loss, the cause, and the fix.
+- **"Why should we trust the 94%?"** Dedupe (one bet per oracle event — the
+  15s loop re-observes the same opportunity ~40×), a 2% fee haircut, two
+  disjoint windows, and the replay runs server-side from the deployed
+  ledger — you don't have to trust our CSVs.
+- **"Could the calibration gap be YOUR model being wrong?"** No model of
+  ours is in the loop: it compares Predict's own quoted probability against
+  realized settlement outcomes. Our SVI evaluator is only used to READ the
+  quote, and it's validated to 1e-6 plus an arbitrage-free checker.
+- **"Where's the delta hedge?"** (the brief's stretch goal) Built and
+  exercised on mainnet, then disabled by the audit: it sized delta at the
+  15-minute oracle expiry instead of the Polymarket expiry, and a correctly
+  sized ATM hedge exceeds the per-trade cap at $4 clips. Honest answer:
+  at this clip size a hedge costs more than the risk it removes; the code
+  and the re-enable conditions are documented.
+- **"Kelly sizing?"** Fixed clips on purpose at this bankroll;
+  equity-scaled sizing is a written task (docs/tasks) gated on more settled
+  history.
+- **"Vault? Token?"** Deliberately no Move package and no pooled funds — a
+  single-operator bot stays out of securities territory until the
+  post-audit vault phase (roadmap on /about).
 
-Switch to a terminal and show `docs/mainnet-runbook.md`. Highlight the
-two parts: live Polymarket operations (top-up, kill-switch, log triage)
-and the pre-flight checklist for the future Sui mainnet switch.
+## Fallbacks
 
-> "The Polymarket leg is mainnet today — the bot trades real pUSD against
-> real BTC strike markets and auto-redeems winning shares via the
-> NegRiskAdapter. When DeepBook Predict ships on Sui mainnet, the second
-> leg flips on with a config change and an address swap. The runbook
-> covers both."
-
-> "There are no users. There is no vault. There is no token. SVX trades its
-> own balance. The 50% mainnet-prize gate is already cleared: the bot
-> runs, the bot trades, the bot is on mainnet — Polygon now, Sui as soon
-> as Predict ships there."
-
-## 4:30–5:00 — What's next + the Hyperliquid stretch goal
-
-> "The hackathon brief explicitly listed Hyperliquid delta hedging as the
-> stretch goal for this exact bot. We built it.
->
-> Every Polymarket fill triggers a delta-sized BTC perp hedge on
-> Hyperliquid — short BTC when we bought Yes, long when we bought No. The
-> hedge closes at settlement on the same poll loop that detects UMA
-> resolution. Combined PnL on the dashboard is poly + HL = pure-vol PnL.
->
-> Three venues, one bot, delta-neutral by construction. We don't care
-> which way BTC moves — only whether the spread we observed was real."
-
-Open the `/mainnet` dashboard:
-- Point to the **HL exposure** stat — current open hedge notional.
-- Point to the **HL PnL (all)** stat — funding cost + perp PnL.
-- Point to the **Combined PnL (all)** stat — the pure-vol number.
-- Scroll to "Open Hyperliquid hedges" — one row per active hedge with
-  size, side, open price.
-- Scroll to "Closed Polymarket positions" — Poly PnL, HL PnL, Combined
-  columns side-by-side. Show how the combined column has tighter swings
-  than the Poly column alone.
-
-> "Two more lines of work from here:
->
-> 1. **Dynamic hedge rebalancing** for longer-dated positions — re-sizing
->    the HL leg as delta drifts during the day. Currently a static hedge
->    at trade open is sufficient because Polymarket BTC markets typically
->    resolve same-day.
-> 2. **Multi-asset** — extend the matching layer to ETH and SOL once
->    Predict adds them. The math, sizing, risk gate, and execution paths
->    are all asset-agnostic; only the matching glue needs an extension."
-
-Close on the dashboard URL + GitHub link. Done.
+- If venue Wi-Fi dies: `docs/api-samples/` has canned JSON for the key
+  endpoints, and the README carries the same headline numbers with method.
+- If a page errors mid-demo: the About page's evidence card covers every
+  claim from a single page.
 
 ## Things to NOT say
 
-- "Beats the market" — you don't know that yet.
-- "Risk-free arbitrage" — there is no such thing.
-- "Will scale to billions" — focus on what you have running today.
-- "We're a fund" — you're a bot. That's the whole point.
+- "Beats the market" — not established.
+- "Risk-free arbitrage" — no such thing.
+- "Delta-neutral by construction" — the hedge is off; that claim died in
+  the audit.
+- "Will scale to billions" — demo what runs today.
+- "We're a fund" — it's a single-operator bot. That's the point.

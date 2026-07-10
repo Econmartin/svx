@@ -187,3 +187,123 @@ function round(x: number, decimals: number): number {
   const m = 10 ** decimals;
   return Math.round(x * m) / m;
 }
+
+// ── SVI calibration report ──────────────────────────────────────────────────
+
+export interface CalibrationBucket {
+  /** Quoted favored-side price band [lo, hi). */
+  lo: number;
+  hi: number;
+  n: number;
+  wins: number;
+  avg_quoted: number | null;
+  realized: number | null;
+  /** realized − avg_quoted: positive = the surface is underconfident here. */
+  gap_pp: number | null;
+}
+
+export interface CalibrationGroup {
+  n: number;
+  wins: number;
+  avg_quoted: number | null;
+  realized: number | null;
+  gap_pp: number | null;
+  buckets: CalibrationBucket[];
+}
+
+export interface CalibrationReport {
+  divergence_threshold: number;
+  /** Every deduped, settled signal observation. */
+  all: CalibrationGroup;
+  /** The subset where |Predict − Polymarket| ≥ divergence_threshold. */
+  divergent: CalibrationGroup;
+  data_window: { firstTsIso: string | null; lastTsIso: string | null };
+}
+
+const BUCKET_EDGES = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0000001];
+
+/**
+ * Quoted-vs-realized calibration of Predict's SVI surface, measured against
+ * recorded oracle settlements — the "live stress test of the SVI feeder" the
+ * track brief asks for. For every deduped signal whose oracle settled: take
+ * the FAVORED side (the one Predict prices ≥ 50¢), record its quoted price,
+ * and whether it won. A perfectly calibrated surface realizes each bucket at
+ * its quoted price; a positive gap means the surface is underconfident (its
+ * favorite wins more often than it charges for) — which is both protocol
+ * feedback and the entire edge behind the divergence-mint strategy.
+ */
+export function computeCalibration(
+  signals: BacktestSignalRow[],
+  settlements: Map<string, number>,
+  args: { divergenceThreshold: number },
+): CalibrationReport {
+  const seen = new Set<string>();
+  type Obs = { quoted: number; won: boolean; divergent: boolean };
+  const obs: Obs[] = [];
+
+  let firstTs: number | null = null;
+  let lastTs: number | null = null;
+  for (const s of signals) {
+    if (firstTs === null || s.tsMs < firstTs) firstTs = s.tsMs;
+    if (lastTs === null || s.tsMs > lastTs) lastTs = s.tsMs;
+
+    const key = `${s.oracleId}|${s.strike}|${s.predictDirection}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const settle = settlements.get(s.oracleId);
+    if (settle === undefined) continue;
+    if (!isFinite(s.predictProb) || s.predictProb <= 0 || s.predictProb >= 1) continue;
+
+    const favored: 'up' | 'down' = s.predictProb >= 0.5 ? 'up' : 'down';
+    const quoted = favored === 'up' ? s.predictProb : 1 - s.predictProb;
+    const upWon = settle > s.strike;
+    obs.push({
+      quoted,
+      won: favored === 'up' ? upWon : !upWon,
+      divergent: s.spread >= args.divergenceThreshold,
+    });
+  }
+
+  const group = (rows: Obs[]): CalibrationGroup => {
+    const buckets: CalibrationBucket[] = [];
+    for (let i = 0; i < BUCKET_EDGES.length - 1; i++) {
+      const lo = BUCKET_EDGES[i]!;
+      const hi = BUCKET_EDGES[i + 1]!;
+      const inB = rows.filter((r) => r.quoted >= lo && r.quoted < hi);
+      const wins = inB.filter((r) => r.won).length;
+      const avgQ = inB.length ? inB.reduce((a, r) => a + r.quoted, 0) / inB.length : null;
+      const realized = inB.length ? wins / inB.length : null;
+      buckets.push({
+        lo: round(lo, 2),
+        hi: round(Math.min(hi, 1), 2),
+        n: inB.length,
+        wins,
+        avg_quoted: avgQ != null ? round(avgQ, 4) : null,
+        realized: realized != null ? round(realized, 4) : null,
+        gap_pp: avgQ != null && realized != null ? round(realized - avgQ, 4) : null,
+      });
+    }
+    const wins = rows.filter((r) => r.won).length;
+    const avgQ = rows.length ? rows.reduce((a, r) => a + r.quoted, 0) / rows.length : null;
+    const realized = rows.length ? wins / rows.length : null;
+    return {
+      n: rows.length,
+      wins,
+      avg_quoted: avgQ != null ? round(avgQ, 4) : null,
+      realized: realized != null ? round(realized, 4) : null,
+      gap_pp: avgQ != null && realized != null ? round(realized - avgQ, 4) : null,
+      buckets,
+    };
+  };
+
+  return {
+    divergence_threshold: args.divergenceThreshold,
+    all: group(obs),
+    divergent: group(obs.filter((o) => o.divergent)),
+    data_window: {
+      firstTsIso: firstTs != null ? new Date(firstTs).toISOString() : null,
+      lastTsIso: lastTs != null ? new Date(lastTs).toISOString() : null,
+    },
+  };
+}

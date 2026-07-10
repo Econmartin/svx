@@ -18,7 +18,7 @@ import {
   wingNoArb,
 } from '../pricing/svi-arb.js';
 import type { MarginLeverState } from '../strategy/margin-lever.js';
-import { computeBacktest, type BacktestSide } from '../ops/backtest.js';
+import { computeBacktest, computeCalibration, type BacktestSide } from '../ops/backtest.js';
 import { log } from '../util/log.js';
 
 interface ApiDeps {
@@ -385,6 +385,22 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       { threshold, side, dedupe, fee, notional: 1 },
     );
     res.json(summary);
+  });
+
+  /**
+   * Quoted-vs-realized calibration of Predict's SVI surface against recorded
+   * oracle settlements — the "live stress test of the SVI feeder" from the
+   * track brief. Deduped to one observation per (oracle, strike, direction).
+   *
+   *   GET /calibration?threshold=0.08
+   */
+  app.get('/calibration', (req, res) => {
+    const threshold = clampFloat(req.query.threshold, 0, 1, 0.08);
+    res.json(
+      computeCalibration(deps.ledger.backtestSignals(), deps.ledger.allSettlements(), {
+        divergenceThreshold: threshold,
+      }),
+    );
   });
 
   app.get('/positions/open', (_req, res) => {

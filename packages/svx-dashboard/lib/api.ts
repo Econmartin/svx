@@ -202,6 +202,36 @@ export interface BacktestSummary {
   data_window: { firstTsIso: string | null; lastTsIso: string | null };
 }
 
+/** One quoted-price band of the SVI calibration report. */
+export interface CalibrationBucket {
+  lo: number;
+  hi: number;
+  n: number;
+  wins: number;
+  avg_quoted: number | null;
+  realized: number | null;
+  /** realized − quoted: positive = surface underconfident in this band. */
+  gap_pp: number | null;
+}
+
+export interface CalibrationGroup {
+  n: number;
+  wins: number;
+  avg_quoted: number | null;
+  realized: number | null;
+  gap_pp: number | null;
+  buckets: CalibrationBucket[];
+}
+
+/** Response of `GET /calibration` — quoted vs realized for Predict's favorite,
+ *  measured against recorded oracle settlements (deduped observations). */
+export interface CalibrationReport {
+  divergence_threshold: number;
+  all: CalibrationGroup;
+  divergent: CalibrationGroup;
+  data_window: { firstTsIso: string | null; lastTsIso: string | null };
+}
+
 export interface OracleSummary {
   oracleId: string;
   underlyingAsset: string;
@@ -464,6 +494,8 @@ export function createApi(base: string) {
       get<BacktestSummary>(
         `/backtest?threshold=${q.threshold ?? 0.08}&side=${q.side ?? 'favored'}&dedupe=${q.dedupe ?? true}&fee=${q.fee ?? 0.02}`,
       ),
+    calibration: (threshold = 0.08) =>
+      get<CalibrationReport>(`/calibration?threshold=${threshold}`),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
     surfaceHistory: (oracleId: string, limit = 200) =>
       get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),

@@ -4,7 +4,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { computeBacktest, type BacktestSignalRow } from '../src/ops/backtest.js';
+import {
+  computeBacktest,
+  computeCalibration,
+  type BacktestSignalRow,
+} from '../src/ops/backtest.js';
 
 const sig = (over: Partial<BacktestSignalRow>): BacktestSignalRow => ({
   tsMs: 1_700_000_000_000,
@@ -126,6 +130,38 @@ describe('computeBacktest', () => {
       ARGS,
     );
     expect(summary.would_fire).toBe(1);
+  });
+
+  it('calibration: favored side quoted vs realized, split by divergence', () => {
+    const signals = [
+      // favored=up @0.76, divergent (0.09) — up wins
+      sig({ oracleId: 'o1', spread: 0.09 }),
+      // favored=up @0.76, NOT divergent (0.03) — up loses
+      sig({ oracleId: 'o2', spread: 0.03 }),
+      // favored=down @0.80 (P(up)=0.2), divergent — down wins
+      sig({ oracleId: 'o3', predictProb: 0.2, spread: 0.12 }),
+      // duplicate of o1 (same oracle/strike/direction) — deduped away
+      sig({ oracleId: 'o1', tsMs: 1_700_000_001_000, spread: 0.2 }),
+      // unsettled — excluded from calibration but counted in data_window
+      sig({ oracleId: 'o4', tsMs: 1_700_000_002_000 }),
+    ];
+    const settlements = new Map([
+      ['o1', 61_000], // up won
+      ['o2', 59_000], // up lost
+      ['o3', 59_000], // down won
+    ]);
+    const r = computeCalibration(signals, settlements, { divergenceThreshold: 0.08 });
+    expect(r.all.n).toBe(3);
+    expect(r.all.wins).toBe(2);
+    expect(r.divergent.n).toBe(2);
+    expect(r.divergent.wins).toBe(2);
+    expect(r.divergent.realized).toBe(1);
+    // o1 (0.76) and o3 (0.80) land in the 0.7–0.8 and 0.8–0.9 buckets
+    const b78 = r.divergent.buckets.find((b) => b.lo === 0.7)!;
+    const b89 = r.divergent.buckets.find((b) => b.lo === 0.8)!;
+    expect(b78.n).toBe(1);
+    expect(b89.n).toBe(1);
+    expect(r.data_window.lastTsIso).toBe(new Date(1_700_000_002_000).toISOString());
   });
 
   it('handles large signal arrays without stack overflow (data_window)', () => {

@@ -4,16 +4,19 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/cn';
 
+// Ordered as the demo flow: the brain → live signals/positions → real-money
+// strategy → post-mortems → the Predict-native finale. Matches the numbered
+// journey on the landing page and docs/demo-script.md.
 const NAV = [
   ['Overview', '/overview'],
+  ['Surface', '/surface'],
   ['Signals', '/signals'],
   ['Positions', '/positions'],
   ['Poly-arb', '/poly-arb'],
-  ['Divergence', '/divergence-mint'],
   ['IV-RV', '/vol-arb'],
   ['Margin-Lever', '/margin-lever'],
+  ['Divergence', '/divergence-mint'],
   ['Wallets', '/wallets'],
-  ['Surface', '/surface'],
   ['About', '/about'],
 ] as const;
 

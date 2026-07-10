@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback } from 'react';
 import { useApiClient, useNetwork } from '@/lib/network-context';
 import { usePolling } from '@/lib/usePolling';
-import { formatUsdc, formatPct } from '@/lib/api';
+import { formatUsdc, formatPct, type CalibrationReport } from '@/lib/api';
 import { Hero } from '@/components/landing/Hero';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +25,11 @@ export default function LandingPage() {
   const { network } = useNetwork();
   const fetchStatus = useCallback(() => client.status(), [client]);
   const { data: status } = usePolling(fetchStatus, 15_000);
+  const fetchCalibration = useCallback(
+    () => client.calibration(0.08).catch(() => null as CalibrationReport | null),
+    [client],
+  );
+  const { data: calibration } = usePolling(fetchCalibration, 60_000);
 
   const isMainnet = network === 'mainnet';
   const combinedPnl = isMainnet
@@ -97,21 +102,56 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section aria-label="Quick links" className="space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <DeepLinkCard
-            href="/overview"
-            icon={<ChartLineUp className="h-5 w-5 text-accent" />}
-            title="Live overview"
-            body="Cumulative PnL, open positions, health panel, recent signals — the operator's dashboard."
-          />
-          <DeepLinkCard
-            href="/about"
-            icon={<Cube className="h-5 w-5 text-accent" />}
-            title="How it works"
-            body="Full breakdown: SVI math, signal pipeline, risk gates, two-network architecture, judging-criteria mapping."
-          />
+      <section aria-label="The build, in order" className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-[20px] font-semibold tracking-tight flex items-center gap-2">
+            <ChartLineUp className="h-5 w-5 text-accent" />
+            The build, in order — and what each step proved
+          </h2>
+          <p className="text-muted text-sm max-w-3xl">
+            This is the demo path. Every claim below links to a live page where you can verify
+            it yourself; nothing is a slide.
+          </p>
         </div>
+
+        <ol className="space-y-3">
+          <JourneyStep
+            n={1}
+            href="/surface"
+            badge={{ label: 'LIVE', variant: 'live' }}
+            title="Build the pricing brain"
+            body="Back-solve Predict's implied vol from the on-chain SVI surface, reprice every strike at any expiry, and run an arbitrage-free checker (butterfly violations) on the live surface. The /surface page streams it in real time."
+          />
+          <JourneyStep
+            n={2}
+            href="/poly-arb"
+            badge={{ label: 'LIVE · REAL MONEY', variant: 'warn' }}
+            title="Trade the surface against Polymarket — with real money"
+            body="When Predict and Polymarket disagree, buy the cheap side on the Polygon-mainnet CLOB. Real fills, UMA settlement detection, on-chain auto-redeem, and a wallet-vs-ledger reconciliation invariant that pauses trading on unexplained cent-level drift."
+          />
+          <JourneyStep
+            n={3}
+            href="/vol-arb"
+            badge={{ label: 'CUT — POST-MORTEM', variant: 'outline' }}
+            title="Kill what real money disproved"
+            body="The IV−RV perp strategy paid $29.12 in fees for −$1.80 of direction PnL over 5,219 fills (a perp has no vega) — reconciled to the cent and hard-disabled in code. The delta hedge and the margin-lever signal got the same treatment: measured, documented, switched off. The post-mortems live on their pages."
+          />
+          <JourneyStep
+            n={4}
+            href="/divergence-mint"
+            badge={{ label: 'THE FINDING', variant: 'outline' }}
+            title="Measure the SVI feeder itself"
+            body="The brief calls this bot 'a live stress test of the SVI feeder' — so we ran the test. Against every recorded oracle settlement, Predict's favorite is well-calibrated above 90¢ but systematically UNDERCONFIDENT below it — and the gap concentrates exactly where Polymarket disagrees:"
+            extra={<CalibrationExhibit report={calibration ?? null} />}
+          />
+          <JourneyStep
+            n={5}
+            href="/divergence-mint"
+            badge={{ label: 'LIVE ON TESTNET · MAINNET-DAY-ONE', variant: 'live' }}
+            title="Ship the strategy that finding implies"
+            body="Divergence-mint: when the venues disagree by ≥8pp, mint Predict's favorite via predict::mint and redeem permissionlessly at settlement. 94% win rate / +11.9% ROI on May data, 93.5% / +11.5% on July data — two disjoint windows, reproducible from this bot's own ledger via GET /backtest. Live with dUSDC on testnet now; Predict Sui-mainnet launch day is an address swap and one config flip."
+          />
+        </ol>
       </section>
 
       <section
@@ -245,35 +285,113 @@ function Pillar({
   );
 }
 
-function DeepLinkCard({
+function JourneyStep({
+  n,
   href,
-  icon,
+  badge,
   title,
   body,
+  extra,
 }: {
+  n: number;
   href: string;
-  icon: React.ReactNode;
+  badge: { label: string; variant: 'live' | 'warn' | 'outline' };
   title: string;
   body: string;
+  extra?: React.ReactNode;
 }) {
   return (
-    <Link
-      href={href}
-      className="group block rounded-xl border border-border bg-surface/40 hover:bg-surface/70 hover:border-border-strong p-5 transition-colors no-underline"
-    >
-      <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 mt-0.5">{icon}</div>
-        <div className="flex-1 space-y-1">
-          <div className="flex items-center gap-2">
-            <h3 className="text-[15px] font-semibold tracking-tight text-fg">
-              {title}
-            </h3>
-            <ArrowRight className="h-4 w-4 text-muted group-hover:text-accent group-hover:translate-x-0.5 transition-transform" />
+    <li className="rounded-xl border border-border bg-surface/40 p-5">
+      <div className="flex items-start gap-4">
+        <span
+          aria-hidden
+          className="flex-shrink-0 w-7 h-7 rounded-full bg-surface-elevated text-accent text-sm font-mono flex items-center justify-center mt-0.5"
+        >
+          {n}
+        </span>
+        <div className="flex-1 min-w-0 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={href}
+              className="group inline-flex items-center gap-1.5 no-underline"
+            >
+              <h3 className="text-[15px] font-semibold tracking-tight text-fg group-hover:text-accent transition-colors">
+                {title}
+              </h3>
+              <ArrowRight className="h-4 w-4 text-muted group-hover:text-accent group-hover:translate-x-0.5 transition-transform" />
+            </Link>
+            <Badge variant={badge.variant} className="text-[10px]">
+              {badge.label}
+            </Badge>
           </div>
-          <p className="text-sm text-muted leading-relaxed">{body}</p>
+          <p className="text-sm text-muted leading-relaxed max-w-3xl">{body}</p>
+          {extra}
         </div>
       </div>
-    </Link>
+    </li>
+  );
+}
+
+/**
+ * Live quoted-vs-realized table for Predict's favorite — recomputed by the
+ * bot from its own ledger on every load (GET /calibration). Renders nothing
+ * until the endpoint responds so the landing page never blocks on it.
+ */
+function CalibrationExhibit({ report }: { report: CalibrationReport | null }) {
+  if (!report || report.all.n === 0) return null;
+  const rows = report.all.buckets.filter((b) => b.n > 0);
+  const div = report.divergent;
+  return (
+    <div className="mt-2 space-y-2">
+      <div className="overflow-x-auto">
+        <table className="text-xs font-mono tabular-nums border-separate border-spacing-x-4 border-spacing-y-0.5">
+          <thead>
+            <tr className="text-muted uppercase tracking-wider text-[10px]">
+              <th className="text-left font-medium">Quoted band</th>
+              <th className="text-right font-medium">n</th>
+              <th className="text-right font-medium">Avg quoted</th>
+              <th className="text-right font-medium">Realized</th>
+              <th className="text-right font-medium">Gap</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((b) => (
+              <tr key={b.lo}>
+                <td>{Math.round(b.lo * 100)}–{Math.round(b.hi * 100)}¢</td>
+                <td className="text-right">{b.n}</td>
+                <td className="text-right">{b.avg_quoted != null ? `${(b.avg_quoted * 100).toFixed(1)}¢` : '—'}</td>
+                <td className="text-right">{b.realized != null ? `${(b.realized * 100).toFixed(1)}%` : '—'}</td>
+                <td
+                  className={`text-right ${
+                    b.gap_pp != null && b.gap_pp > 0.02
+                      ? 'text-win'
+                      : b.gap_pp != null && b.gap_pp < -0.02
+                        ? 'text-loss'
+                        : 'text-muted'
+                  }`}
+                >
+                  {b.gap_pp != null
+                    ? `${b.gap_pp >= 0 ? '+' : ''}${(b.gap_pp * 100).toFixed(1)}pp`
+                    : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-muted leading-relaxed max-w-3xl">
+        {div.n > 0 && div.avg_quoted != null && div.realized != null && (
+          <>
+            At ≥{Math.round(report.divergence_threshold * 100)}pp divergence from Polymarket the
+            gap widens: quoted {(div.avg_quoted * 100).toFixed(0)}¢ avg, realized{' '}
+            {(div.realized * 100).toFixed(0)}% ({div.wins}/{div.n}).{' '}
+          </>
+        )}
+        {report.all.n.toLocaleString()} deduped settled observations,{' '}
+        {report.data_window.firstTsIso?.slice(0, 10)} → {report.data_window.lastTsIso?.slice(0, 10)}.
+        Verify: <code className="code">GET /calibration</code> on either bot.
+      </p>
+    </div>
   );
 }
 

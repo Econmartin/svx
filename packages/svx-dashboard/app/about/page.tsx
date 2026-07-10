@@ -14,10 +14,14 @@ export default function AboutPage() {
         </div>
         <p className="text-muted-strong text-[14.5px] leading-relaxed">
           SVX is a fully-automated cross-venue trading bot for the DeepBook
-          Predict track. Two live strategies share one risk stack:{' '}
-          <strong>poly-arb</strong> captures pricing disagreements between
-          Predict's continuous SVI surface and Polymarket's discrete-strike
-          order book, and <strong>expiry-convergence</strong> buys the
+          Predict track. Three live strategies share one risk stack:{' '}
+          <strong>divergence-mint</strong> mints Predict's favorite on-chain
+          when the venues disagree by ≥8pp (the Predict-native flagship — live
+          with dUSDC on testnet, validated at 94% win rate across two disjoint
+          data windows), <strong>poly-arb</strong> captures pricing
+          disagreements between Predict's continuous SVI surface and
+          Polymarket's discrete-strike order book with real money on Polygon
+          mainnet, and <strong>expiry-convergence</strong> buys the
           deep-in-the-money side of BTC dailies in their final hour when
           realized vol says the strike is out of reach. Positions are small
           naked binaries bounded by hard per-trade clips — the earlier
@@ -26,6 +30,62 @@ export default function AboutPage() {
           live realized-vol feed.
         </p>
       </header>
+
+      <Card className="border-accent/40">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Trophy className="h-4 w-4 text-accent" /> Track minimum requirements — with evidence
+          </CardTitle>
+          <p className="text-xs text-muted mt-0.5">
+            Each requirement from the brief, and where to verify it yourself in under a minute.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 text-sm">
+            <Requirement
+              req="Integrate the DeepBook Predict contract on testnet"
+              evidence={
+                <>
+                  The testnet bot mints live positions via{' '}
+                  <code className="code">predict::mint</code> and claims payouts via{' '}
+                  <code className="code">predict::redeem_permissionless</code> — every trade row
+                  on <a className="underline decoration-border hover:text-accent" href="/divergence-mint">/divergence-mint</a> and{' '}
+                  <a className="underline decoration-border hover:text-accent" href="/positions">/positions</a>{' '}
+                  carries its Sui tx digest. The pricing brain reads the on-chain{' '}
+                  <code className="code">OracleSVI</code> surface continuously (
+                  <a className="underline decoration-border hover:text-accent" href="/surface">/surface</a>).
+                </>
+              }
+            />
+            <Requirement
+              req="Work end to end — the entire flow will be tested"
+              evidence={
+                <>
+                  Signal → risk gates → on-chain mint → settlement detection → permissionless
+                  redeem, running unattended on a 15s loop. The same pipeline executes real money
+                  on Polymarket (Polygon mainnet) with UMA settlement + CTF auto-redeem, and a
+                  wallet-vs-ledger reconciliation invariant pauses trading on unexplained drift.
+                  Watch it live on <a className="underline decoration-border hover:text-accent" href="/overview">/overview</a>.
+                </>
+              }
+            />
+            <Requirement
+              req="Proper simulation results for strategy claims"
+              evidence={
+                <>
+                  Every recorded signal is replayable server-side against recorded settlements:{' '}
+                  <code className="code">GET /backtest?side=favored&dedupe=true&fee=0.02</code>{' '}
+                  on either bot recomputes the divergence-mint validation from the deployed
+                  ledger on demand, and <code className="code">GET /calibration</code> publishes
+                  the SVI feeder's quoted-vs-realized calibration — the "live stress test of the
+                  SVI feeder" the brief asks for. Method + caveats:{' '}
+                  <code className="code">docs/backtest-report.md</code>.
+                </>
+              }
+            />
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Stacked 3-card list. Earlier we tried an asymmetric hero-vs-stack
           grid to highlight Predict as the pricing brain, but at mid-width
@@ -678,6 +738,20 @@ export default function AboutPage() {
           DeepBook Predict docs
         </a>
       </footer>
+    </div>
+  );
+}
+
+function Requirement({ req, evidence }: { req: string; evidence: React.ReactNode }) {
+  return (
+    <div className="rounded border border-border bg-surface-elevated/30 p-3">
+      <div className="flex items-start gap-2">
+        <span aria-hidden className="text-accent font-mono text-xs mt-0.5">✓</span>
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-fg">{req}</div>
+          <p className="text-muted text-[13px] leading-relaxed mt-1">{evidence}</p>
+        </div>
+      </div>
     </div>
   );
 }

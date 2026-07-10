@@ -40,6 +40,10 @@ interface Args {
   /** Cost markup fraction to approximate the Predict protocol fee
    *  (UP + DOWN > 1). E.g. 0.02 = pay 2% over the quoted probability. */
   fee: number;
+  /** Exclusive upper bound on |spread| — isolate a band (harvest: 0.08). */
+  maxThreshold?: number;
+  /** Refuse entries costing more than this pre-fee (harvest: 0.9). */
+  maxCost?: number;
 }
 
 function parseArgs(): Args {
@@ -66,6 +70,8 @@ function parseArgs(): Args {
       args.side = s;
     } else if (a === '--dedupe') args.dedupe = true;
     else if (a === '--fee') args.fee = Number(process.argv[++i]);
+    else if (a === '--max-threshold') args.maxThreshold = Number(process.argv[++i]);
+    else if (a === '--max-cost') args.maxCost = Number(process.argv[++i]);
   }
   return args;
 }
@@ -137,6 +143,8 @@ async function main(): Promise<void> {
     settlements,
     {
       threshold: args.threshold,
+      maxThreshold: args.maxThreshold,
+      maxCostPrice: args.maxCost,
       side: args.side,
       dedupe: args.dedupe,
       fee: args.fee,

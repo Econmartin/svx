@@ -35,6 +35,12 @@ export type BacktestSide = 'predict' | 'flip' | 'favored';
 export interface BacktestArgs {
   /** Min |spread| for a signal to fire. */
   threshold: number;
+  /** EXCLUSIVE upper bound on |spread| — lets a band be tested in isolation
+   *  (e.g. the calibration-harvest band [0, 0.08)). Omit for no bound. */
+  maxThreshold?: number;
+  /** Refuse entries whose cost price exceeds this (pre-fee). Mirrors the
+   *  live strategies' price caps (harvest: 0.90). Omit for no cap. */
+  maxCostPrice?: number;
   /** Which side of the divergence to bet — see module doc. */
   side: BacktestSide;
   /** One bet per (oracle, strike, direction) — first observation only.
@@ -90,7 +96,23 @@ export function computeBacktest(
   settlements: Map<string, number>,
   args: BacktestArgs,
 ): { summary: BacktestSummary; trades: BacktestTrade[] } {
-  let wouldFire = signals.filter((s) => s.spread >= args.threshold);
+  const maxThreshold = args.maxThreshold ?? Infinity;
+  const maxCostPrice = args.maxCostPrice ?? Infinity;
+  let wouldFire = signals.filter(
+    (s) => s.spread >= args.threshold && s.spread < maxThreshold,
+  );
+  if (isFinite(maxCostPrice)) {
+    wouldFire = wouldFire.filter((s) => {
+      const betDirection: 'up' | 'down' =
+        args.side === 'favored'
+          ? s.predictProb >= 0.5 ? 'up' : 'down'
+          : args.side === 'flip'
+            ? s.predictDirection === 'up' ? 'down' : 'up'
+            : s.predictDirection;
+      const raw = betDirection === 'up' ? s.predictProb : 1 - s.predictProb;
+      return raw <= maxCostPrice;
+    });
+  }
 
   if (args.dedupe) {
     const seen = new Set<string>();

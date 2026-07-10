@@ -41,6 +41,25 @@ export interface DivergenceMintCfg {
   divergenceMintDailyLossLimitDusdc: number;
 }
 
+/**
+ * Venue-agnostic gate set for a favored-side mint. Both strategies built on
+ * the calibration finding (divergence-mint and calibration-harvest) share
+ * this shape — they differ only in the divergence band they claim:
+ * divergence-mint takes ≥ threshold, harvest takes [0, threshold). The bands
+ * are DISJOINT by construction so the two strategies can never double-bet
+ * the same signal on the same tick; cross-strategy dedupe on (oracle,
+ * strike) covers drift across ticks.
+ */
+export interface FavoredMintGates {
+  /** Inclusive lower bound on divergence. */
+  minDivergence: number;
+  /** Exclusive upper bound on divergence (Infinity = no upper bound). */
+  maxDivergenceExclusive: number;
+  maxCostPrice: number;
+  maxOpen: number;
+  dailyLossLimitDusdc: number;
+}
+
 export interface DivergenceMintDecision {
   enter: boolean;
   /** The favored side — the direction Predict prices above 50¢. */
@@ -51,27 +70,35 @@ export interface DivergenceMintDecision {
   reason: string;
 }
 
-/**
- * Core decision. `divergence` is the observed |Predict − Poly| spread the
- * signal stream records (same quantity the backtest fires on, so live
- * behavior and backtest stay comparable). All rejections carry a reason.
- */
-export function decideDivergenceMint(input: {
+export interface FavoredMintInput {
   /** P(up) per Predict's SVI surface. */
   predictUp: number;
   /** Observed cross-venue divergence in probability points. */
   divergence: number;
   expiryMs: number;
   nowMs: number;
-  /** An open divergence-mint trade already exists on this (oracle, strike). */
+  /** An open favored-side trade already exists on this (oracle, strike) —
+   *  checked across BOTH favored-side strategies so divergence drift
+   *  between ticks can't stack a mint and a harvest on the same event. */
   hasOpenForSignal: boolean;
-  /** Current count of open divergence-mint positions. */
+  /** Current count of open positions for THIS strategy. */
   openStrategyCount: number;
-  /** Realized divergence-mint PnL over the trailing 24h (dUSDC, ≤0 when losing). */
+  /** Realized strategy PnL over the trailing 24h (dUSDC, ≤0 when losing). */
   dailyStrategyPnlUsdc: number;
-  cfg: DivergenceMintCfg;
-}): DivergenceMintDecision {
-  const { predictUp, divergence, cfg } = input;
+}
+
+/**
+ * Core decision, shared by divergence-mint and calibration-harvest.
+ * `divergence` is the observed |Predict − Poly| spread the signal stream
+ * records (same quantity the backtest fires on, so live behavior and
+ * backtest stay comparable). All rejections carry a reason.
+ */
+export function decideFavoredMint(
+  input: FavoredMintInput,
+  gates: FavoredMintGates,
+  tag: string,
+): DivergenceMintDecision {
+  const { predictUp, divergence } = input;
   const direction: 'up' | 'down' = predictUp >= 0.5 ? 'up' : 'down';
   const costPrice = direction === 'up' ? predictUp : 1 - predictUp;
   const base = { direction, costPrice, divergence };
@@ -82,27 +109,34 @@ export function decideDivergenceMint(input: {
   if (input.expiryMs <= input.nowMs) {
     return { ...base, enter: false, reason: 'expired' };
   }
-  if (divergence < cfg.divergenceMintThreshold) {
+  if (divergence < gates.minDivergence) {
     return {
       ...base,
       enter: false,
-      reason: `sub_threshold:${divergence.toFixed(3)}<${cfg.divergenceMintThreshold}`,
+      reason: `sub_threshold:${divergence.toFixed(3)}<${gates.minDivergence}`,
     };
   }
-  if (costPrice > cfg.divergenceMintMaxCostPrice) {
+  if (divergence >= gates.maxDivergenceExclusive) {
+    return {
+      ...base,
+      enter: false,
+      reason: `above_band:${divergence.toFixed(3)}>=${gates.maxDivergenceExclusive}`,
+    };
+  }
+  if (costPrice > gates.maxCostPrice) {
     return { ...base, enter: false, reason: `too_rich:${costPrice.toFixed(3)}` };
   }
   if (input.hasOpenForSignal) {
     return { ...base, enter: false, reason: 'already_open_for_signal' };
   }
-  if (input.openStrategyCount >= cfg.divergenceMintMaxOpen) {
+  if (input.openStrategyCount >= gates.maxOpen) {
     return {
       ...base,
       enter: false,
-      reason: `max_open:${input.openStrategyCount}>=${cfg.divergenceMintMaxOpen}`,
+      reason: `max_open:${input.openStrategyCount}>=${gates.maxOpen}`,
     };
   }
-  if (input.dailyStrategyPnlUsdc <= -cfg.divergenceMintDailyLossLimitDusdc) {
+  if (input.dailyStrategyPnlUsdc <= -gates.dailyLossLimitDusdc) {
     return {
       ...base,
       enter: false,
@@ -112,6 +146,24 @@ export function decideDivergenceMint(input: {
   return {
     ...base,
     enter: true,
-    reason: `divergence_mint:${(divergence * 100).toFixed(1)}pp_fav_${direction}@${costPrice.toFixed(2)}`,
+    reason: `${tag}:${(divergence * 100).toFixed(1)}pp_fav_${direction}@${costPrice.toFixed(2)}`,
   };
+}
+
+/** Divergence-mint: the ≥ threshold band of the favored-side edge. */
+export function decideDivergenceMint(
+  input: FavoredMintInput & { cfg: DivergenceMintCfg },
+): DivergenceMintDecision {
+  const { cfg, ...rest } = input;
+  return decideFavoredMint(
+    rest,
+    {
+      minDivergence: cfg.divergenceMintThreshold,
+      maxDivergenceExclusive: Infinity,
+      maxCostPrice: cfg.divergenceMintMaxCostPrice,
+      maxOpen: cfg.divergenceMintMaxOpen,
+      dailyLossLimitDusdc: cfg.divergenceMintDailyLossLimitDusdc,
+    },
+    'divergence_mint',
+  );
 }

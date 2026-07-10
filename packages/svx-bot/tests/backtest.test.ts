@@ -132,6 +132,22 @@ describe('computeBacktest', () => {
     expect(summary.would_fire).toBe(1);
   });
 
+  it('maxThreshold and maxCostPrice isolate the harvest band', () => {
+    const signals = [
+      sig({ oracleId: 'o1', spread: 0.03 }), // in band, favored 0.76 ≤ 0.9 → fires
+      sig({ oracleId: 'o2', spread: 0.09 }), // above band — excluded
+      sig({ oracleId: 'o3', spread: 0.03, predictProb: 0.93 }), // too rich — excluded
+    ];
+    const { summary } = computeBacktest(signals, new Map(), {
+      ...ARGS,
+      threshold: 0,
+      maxThreshold: 0.08,
+      maxCostPrice: 0.9,
+      side: 'favored' as const,
+    });
+    expect(summary.would_fire).toBe(1);
+  });
+
   it('calibration: favored side quoted vs realized, split by divergence', () => {
     const signals = [
       // favored=up @0.76, divergent (0.09) — up wins

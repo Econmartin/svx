@@ -83,6 +83,35 @@ Polymarket in July). The favorite is the same economic bet in both regimes.
 - **Both windows are BTC-only, sub-hour oracles.** No claim is made about
   other assets or tenors.
 
+## Addendum 2026-07-11 — the calibration-harvest band
+
+The `/calibration` report shows the underconfidence is NOT confined to
+≥8pp divergences — every quoted band below ~90¢ realizes above its quote.
+That implies a second, complementary strategy: buy every Predict favorite
+below 90¢ whose divergence is *below* the mint threshold ("calibration
+harvest" — the [0, 8pp) band the mint refuses, at a tighter price cap).
+
+| Band | Window | n (settled, deduped) | Win rate | Avg cost | ROI after fee |
+|---|---|---|---|---|---|
+| Harvest [0, 8pp), cap 90¢ | May 2026 | 64 | **90.6%** | 79¢ | **+14.2%** |
+| Harvest [0, 8pp), cap 90¢ | July 2026 (gate-free proxy¹) | 48 | 97.9% | 89¢ | +10.5% |
+
+¹ July run pre-dates the band bounds in the deployed API (`threshold=0`,
+no `maxThreshold`/`maxCost`) so it includes the mint band and >90¢ rows;
+re-run the exact band once redeployed:
+
+```bash
+curl "https://svx-mainnet.econmartin.xyz/backtest?threshold=0&maxThreshold=0.08&maxCost=0.9&side=favored&dedupe=true&fee=0.02"
+```
+
+The two bands are disjoint by construction (`divergence-mint` ≥ 8pp,
+`harvest` < 8pp) and share a one-position-per-(oracle, strike) dedupe, so
+they can never double-bet one settlement event. Caveat inherited from the
+signal stream: rows only exist where a Polymarket comparison existed, so
+the harvest backtest is conditioned on "Polymarket listed a comparable
+strike" — a fully Poly-free harvest needs the unmatched-oracle logging
+extension before its numbers are unconditioned.
+
 ## Implementation
 
 `packages/svx-bot/src/strategy/divergence-mint.ts` (pure decision module,

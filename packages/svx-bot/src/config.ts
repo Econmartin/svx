@@ -158,6 +158,12 @@ const Schema = z.object({
   divergenceMintNotionalDusdc: z.number().positive().default(5),
   divergenceMintMaxOpen: z.number().int().positive().default(10),
   divergenceMintDailyLossLimitDusdc: z.number().positive().default(20),
+  // ── Calibration-harvest strategy (complement band; see strategy/divergence-mint.ts) ──
+  calibrationHarvestEnabled: z.boolean().default(true),
+  calibrationHarvestMaxCostPrice: z.number().min(0.5).max(1).default(0.9),
+  calibrationHarvestNotionalDusdc: z.number().positive().default(5),
+  calibrationHarvestMaxOpen: z.number().int().positive().default(10),
+  calibrationHarvestDailyLossLimitDusdc: z.number().positive().default(20),
   /** Redeem retry backoff + attempt cap. */
   polyRedeemRetryGapMs: z.number().int().positive().default(30 * 60_000),
   polyRedeemMaxAttempts: z.number().int().positive().default(5),
@@ -394,6 +400,14 @@ export function loadConfig(): SvxConfig {
     divergenceMintNotionalDusdc: TUNABLES.divergenceMintNotionalDusdc,
     divergenceMintMaxOpen: TUNABLES.divergenceMintMaxOpen,
     divergenceMintDailyLossLimitDusdc: TUNABLES.divergenceMintDailyLossLimitDusdc,
+    calibrationHarvestEnabled: parseBool(
+      process.env.CALIBRATION_HARVEST_ENABLED,
+      TUNABLES.calibrationHarvestEnabled,
+    ),
+    calibrationHarvestMaxCostPrice: TUNABLES.calibrationHarvestMaxCostPrice,
+    calibrationHarvestNotionalDusdc: TUNABLES.calibrationHarvestNotionalDusdc,
+    calibrationHarvestMaxOpen: TUNABLES.calibrationHarvestMaxOpen,
+    calibrationHarvestDailyLossLimitDusdc: TUNABLES.calibrationHarvestDailyLossLimitDusdc,
     convergenceEnabled: TUNABLES.convergenceEnabled,
     convergenceMaxMinutes: TUNABLES.convergenceMaxMinutes,
     convergenceMinMinutes: TUNABLES.convergenceMinMinutes,

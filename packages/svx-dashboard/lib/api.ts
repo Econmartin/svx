@@ -171,7 +171,7 @@ export interface TradeRecord {
    *  Polymarket certainty-discount buyer), or 'divergence_mint' (Predict
    *  favored-side mint at ≥8pp divergence). Defaults to 'poly_arb' on rows
    *  that pre-date the strategy tag (May 2026). */
-  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint';
+  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest';
   /** High-water mark of the poly leg's P&L fraction (trailing ratchet). */
   polyHighWaterFrac?: number;
 }
@@ -490,9 +490,20 @@ export function createApi(base: string) {
     volArbState: () => get<VolArbStateResponse>('/strategy/vol-arb/state'),
     oracles: () => get<OracleSummary[]>('/oracles'),
     marginLeverState: () => get<MarginLeverStateResponse>('/strategy/margin-lever/state'),
-    backtest: (q: { threshold?: number; side?: 'predict' | 'flip' | 'favored'; dedupe?: boolean; fee?: number } = {}) =>
+    backtest: (
+      q: {
+        threshold?: number;
+        maxThreshold?: number;
+        maxCost?: number;
+        side?: 'predict' | 'flip' | 'favored';
+        dedupe?: boolean;
+        fee?: number;
+      } = {},
+    ) =>
       get<BacktestSummary>(
-        `/backtest?threshold=${q.threshold ?? 0.08}&side=${q.side ?? 'favored'}&dedupe=${q.dedupe ?? true}&fee=${q.fee ?? 0.02}`,
+        `/backtest?threshold=${q.threshold ?? 0.08}&side=${q.side ?? 'favored'}&dedupe=${q.dedupe ?? true}&fee=${q.fee ?? 0.02}` +
+          (q.maxThreshold != null ? `&maxThreshold=${q.maxThreshold}` : '') +
+          (q.maxCost != null ? `&maxCost=${q.maxCost}` : ''),
       ),
     calibration: (threshold = 0.08) =>
       get<CalibrationReport>(`/calibration?threshold=${threshold}`),

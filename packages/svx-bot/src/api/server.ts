@@ -371,6 +371,12 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
    */
   app.get('/backtest', (req, res) => {
     const threshold = clampFloat(req.query.threshold, 0, 1, 0.08);
+    // Band bounds — maxThreshold/maxCost let a strategy's exact band be
+    // replayed (calibration harvest: threshold=0&maxThreshold=0.08&maxCost=0.9).
+    const maxThreshold =
+      req.query.maxThreshold != null ? clampFloat(req.query.maxThreshold, 0, 1, 1) : undefined;
+    const maxCostPrice =
+      req.query.maxCost != null ? clampFloat(req.query.maxCost, 0, 1, 1) : undefined;
     const fee = clampFloat(req.query.fee, 0, 0.2, 0);
     const side: BacktestSide =
       req.query.side === 'flip' || req.query.side === 'favored'
@@ -382,7 +388,7 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     const { summary } = computeBacktest(
       deps.ledger.backtestSignals(),
       deps.ledger.allSettlements(),
-      { threshold, side, dedupe, fee, notional: 1 },
+      { threshold, maxThreshold, maxCostPrice, side, dedupe, fee, notional: 1 },
     );
     res.json(summary);
   });

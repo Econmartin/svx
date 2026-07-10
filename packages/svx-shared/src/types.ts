@@ -215,7 +215,7 @@ export interface TradeRecord {
   /** Which strategy opened this trade. Defaults to 'poly_arb' (the original
    *  Predict×Polymarket arb). 'vol_arb' is the standalone HL vol strategy;
    *  'convergence' is the near-expiry Polymarket certainty-discount buyer. */
-  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint';
+  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest';
   /** Highest mark-to-market P&L fraction seen on the poly leg — drives the
    *  trailing ratchet exit (lock +20%, +40%, ... as the trade runs). */
   polyHighWaterFrac?: number;

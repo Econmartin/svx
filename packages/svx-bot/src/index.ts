@@ -73,7 +73,7 @@ import {
   type MarginLeverState,
 } from './strategy/margin-lever.js';
 import { decideConvergence, sigmaDistance } from './strategy/convergence.js';
-import { decideDivergenceMint } from './strategy/divergence-mint.js';
+import { decideFavoredMint, type FavoredMintGates } from './strategy/divergence-mint.js';
 import { startApiServer } from './api/server.js';
 import { log } from './util/log.js';
 
@@ -1529,35 +1529,68 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
       });
     }
 
-    // === Divergence-mint (favored side) — independent of the arb path ===
-    // Bet the side Predict prices above 50¢ when the venues disagree by
-    // ≥ divergenceMintThreshold. Predict-side only: no Poly leg, no hedge.
-    // Data-integrity filters (stale SVI, expiry mismatch) still gate entry;
-    // poly-book-quality reasons don't — the mint never touches the book.
-    // (Slightly tighter than the backtest population, which had no filters.)
+    // === Favored-side mints — independent of the arb path ===
+    // Bet the side Predict prices above 50¢. Two disjoint bands share the
+    // calibration edge (the surface is underconfident below ~90¢):
+    //   divergence-mint:     divergence ≥ divergenceMintThreshold
+    //   calibration-harvest: divergence ∈ [0, threshold), tighter 90¢ cap
+    // Predict-side only: no Poly leg, no hedge. Data-integrity filters
+    // (stale SVI, expiry mismatch) still gate entry; poly-book-quality
+    // reasons don't — the mint never touches the book. (Slightly tighter
+    // than the backtest population, which had no filters.)
     if (
-      cfg.divergenceMintEnabled &&
-      (filterReason === null ||
-        filterReason === 'poly_one_sided' ||
-        filterReason === 'poly_wide_spread' ||
-        filterReason === 'poly_low_volume')
+      filterReason === null ||
+      filterReason === 'poly_one_sided' ||
+      filterReason === 'poly_wide_spread' ||
+      filterReason === 'poly_low_volume'
     ) {
-      try {
-        await maybeDivergenceMint({
-          ledger,
-          cfg,
-          live,
-          state,
-          sigId,
-          oracleSnap,
-          polySnap,
-          predictUp: spread.predictUp,
-          polyYesAsk: spread.polyYesAsk,
-          predictIv: spread.predictIv,
-          divergence: observedSpread,
-        });
-      } catch (e) {
-        log.warn('svx.divergence.error', { err: errMsg(e), stack: errStack(e) });
+      const isMintBand = observedSpread >= cfg.divergenceMintThreshold;
+      const params = isMintBand
+        ? cfg.divergenceMintEnabled
+          ? {
+              strategy: 'divergence_mint' as const,
+              notionalDusdc: cfg.divergenceMintNotionalDusdc,
+              gates: {
+                minDivergence: cfg.divergenceMintThreshold,
+                maxDivergenceExclusive: Infinity,
+                maxCostPrice: cfg.divergenceMintMaxCostPrice,
+                maxOpen: cfg.divergenceMintMaxOpen,
+                dailyLossLimitDusdc: cfg.divergenceMintDailyLossLimitDusdc,
+              },
+            }
+          : null
+        : cfg.calibrationHarvestEnabled
+          ? {
+              strategy: 'calibration_harvest' as const,
+              notionalDusdc: cfg.calibrationHarvestNotionalDusdc,
+              gates: {
+                minDivergence: 0,
+                maxDivergenceExclusive: cfg.divergenceMintThreshold,
+                maxCostPrice: cfg.calibrationHarvestMaxCostPrice,
+                maxOpen: cfg.calibrationHarvestMaxOpen,
+                dailyLossLimitDusdc: cfg.calibrationHarvestDailyLossLimitDusdc,
+              },
+            }
+          : null;
+      if (params) {
+        try {
+          await maybeFavoredMint({
+            ledger,
+            cfg,
+            live,
+            state,
+            sigId,
+            oracleSnap,
+            polySnap,
+            predictUp: spread.predictUp,
+            polyYesAsk: spread.polyYesAsk,
+            predictIv: spread.predictIv,
+            divergence: observedSpread,
+            ...params,
+          });
+        } catch (e) {
+          log.warn('svx.divergence.error', { err: errMsg(e), stack: errStack(e) });
+        }
       }
     }
   }
@@ -2681,13 +2714,14 @@ async function runVolArbStep(args: {
 }
 
 /**
- * Divergence-mint execution — bet the side Predict prices above 50¢ when the
- * venues disagree by ≥ divergenceMintThreshold. Predict-side only (no Poly
- * leg, no hedge); dedupe/caps/daily-loss live in decideDivergenceMint.
+ * Favored-side mint execution — bet the side Predict prices above 50¢.
+ * Shared by divergence-mint (divergence ≥ threshold) and calibration-harvest
+ * (the complement band, tighter price cap); the caller passes the band's
+ * gates + strategy tag. Predict-side only (no Poly leg, no hedge).
  * Settlement, PnL, and redeem ride the existing oracle-settlement machinery —
- * the trade row is a normal Predict trade tagged strategy='divergence_mint'.
+ * the trade row is a normal Predict trade tagged with the strategy.
  */
-async function maybeDivergenceMint(args: {
+async function maybeFavoredMint(args: {
   ledger: LedgerStore;
   cfg: SvxConfig;
   live?: LiveContext;
@@ -2699,42 +2733,57 @@ async function maybeDivergenceMint(args: {
   polyYesAsk: number;
   predictIv: number;
   divergence: number;
+  strategy: 'divergence_mint' | 'calibration_harvest';
+  notionalDusdc: number;
+  gates: FavoredMintGates;
 }): Promise<void> {
-  const { ledger, cfg, live, state, oracleSnap, polySnap } = args;
+  const { ledger, cfg, live, state, oracleSnap, polySnap, strategy, gates } = args;
   const nowMs = Date.now();
 
-  const decision = decideDivergenceMint({
-    predictUp: args.predictUp,
-    divergence: args.divergence,
-    expiryMs: oracleSnap.expiryMs,
-    nowMs,
-    hasOpenForSignal: ledger.hasOpenStrategyTradeForSignal(
+  // Cross-strategy dedupe: divergence can drift across the band boundary
+  // between ticks, so one (oracle, strike) must never hold BOTH a mint and
+  // a harvest — that would be double exposure to one settlement event.
+  const hasOpenForSignal =
+    ledger.hasOpenStrategyTradeForSignal(oracleSnap.oracleId, polySnap.strike, 'divergence_mint') ||
+    ledger.hasOpenStrategyTradeForSignal(
       oracleSnap.oracleId,
       polySnap.strike,
-      'divergence_mint',
-    ),
-    openStrategyCount: ledger.countOpenStrategyTrades('divergence_mint'),
-    dailyStrategyPnlUsdc: ledger.realizedStrategyPnlSince(
-      'divergence_mint',
-      nowMs - 24 * 3600_000,
-    ),
-    cfg,
-  });
+      'calibration_harvest',
+    );
+
+  const decision = decideFavoredMint(
+    {
+      predictUp: args.predictUp,
+      divergence: args.divergence,
+      expiryMs: oracleSnap.expiryMs,
+      nowMs,
+      hasOpenForSignal,
+      openStrategyCount: ledger.countOpenStrategyTrades(strategy),
+      dailyStrategyPnlUsdc: ledger.realizedStrategyPnlSince(strategy, nowMs - 24 * 3600_000),
+    },
+    gates,
+    strategy,
+  );
 
   if (!decision.enter) {
-    // Only surface skips that were live candidates (past the divergence
-    // gate) — sub-threshold skips are the boring 99% of the stream.
-    if (args.divergence >= cfg.divergenceMintThreshold) {
+    // Only surface skips rejected by risk gates (dedupe/caps/standdown) —
+    // band/threshold skips are the boring 99% of the stream.
+    if (
+      decision.reason !== 'bad_predict_prob' &&
+      !decision.reason.startsWith('sub_threshold') &&
+      !decision.reason.startsWith('above_band')
+    ) {
       log.debug('svx.divergence.skip', {
         oracle: oracleSnap.oracleId.slice(0, 10),
         strike: polySnap.strike,
+        strategy,
         reason: decision.reason,
       });
     }
     return;
   }
 
-  const quantityDusdc = cfg.divergenceMintNotionalDusdc;
+  const quantityDusdc = args.notionalDusdc;
   const costUsdc = quantityDusdc * decision.costPrice;
   let txDigest: string | undefined;
   let mode: 'paper' | 'live' = 'paper';
@@ -2799,12 +2848,13 @@ async function maybeDivergenceMint(args: {
     polyAskAtExec: args.polyYesAsk,
     predictIvAtExec: args.predictIv,
     edgeAtExec: args.divergence,
-    strategy: 'divergence_mint',
+    strategy,
   });
   if (mode === 'paper') {
     state.navUsdc -= costUsdc;
   }
   log.info(`svx.divergence.${mode}_executed`, {
+    strategy,
     oracleId: oracleSnap.oracleId,
     strike: polySnap.strike,
     dir: decision.direction,

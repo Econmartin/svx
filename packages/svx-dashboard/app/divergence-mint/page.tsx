@@ -39,23 +39,29 @@ interface PageData {
   open: TradeRecord[];
   closed: TradeRecord[];
   backtest: BacktestSummary | null;
+  harvestBacktest: BacktestSummary | null;
 }
 
-const isDivergence = (t: TradeRecord) => t.strategy === 'divergence_mint';
+const isDivergence = (t: TradeRecord) =>
+  t.strategy === 'divergence_mint' || t.strategy === 'calibration_harvest';
 
 export default function DivergenceMintPage() {
   const client = useApiClient();
   const { network } = useNetwork();
   const fetcher = useCallback(async (): Promise<PageData> => {
-    const [open, closed, backtest] = await Promise.all([
+    const [open, closed, backtest, harvestBacktest] = await Promise.all([
       client.positionsOpen(),
       client.positionsClosed(500),
       client.backtest({ threshold: 0.08, side: 'favored', dedupe: true, fee: 0.02 }).catch(() => null),
+      client
+        .backtest({ threshold: 0, maxThreshold: 0.08, maxCost: 0.9, side: 'favored', dedupe: true, fee: 0.02 })
+        .catch(() => null),
     ]);
     return {
       open: open.filter(isDivergence),
       closed: closed.filter(isDivergence),
       backtest,
+      harvestBacktest,
     };
   }, [client]);
   const { data, error } = usePolling(fetcher, 15_000);
@@ -106,14 +112,16 @@ export default function DivergenceMintPage() {
             {isMainnet ? 'paper until Predict Sui mainnet' : 'live · testnet dUSDC'}
           </Badge>
           <Badge variant="outline" className="text-[10px]">
-            one bet per oracle · 8pp gate
+            one bet per oracle · two bands
           </Badge>
         </div>
         <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
-          When Predict&apos;s SVI-implied probability and the Polymarket book disagree by ≥ 8pp on
-          the same (strike, expiry), mint the side <strong>Predict prices above 50¢</strong>. At
-          large divergences the favorite is directionally right but underconfident — quoted
-          ~74–84¢, it realizes 84–94%. Hold to settlement, redeem permissionlessly.
+          Mint the side <strong>Predict prices above 50¢</strong> — its favorite is measurably
+          underconfident below ~90¢ (see the calibration exhibit on the landing page). Two
+          disjoint bands share the edge: <strong>divergence-mint</strong> takes signals where
+          Polymarket disagrees by ≥ 8pp (95¢ cap), <strong>calibration-harvest</strong> takes
+          everything below 8pp at a tighter 90¢ cap. One position per (oracle, strike) across
+          both. Hold to settlement, redeem permissionlessly.
         </p>
       </header>
 
@@ -232,10 +240,25 @@ export default function DivergenceMintPage() {
                 Backtest endpoint unavailable on this bot version.
               </div>
             )}
+            {data.harvestBacktest && data.harvestBacktest.settled_trades > 0 && (
+              <p className="text-xs text-muted mt-3 leading-relaxed border-t border-border pt-3">
+                <strong className="text-fg">Harvest band</strong> (divergence &lt; 8pp, cap 90¢):{' '}
+                {data.harvestBacktest.settled_trades} settled,{' '}
+                {data.harvestBacktest.win_rate != null
+                  ? `${(data.harvestBacktest.win_rate * 100).toFixed(1)}% win`
+                  : '—'}
+                ,{' '}
+                {data.harvestBacktest.roi != null
+                  ? `${data.harvestBacktest.roi >= 0 ? '+' : ''}${(data.harvestBacktest.roi * 100).toFixed(1)}% ROI`
+                  : '—'}{' '}
+                — <code className="font-mono text-[10px]">&maxThreshold=0.08&maxCost=0.9</code>.
+              </p>
+            )}
             {bt && (
               <p className="text-xs text-muted mt-3 leading-relaxed">
-                Signal retention bounds the window (~12 days). The May-2026 archive window
-                (n=50, 94% win, +11.9% ROI) is documented with method + caveats in{' '}
+                Signal retention bounds the window (~12 days). The May-2026 archive windows
+                (mint band: n=50, 94% win, +11.9% ROI · harvest band: n=64, 90.6%, +14.2%) are
+                documented with method + caveats in{' '}
                 <code className="font-mono text-[10px]">docs/backtest-report.md</code>.
               </p>
             )}
@@ -372,6 +395,7 @@ function TradesTable({ trades, showPnl }: { trades: TradeRecord[]; showPnl: bool
           <TableHead>Time</TableHead>
           <TableHead>Strike</TableHead>
           <TableHead>Side</TableHead>
+          <TableHead>Band</TableHead>
           <TableHead>Favorite price</TableHead>
           <TableHead>Divergence</TableHead>
           <TableHead>Cost</TableHead>
@@ -396,6 +420,11 @@ function TradesTable({ trades, showPnl }: { trades: TradeRecord[]; showPnl: bool
             <TableCell>
               <Badge variant={t.direction === 'up' ? 'live' : 'warn'} className="text-[10px]">
                 {t.direction.toUpperCase()}
+              </Badge>
+            </TableCell>
+            <TableCell>
+              <Badge variant="outline" className="text-[10px]">
+                {t.strategy === 'calibration_harvest' ? 'harvest' : 'mint'}
               </Badge>
             </TableCell>
             <TableCell className="font-mono tabular-nums">

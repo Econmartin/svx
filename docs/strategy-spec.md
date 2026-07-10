@@ -11,6 +11,7 @@ strategy and the shared rails. Current portfolio:
 | Strategy | Status | One-line rationale |
 |---|---|---|
 | Divergence-mint | **LIVE** (testnet dUSDC; paper on mainnet) | Predict's favorite at ≥8pp divergence is underconfident (~74–84¢ quoted, 84–94% realized); two disjoint validation windows — see [backtest-report.md](backtest-report.md). Added 2026-07-10. |
+| Calibration-harvest | **LIVE** (testnet dUSDC; paper on mainnet) | The complement band: every Predict favorite <90¢ at divergence <8pp. May: n=64, 90.6% win, +14.2% ROI. Disjoint from the mint band by construction; shared per-(oracle,strike) dedupe. Added 2026-07-11. |
 | Poly-arb | **LIVE** | Entry math verified; gates raised to 8pp spread + 5% EV-after-ask; hedge removed (naked binaries, $4 clips). |
 | Expiry-convergence | **LIVE** | Late-certainty discount on BTC dailies; sigma gate runs on 2× trailing RV with strict universe filters. |
 | Vol-arb (IV−RV perps) | **CUT** | A perp has no vega. $29.12 fees vs −$1.80 direction PnL over 5,219 fills, reconciled to the cent. Hard-disabled in code. |

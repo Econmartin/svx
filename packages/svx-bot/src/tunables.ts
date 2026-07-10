@@ -372,6 +372,27 @@ export const TUNABLES = {
   divergenceMintDailyLossLimitDusdc: 20,
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Calibration-harvest strategy — the complement band of the favored-side
+  // edge. Divergence-mint takes signals at ≥ divergenceMintThreshold; the
+  // harvest takes [0, threshold): every OTHER Predict favorite below its
+  // (tighter) price cap. Bands are disjoint so the strategies never overlap.
+  // Validated on July data via GET /backtest?threshold=0&side=favored:
+  // 48 settled, 97.9% win, +10.5% ROI after 2% fee; the /calibration report
+  // shows why — the surface is underconfident everywhere below ~90¢.
+  // ─────────────────────────────────────────────────────────────────────────
+  /** Master switch. Env-overridable via CALIBRATION_HARVEST_ENABLED. */
+  calibrationHarvestEnabled: true,
+  /** Tighter price cap than the mint: above 90¢ the surface is measured
+   *  well-calibrated, so there's no edge to harvest. */
+  calibrationHarvestMaxCostPrice: 0.9,
+  /** Fixed dUSDC clip per trade. */
+  calibrationHarvestNotionalDusdc: 5,
+  /** Max simultaneous open harvest positions (distinct oracle/strike). */
+  calibrationHarvestMaxOpen: 10,
+  /** Stand down for the day at −this realized dUSDC over trailing 24h. */
+  calibrationHarvestDailyLossLimitDusdc: 20,
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Boot-time behaviour
   // ─────────────────────────────────────────────────────────────────────────
   /** When true, the bot resumes (clears the persisted pause flag) on every

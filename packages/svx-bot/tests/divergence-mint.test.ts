@@ -8,7 +8,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   decideDivergenceMint,
+  decideFavoredMint,
   type DivergenceMintCfg,
+  type FavoredMintGates,
 } from '../src/strategy/divergence-mint.js';
 
 const cfg: DivergenceMintCfg = {
@@ -87,5 +89,52 @@ describe('decideDivergenceMint', () => {
     expect(d.direction).toBe('up');
     expect(d.costPrice).toBeCloseTo(0.5, 10);
     expect(d.enter).toBe(true);
+  });
+});
+
+describe('calibration harvest (complement band)', () => {
+  const { cfg: _cfg, ...noCfg } = base;
+  const harvestGates: FavoredMintGates = {
+    minDivergence: 0,
+    maxDivergenceExclusive: 0.08, // = divergenceMintThreshold
+    maxCostPrice: 0.9,
+    maxOpen: 10,
+    dailyLossLimitDusdc: 20,
+  };
+
+  it('takes the sub-threshold band the mint refuses', () => {
+    const input = { ...noCfg, divergence: 0.03 };
+    const harvest = decideFavoredMint(input, harvestGates, 'calibration_harvest');
+    expect(harvest.enter).toBe(true);
+    expect(harvest.reason).toMatch(/^calibration_harvest/);
+    const mint = decideDivergenceMint({ ...input, cfg });
+    expect(mint.enter).toBe(false);
+  });
+
+  it('refuses the mint band — the bands are disjoint', () => {
+    const input = { ...noCfg, divergence: 0.09 };
+    const harvest = decideFavoredMint(input, harvestGates, 'calibration_harvest');
+    expect(harvest.enter).toBe(false);
+    expect(harvest.reason).toMatch(/^above_band/);
+    expect(decideDivergenceMint({ ...input, cfg }).enter).toBe(true);
+  });
+
+  it('every divergence value is claimed by exactly one band', () => {
+    for (const div of [0, 0.02, 0.0799, 0.08, 0.12, 0.5]) {
+      const input = { ...noCfg, divergence: div, predictUp: 0.75 };
+      const h = decideFavoredMint(input, harvestGates, 'calibration_harvest').enter;
+      const m = decideDivergenceMint({ ...input, cfg }).enter;
+      expect(h !== m).toBe(true); // XOR — never both, never neither
+    }
+  });
+
+  it('applies the tighter 90¢ cap', () => {
+    const d = decideFavoredMint(
+      { ...noCfg, divergence: 0.03, predictUp: 0.92 },
+      harvestGates,
+      'calibration_harvest',
+    );
+    expect(d.enter).toBe(false);
+    expect(d.reason).toMatch(/^too_rich/);
   });
 });

@@ -167,12 +167,39 @@ export interface TradeRecord {
   hlFundingPaidUsdc?: number;
   hlClosedAtMs?: number;
   /** Strategy that opened the trade. 'poly_arb' (original cross-venue),
-   *  'vol_arb' (standalone HL vol strategy), or 'convergence' (near-expiry
-   *  Polymarket certainty-discount buyer). Defaults to 'poly_arb' on rows
+   *  'vol_arb' (standalone HL vol strategy), 'convergence' (near-expiry
+   *  Polymarket certainty-discount buyer), or 'divergence_mint' (Predict
+   *  favored-side mint at ≥8pp divergence). Defaults to 'poly_arb' on rows
    *  that pre-date the strategy tag (May 2026). */
-  strategy?: 'poly_arb' | 'vol_arb' | 'convergence';
+  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint';
   /** High-water mark of the poly leg's P&L fraction (trailing ratchet). */
   polyHighWaterFrac?: number;
+}
+
+/**
+ * Response of `GET /backtest` — the bot replays its own recorded signal
+ * stream against recorded oracle settlements, server-side. `data_window`
+ * bounds how far back retention lets the replay see.
+ */
+export interface BacktestSummary {
+  threshold: number;
+  side: 'predict' | 'flip' | 'favored';
+  dedupe: boolean;
+  fee: number;
+  notional_per_trade: number;
+  signals_with_spread: number;
+  would_fire: number;
+  fire_rate: number;
+  settled_trades: number;
+  still_open: number;
+  wins: number;
+  losses: number;
+  win_rate: number | null;
+  avg_cost_price: number | null;
+  total_cost_usdc: number;
+  total_pnl_usdc: number;
+  roi: number | null;
+  data_window: { firstTsIso: string | null; lastTsIso: string | null };
 }
 
 export interface OracleSummary {
@@ -433,6 +460,10 @@ export function createApi(base: string) {
     volArbState: () => get<VolArbStateResponse>('/strategy/vol-arb/state'),
     oracles: () => get<OracleSummary[]>('/oracles'),
     marginLeverState: () => get<MarginLeverStateResponse>('/strategy/margin-lever/state'),
+    backtest: (q: { threshold?: number; side?: 'predict' | 'flip' | 'favored'; dedupe?: boolean; fee?: number } = {}) =>
+      get<BacktestSummary>(
+        `/backtest?threshold=${q.threshold ?? 0.08}&side=${q.side ?? 'favored'}&dedupe=${q.dedupe ?? true}&fee=${q.fee ?? 0.02}`,
+      ),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
     surfaceHistory: (oracleId: string, limit = 200) =>
       get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),

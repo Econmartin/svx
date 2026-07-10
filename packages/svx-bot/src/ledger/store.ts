@@ -760,6 +760,93 @@ export class LedgerStore {
    * proceeds - poly_cost_usdc and feeds the same realizedPolyPnlSince query
    * as a normal settlement.
    */
+  /**
+   * Book a PARTIAL early exit (the FAK exit ladder sold only what the book
+   * offered at ≥ floor). Splits the trade row in two so every aggregate —
+   * realized poly PnL, open cost, the wallet-vs-ledger reconciliation
+   * invariant — stays exact without new columns:
+   *
+   *   - a new CLOSED row for the sold chunk (poly_settled=1,
+   *     outcome='early_exit', payout=proceeds, pnl=proceeds−costOfChunk;
+   *     Predict-side fields zeroed/settled so oracle settlement and the
+   *     Sui-leg aggregates never double-count it), and
+   *   - the ORIGINAL row shrunk (poly_filled_shares/poly_cost_usdc reduced
+   *     pro-rata) so the remainder keeps walking the exit ladder.
+   *
+   * Returns the id of the closed chunk row. Throws if soldShares ≥ the
+   * row's filled shares (that's a FULL exit — use markPolyExited).
+   */
+  splitPolyPartialExit(
+    tradeId: string,
+    soldShares: number,
+    proceedsUsdc: number,
+    exitOrderId: string | null,
+    exitedAtMs: number,
+  ): string {
+    const chunkId = randomUUID();
+    const run = this.db.transaction(() => {
+      const row = this.db
+        .prepare<[string], { poly_filled_shares: number | null; poly_cost_usdc: number | null }>(
+          `SELECT poly_filled_shares, poly_cost_usdc FROM trades WHERE id = ?`,
+        )
+        .get(tradeId);
+      if (!row || row.poly_filled_shares == null || row.poly_cost_usdc == null) {
+        throw new Error(`splitPolyPartialExit: trade ${tradeId} has no poly leg`);
+      }
+      if (soldShares <= 0 || soldShares >= row.poly_filled_shares) {
+        throw new Error(
+          `splitPolyPartialExit: soldShares ${soldShares} out of range (0, ${row.poly_filled_shares})`,
+        );
+      }
+      const costOfSold = row.poly_cost_usdc * (soldShares / row.poly_filled_shares);
+      const chunkPnl = proceedsUsdc - costOfSold;
+
+      this.db
+        .prepare(
+          `INSERT INTO trades (id, signal_id, ts_ms, mode, oracle_id, underlying, expiry_ms,
+             strike, direction, quantity_dusdc, cost_price, cost_usdc, tx_digest, settled,
+             payout_usdc, pnl_usdc,
+             ms_to_expiry_at_exec, predict_prob_at_exec, poly_ask_at_exec, predict_iv_at_exec,
+             edge_at_exec, poly_network, poly_token_id, poly_condition_id, poly_side,
+             poly_outcome, poly_order_id, poly_filled_shares, poly_fill_price, poly_cost_usdc,
+             poly_tx_hash, poly_status, poly_settled, poly_settled_at_ms,
+             poly_settlement_outcome, poly_payout_usdc, poly_pnl_usdc, poly_redeem_tx_hash,
+             poly_redeem_status, strategy)
+           SELECT @chunkId, signal_id, ts_ms, mode, oracle_id, underlying, expiry_ms,
+             strike, direction, 0, cost_price, 0, tx_digest, 1,
+             NULL, NULL,
+             ms_to_expiry_at_exec, predict_prob_at_exec, poly_ask_at_exec, predict_iv_at_exec,
+             edge_at_exec, poly_network, poly_token_id, poly_condition_id, poly_side,
+             poly_outcome, poly_order_id, @soldShares, @fillPrice, @costOfSold,
+             poly_tx_hash, 'filled', 1, @exitedAt,
+             'early_exit', @proceeds, @chunkPnl, @exitOrderId,
+             'success', strategy
+           FROM trades WHERE id = @tradeId`,
+        )
+        .run({
+          chunkId,
+          tradeId,
+          soldShares,
+          fillPrice: proceedsUsdc / soldShares,
+          costOfSold,
+          exitedAt: exitedAtMs,
+          proceeds: proceedsUsdc,
+          chunkPnl,
+          exitOrderId: exitOrderId ?? 'early-exit-partial',
+        });
+
+      this.db
+        .prepare(
+          `UPDATE trades SET poly_filled_shares = poly_filled_shares - ?,
+                             poly_cost_usdc = poly_cost_usdc - ?
+           WHERE id = ?`,
+        )
+        .run(soldShares, costOfSold, tradeId);
+    });
+    run();
+    return chunkId;
+  }
+
   markPolyExited(
     tradeId: string,
     exitOrderId: string | null,

@@ -554,6 +554,11 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   }
 }
 
+/** Round to the CLOB's default 1¢ tick — order prices must sit on the grid. */
+function roundTo2(x: number): number {
+  return Math.round(x * 100) / 100;
+}
+
 async function getOperatorDusdcCoinIds(live: LiveContext): Promise<string[]> {
   const coins = await live.sui.getCoins({
     owner: live.operatorAddress,
@@ -1189,9 +1194,14 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
             entryPrice: polyEntryPrice,
             clampedToDepth: sized.clampedToDepth,
           });
+          // Cap the fill price at ask + polyEntryMaxSlippagePts: with FOK
+          // semantics a thin book now FAILS the order (skip the tick)
+          // instead of walking up and paying away the edge that justified
+          // the entry.
           const resp = await polyExec.marketBuy({
             tokenId: polyTokenId,
             usdcAmount: sized.submitUsdc,
+            maxPrice: Math.min(0.99, roundTo2(polyEntryPrice + cfg.polyEntryMaxSlippagePts)),
           });
 
           // Operator-action-required: maker-not-allowed means the EOA
@@ -1726,11 +1736,19 @@ export async function walkPolyEarlyExits(args: {
       lockedFloorPct: lockedFloor != null ? (lockedFloor * 100).toFixed(0) : null,
     });
 
+    // Exit ladder: floor-priced FAK instead of a market FOK. The FOK sweep
+    // realized 5–10pp below the tape on thin books (the whole position
+    // filled whatever was resting). The FAK sells only what the book offers
+    // at ≥ (bestBid − polyExitMaxSlippagePts) and the remainder retries next
+    // tick against a fresh book — a crash costs ≤ the slippage cap per tick,
+    // not the whole depth of a hollow book at once.
+    const floorPrice = Math.max(0.01, roundTo2(bestBid - cfg.polyExitMaxSlippagePts));
     let resp: unknown;
     try {
-      resp = await polyExec.marketSell({
+      resp = await polyExec.limitSell({
         tokenId: trade.polyTokenId,
         shares: trade.polyFilledShares,
+        floorPrice,
       });
     } catch (e) {
       log.warn('svx.poly.early_exit.sell_error', {
@@ -1758,15 +1776,47 @@ export async function walkPolyEarlyExits(args: {
     if (fill.status === 'failed' || !fill.costUsdc || fill.costUsdc <= 0) {
       log.warn('svx.poly.early_exit.fill_failed', {
         tradeId: trade.id,
+        floorPrice,
         rawStatus: fill.status,
         raw: fill.raw,
+        note: 'no liquidity at/above the floor — remainder retries next tick',
       });
       continue;
     }
 
     const proceedsUsdc = fill.costUsdc;
-    const realizedPnl = proceedsUsdc - trade.polyCostUsdc;
     const nowMs = Date.now();
+    // Partial fill: the ladder sold a chunk; split the row so realized PnL
+    // books now (invariant-exact) and the remainder keeps walking.
+    const soldShares = fill.filledShares ?? trade.polyFilledShares;
+    const isPartial = soldShares > 0 && soldShares < trade.polyFilledShares * 0.995;
+    if (isPartial) {
+      try {
+        const chunkId = ledger.splitPolyPartialExit(
+          trade.id,
+          soldShares,
+          proceedsUsdc,
+          fill.orderId ?? null,
+          nowMs,
+        );
+        log.info('svx.poly.early_exit.partial', {
+          tradeId: trade.id,
+          chunkId,
+          soldShares,
+          remainingShares: trade.polyFilledShares - soldShares,
+          proceedsUsdc: proceedsUsdc.toFixed(4),
+          floorPrice,
+        });
+      } catch (e) {
+        log.error('svx.poly.early_exit.partial_book_failed', {
+          tradeId: trade.id,
+          err: errMsg(e),
+        });
+      }
+      continue; // position still open — hedge (if any) stays until full exit
+    }
+
+    const realizedPnl = proceedsUsdc - trade.polyCostUsdc;
     ledger.markPolyExited(trade.id, fill.orderId ?? null, proceedsUsdc, realizedPnl, nowMs);
     log.info('svx.poly.early_exit.done', {
       tradeId: trade.id,
@@ -1999,7 +2049,13 @@ async function walkExpiryConvergence(args: {
     state.lastPolyAttemptAtMs = Date.now();
     let resp: unknown;
     try {
-      resp = await polyExec.marketBuy({ tokenId, usdcAmount: sized.submitUsdc });
+      // Same entry cap as the arb leg — convergence buys sit at 90–97¢
+      // where overpaying 3–4pp erases the whole discount being collected.
+      resp = await polyExec.marketBuy({
+        tokenId,
+        usdcAmount: sized.submitUsdc,
+        maxPrice: Math.min(0.99, roundTo2(book.ask.bestPrice + cfg.polyEntryMaxSlippagePts)),
+      });
     } catch (e) {
       log.warn('svx.convergence.buy_error', { tokenId: tokenId.slice(0, 12) + '…', err: errMsg(e) });
       continue;

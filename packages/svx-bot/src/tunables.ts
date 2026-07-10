@@ -120,6 +120,17 @@ export const TUNABLES = {
    *  down") — that harvested negative skew: winners clipped at +10-20%,
    *  losers ridden to $0. Set 0 to disable (not recommended). */
   polyStopLossFrac: 0.5,
+  /** Exit ladder: max distance below the CURRENT best bid an early-exit
+   *  attempt may fill (price points). The old FOK market sell swept the
+   *  whole book — intraday price-history showed stops realizing 5–10pp
+   *  below the tape on thin books. Each walker tick sells what the book
+   *  offers at ≥ (bestBid − this) via FAK and retries the remainder next
+   *  tick against a fresh book. */
+  polyExitMaxSlippagePts: 0.02,
+  /** Entry cap: max price points ABOVE the observed ask a FOK entry may
+   *  pay. Thin book → the order fails and the tick is skipped, instead of
+   *  walking up and overpaying for the edge that justified the entry. */
+  polyEntryMaxSlippagePts: 0.02,
   /** Min gap between entries on the SAME poly outcome token. An early exit
    *  frees the concentration slot; without this the very next loop re-bought
    *  the same market at a worse price (the July-2 $60k churn: 24¢ → 29¢ →

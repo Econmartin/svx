@@ -56,6 +56,8 @@ const baseCfg: SvxConfig = {
   polyStaleSettlementDays: 14,
   predictStaleRedeemHours: 6,
   polyStopLossFrac: 0.5,
+  polyExitMaxSlippagePts: 0.02,
+  polyEntryMaxSlippagePts: 0.02,
   polyReentryCooldownMs: 1_800_000,
   polyMinEntryPrice: 0.03,
   polyMaxEntryPrice: 0.97,

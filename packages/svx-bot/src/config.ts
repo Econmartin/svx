@@ -120,6 +120,10 @@ const Schema = z.object({
   predictStaleRedeemHours: z.number().positive().default(6),
   /** Mid-life stop-loss: sell the poly leg at pnlFrac ≤ −this. 0 disables. */
   polyStopLossFrac: z.number().min(0).max(1).default(0.5),
+  /** Exit ladder: max price points below current best bid per exit attempt. */
+  polyExitMaxSlippagePts: z.number().min(0).max(0.5).default(0.02),
+  /** Entry cap: max price points above the observed ask a FOK entry may pay. */
+  polyEntryMaxSlippagePts: z.number().min(0).max(0.5).default(0.02),
   /** Min ms between entries on the same poly token — kills exit→re-buy churn. */
   polyReentryCooldownMs: z.number().int().positive().default(30 * 60_000),
   /** Refuse poly entries priced at/below this (deep-OTM lottery zone). */
@@ -373,6 +377,8 @@ export function loadConfig(): SvxConfig {
     polyStaleSettlementDays: TUNABLES.polyStaleSettlementDays,
     predictStaleRedeemHours: TUNABLES.predictStaleRedeemHours,
     polyStopLossFrac: TUNABLES.polyStopLossFrac,
+    polyExitMaxSlippagePts: TUNABLES.polyExitMaxSlippagePts,
+    polyEntryMaxSlippagePts: TUNABLES.polyEntryMaxSlippagePts,
     polyReentryCooldownMs: TUNABLES.polyReentryCooldownMs,
     polyMinEntryPrice: TUNABLES.polyMinEntryPrice,
     polyMaxEntryPrice: TUNABLES.polyMaxEntryPrice,

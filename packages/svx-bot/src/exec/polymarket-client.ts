@@ -233,12 +233,18 @@ export class PolymarketExecClient {
     tokenId: string;
     usdcAmount: number;
     tickSize?: '0.001' | '0.01' | '0.1';
+    /** Optional price CAP. With FOK semantics this makes the order
+     *  all-or-nothing at ≤ cap: a thin book fails the order (we skip the
+     *  tick) instead of walking up and overpaying. Omitted = old behavior
+     *  (market price). */
+    maxPrice?: number;
   }): Promise<unknown> {
     const tickSize = args.tickSize ?? '0.01';
     log.info('svx.poly_client.market_buy.submit', {
       tokenId: args.tokenId,
       usdcAmount: args.usdcAmount,
       tickSize,
+      ...(args.maxPrice != null && { maxPrice: args.maxPrice }),
     });
     const resp = await this.clob.createAndPostMarketOrder(
       {
@@ -246,6 +252,7 @@ export class PolymarketExecClient {
         amount: args.usdcAmount,
         side: Side.BUY,
         orderType: OrderType.FOK,
+        ...(args.maxPrice != null && { price: args.maxPrice }),
       },
       { tickSize },
       OrderType.FOK,
@@ -361,6 +368,43 @@ export class PolymarketExecClient {
       OrderType.FOK,
     );
     log.info('svx.poly_client.market_sell.ok', { tokenId: args.tokenId, resp });
+    return resp;
+  }
+
+  /**
+   * Floor-priced sell — the exit ladder's rung. A market SELL with a `price`
+   * floor and FAK (fill-and-kill): fills every resting bid priced ≥
+   * `floorPrice`, cancels the remainder instead of walking deeper into the
+   * book. The old FOK market sell realized 5–10pp below the top-of-book on
+   * thin books (the whole position swept whatever was quoted); this bounds
+   * each attempt to `floorPrice` and lets the walker retry the remainder on
+   * the next tick with a fresh book.
+   */
+  async limitSell(args: {
+    tokenId: string;
+    shares: number;
+    floorPrice: number;
+    tickSize?: '0.001' | '0.01' | '0.1';
+  }): Promise<unknown> {
+    const tickSize = args.tickSize ?? '0.01';
+    log.info('svx.poly_client.limit_sell.submit', {
+      tokenId: args.tokenId,
+      shares: args.shares,
+      floorPrice: args.floorPrice,
+      tickSize,
+    });
+    const resp = await this.clob.createAndPostMarketOrder(
+      {
+        tokenID: args.tokenId,
+        amount: args.shares,
+        side: Side.SELL,
+        price: args.floorPrice,
+        orderType: OrderType.FAK,
+      },
+      { tickSize },
+      OrderType.FAK,
+    );
+    log.info('svx.poly_client.limit_sell.ok', { tokenId: args.tokenId, resp });
     return resp;
   }
 }

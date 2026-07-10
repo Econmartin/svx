@@ -29,6 +29,8 @@ Stay on the landing page. The numbered journey below the hero IS the agenda
 
 ## 0:30–1:15 — Step 1: the pricing brain (`/surface`)
 
+*Network toggle: TESTNET (stay here from the start — the surface IS testnet Predict).*
+
 - Live SVI smile for the soonest oracle; UP-probability curve across strikes.
 - "We back-solve implied vol from the on-chain `OracleSVI` params and
   reprice any strike at any expiry. The butterfly arbitrage-free checker
@@ -37,6 +39,8 @@ Stay on the landing page. The numbered journey below the hero IS the agenda
   validated against a Python `math.erf` reference to 1e-6; 36 math tests.
 
 ## 1:15–2:15 — Step 2: real money against the surface (`/poly-arb`)
+
+*Network toggle: flip to MAINNET — say it out loud: "switching to the real-money side." Stay on mainnet through step 3.*
 
 - Flip the network toggle to **mainnet**: real fills on the Polygon CLOB,
   UMA settlement detection, on-chain auto-redeem via the NegRiskAdapter.
@@ -62,6 +66,8 @@ One breath, then the pivot line: **"We kill losers with data. Which is why
 you can believe the next two pages."**
 
 ## 2:55–3:40 — Step 4: the finding (landing-page calibration table)
+
+*Network toggle: back to TESTNET for the rest of the demo.*
 
 - Scroll to the quoted-vs-realized calibration table (live from
   `GET /calibration`, recomputed from the bot's own ledger).
@@ -119,6 +125,11 @@ you can believe the next two pages."**
   sized ATM hedge exceeds the per-trade cap at $4 clips. Honest answer:
   at this clip size a hedge costs more than the risk it removes; the code
   and the re-enable conditions are documented.
+- **"Why does margin-lever have no trades?"** By design: the audit found
+  its signal decomposes to a forward-basis z-score that fires on noise, so
+  it runs in paper mode with an open threshold the broken signal can't
+  reach. The page shows it deciding "hold" every tick with the reason —
+  a strategy alive, watching, and declining to trade.
 - **"Kelly sizing?"** Fixed clips on purpose at this bankroll;
   equity-scaled sizing is a written task (docs/tasks) gated on more settled
   history.

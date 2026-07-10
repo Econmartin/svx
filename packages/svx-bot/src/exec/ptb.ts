@@ -151,6 +151,122 @@ export function buildRedeemTx(args: RedeemArgs): Transaction {
   return tx;
 }
 
+export interface RangeMintArgs {
+  oracleId: string;
+  expiryMs: number;
+  /** Band bounds in $ on the underlying (scaled by 1e9 inside). Pays out
+   *  when settlement lands in (lower, higher]. */
+  lowerStrike: number;
+  higherStrike: number;
+  /** Notional in dUSDC (max payout), scaled to quote units inside. */
+  quantityDusdc: number;
+  managerId: string;
+  topUpDusdc?: number;
+  dusdcCoinObjectIds?: string[];
+  addresses?: PredictAddresses;
+}
+
+/**
+ * Mint a RANGE position — pays `quantity` when settlement ∈ (lower, higher].
+ * Verified against live testnet traffic (range_key::new → predict::mint_range,
+ * same shared objects and clock as the binary mint). Quote with
+ * `predict::get_range_trade_amounts` via devInspect before submitting.
+ */
+export function buildMintRangeTx(args: RangeMintArgs): Transaction {
+  const a = args.addresses ?? ADDRESSES;
+  if (!(args.lowerStrike < args.higherStrike)) {
+    throw new Error(`range bounds inverted: ${args.lowerStrike} >= ${args.higherStrike}`);
+  }
+  const tx = new Transaction();
+
+  if (args.topUpDusdc && args.topUpDusdc > 0) {
+    if (!args.dusdcCoinObjectIds || args.dusdcCoinObjectIds.length === 0) {
+      throw new Error(
+        'topUpDusdc requested but no dusdcCoinObjectIds provided — fetch them via SuiClient.getCoins',
+      );
+    }
+    const topUpUnits = bigintFromDusdc(args.topUpDusdc);
+    const [primary, ...rest] = args.dusdcCoinObjectIds;
+    if (!primary) throw new Error('no dUSDC coin object available');
+    const primaryRef = tx.object(primary);
+    if (rest.length > 0) {
+      tx.mergeCoins(
+        primaryRef,
+        rest.map((id) => tx.object(id)),
+      );
+    }
+    const [topUpCoin] = tx.splitCoins(primaryRef, [topUpUnits]);
+    tx.moveCall({
+      target: `${a.packageId}::predict_manager::deposit`,
+      typeArguments: [a.dusdcType],
+      arguments: [tx.object(args.managerId), topUpCoin],
+    });
+  }
+
+  const key = tx.moveCall({
+    target: `${a.packageId}::range_key::new`,
+    arguments: [
+      tx.pure.id(args.oracleId),
+      tx.pure.u64(BigInt(args.expiryMs)),
+      tx.pure.u64(scaledStrike(args.lowerStrike)),
+      tx.pure.u64(scaledStrike(args.higherStrike)),
+    ],
+  });
+
+  tx.moveCall({
+    target: `${a.packageId}::predict::mint_range`,
+    typeArguments: [a.dusdcType],
+    arguments: [
+      tx.object(a.predictObjectId),
+      tx.object(args.managerId),
+      tx.object(args.oracleId),
+      key,
+      tx.pure.u64(bigintFromDusdc(args.quantityDusdc)),
+      tx.object(SUI_CLOCK_OBJECT_ID),
+    ],
+  });
+
+  return tx;
+}
+
+/**
+ * Redeem a settled range position. NOTE: unlike binaries there is NO
+ * `redeem_range_permissionless` in the protocol — the manager owner must
+ * sign this themselves. The keeper therefore redeems ranges with the
+ * operator key rather than relying on the permissionless crank.
+ */
+export function buildRedeemRangeTx(
+  args: Omit<RangeMintArgs, 'topUpDusdc' | 'dusdcCoinObjectIds'>,
+): Transaction {
+  const a = args.addresses ?? ADDRESSES;
+  const tx = new Transaction();
+
+  const key = tx.moveCall({
+    target: `${a.packageId}::range_key::new`,
+    arguments: [
+      tx.pure.id(args.oracleId),
+      tx.pure.u64(BigInt(args.expiryMs)),
+      tx.pure.u64(scaledStrike(args.lowerStrike)),
+      tx.pure.u64(scaledStrike(args.higherStrike)),
+    ],
+  });
+
+  tx.moveCall({
+    target: `${a.packageId}::predict::redeem_range`,
+    typeArguments: [a.dusdcType],
+    arguments: [
+      tx.object(a.predictObjectId),
+      tx.object(args.managerId),
+      tx.object(args.oracleId),
+      key,
+      tx.pure.u64(bigintFromDusdc(args.quantityDusdc)),
+      tx.object(SUI_CLOCK_OBJECT_ID),
+    ],
+  });
+
+  return tx;
+}
+
 export function buildCreateManagerTx(addresses: PredictAddresses = ADDRESSES): Transaction {
   const tx = new Transaction();
   tx.moveCall({

@@ -19,6 +19,7 @@ import {
 } from '../pricing/svi-arb.js';
 import type { MarginLeverState } from '../strategy/margin-lever.js';
 import { computeBacktest, computeCalibration, type BacktestSide } from '../ops/backtest.js';
+import { computeRangeSim } from '../ops/range-sim.js';
 import { log } from '../util/log.js';
 
 interface ApiDeps {
@@ -405,6 +406,33 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     res.json(
       computeCalibration(deps.ledger.backtestSignals(), deps.ledger.allSettlements(), {
         divergenceThreshold: threshold,
+      }),
+    );
+  });
+
+  /**
+   * Range-ladder vault SIMULATION — the "proper simulation result" the track
+   * brief requires. Replays: for every settled oracle, the ladder the vault
+   * would have minted at first sight of its surface, priced off that surface
+   * (+fee), settled against what actually happened.
+   *
+   *   GET /range-sim?policy=sigma&rungs=5&width=1&fee=0.02&notional=5
+   *   GET /range-sim?policy=fixed_bps&rungs=5&width=25
+   */
+  app.get('/range-sim', (req, res) => {
+    const policy = req.query.policy === 'fixed_bps' ? 'fixed_bps' : 'sigma';
+    const rungs = clampInt(req.query.rungs, 1, 21, 5);
+    const width = clampFloat(req.query.width, 0.01, 10_000, policy === 'sigma' ? 1 : 25);
+    res.json(
+      computeRangeSim(deps.ledger.rangeSimRows(), {
+        policy,
+        rungs,
+        widthZ: policy === 'sigma' ? width : 1,
+        widthBps: policy === 'fixed_bps' ? width : 25,
+        fee: clampFloat(req.query.fee, 0, 0.2, 0.02),
+        notionalPerRung: clampFloat(req.query.notional, 0.1, 1000, 5),
+        minRungPrice: clampFloat(req.query.minPrice, 0, 1, 0.02),
+        maxRungPrice: clampFloat(req.query.maxPrice, 0, 1, 0.98),
       }),
     );
   });

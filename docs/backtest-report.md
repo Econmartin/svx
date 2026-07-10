@@ -112,6 +112,43 @@ the harvest backtest is conditioned on "Polymarket listed a comparable
 strike" — a fully Poly-free harvest needs the unmatched-oracle logging
 extension before its numbers are unconditioned.
 
+## Addendum 2026-07-11 (2) — range-ladder vault simulation
+
+The brief's flagship vault idea (range ladder around ATM, idea bank #1)
+poses one design question: the strike-width policy. We answered it by
+replaying, for every oracle where the ledger holds both an SVI surface
+snapshot and the settlement price (n=104 oracles, May archive), the ladder
+the vault WOULD have minted at first sight of the surface — 5 rungs,
+5 dUSDC notional per rung, 2% fee, rungs priced off that surface:
+
+| Policy | Width | Rungs minted | Ladder hit rate | ROI after fee |
+|---|---|---|---|---|
+| **sigma** | **0.5σ** | 520 | 17% | **+10.1%** |
+| sigma | 1σ | 520 | 19% | −5.1% |
+| sigma | 2σ | 319 | 32% | −4.0% |
+| fixed | 10 bps | 481 | 14% | +1.3% |
+| fixed | 25 bps | 401 | 22% | +5.0% |
+| fixed | 50 bps | 364 | 23% | −0.6% |
+
+The per-rung breakdown explains WHY, and it is the calibration finding
+again from a new angle: at σ/2 widths the ATM rung returns **+29%**, the
+±1 rungs ~+10%, and the ±2 wings lose — the surface underprices the
+center of the distribution (where its favorites are underconfident) and
+relatively overprices the wings. Narrow ladders concentrate capital where
+the surface is cheap; wide ladders donate it back through the wings.
+
+Reproduce against a deployed bot's own ledger:
+
+```bash
+curl "https://svx-testnet.econmartin.xyz/range-sim?policy=sigma&rungs=5&width=0.5"
+```
+
+Live execution: `predict::mint_range` / `redeem_range` builders are in
+`exec/ptb.ts` (verified against live testnet range traffic), and
+`svx mint-ladder [--dry]` mints the σ/2 ladder on the soonest oracle
+on-chain. Caveat: ranges have NO permissionless redeem — the operator key
+must redeem after settlement.
+
 ## Implementation
 
 `packages/svx-bot/src/strategy/divergence-mint.ts` (pure decision module,

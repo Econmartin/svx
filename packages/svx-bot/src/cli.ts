@@ -12,10 +12,18 @@
  */
 
 import path from 'node:path';
+import fs from 'node:fs';
+import { SuiClient } from '@mysten/sui/client';
+import { ADDRESSES } from 'svx-shared/addresses';
 import { loadConfig } from './config.js';
 import { LedgerStore } from './ledger/store.js';
 import { runBot } from './index.js';
 import { setKillFlag, clearKillFlag, isKilled } from './ops/kill.js';
+import { loadOperatorKey } from './exec/keypair.js';
+import { buildMintRangeTx } from './exec/ptb.js';
+import { submitTx } from './exec/submit.js';
+import { PredictClient } from './pricing/predict.js';
+import { buildLadder } from './strategy/range-ladder.js';
 import { log } from './util/log.js';
 
 async function main(): Promise<void> {
@@ -35,10 +43,114 @@ async function main(): Promise<void> {
       return printStatus();
     case 'report':
       return printReport();
+    case 'mint-ladder':
+      return mintLadder(rest);
     default:
       printHelp();
       process.exit(cmd ? 1 : 0);
   }
+}
+
+/**
+ * One-shot live demo: build a σ/2-width 5-rung ladder around ATM on the
+ * soonest active oracle and mint it on-chain via `predict::mint_range`.
+ * The σ/2 policy is the simulation winner (+10.1% ROI over 104 oracles on
+ * the May archive — see docs/backtest-report.md and GET /range-sim).
+ *
+ *   svx mint-ladder [--notional 2] [--rungs 5] [--width-z 0.5] [--dry]
+ */
+async function mintLadder(rest: string[]): Promise<void> {
+  const cfg = loadConfig();
+  const arg = (name: string, def: number) => {
+    const i = rest.indexOf(name);
+    return i >= 0 && rest[i + 1] ? Number(rest[i + 1]) : def;
+  };
+  const notional = arg('--notional', 2);
+  const rungCount = Math.round(arg('--rungs', 5));
+  const widthZ = arg('--width-z', 0.5);
+  const dry = rest.includes('--dry');
+
+  const predict = new PredictClient();
+  const oracles = await predict.listActiveOracles('BTC');
+  const soonest = oracles
+    .filter((o) => o.expiryMs > Date.now() + 3 * 60_000) // ≥3min TTM
+    .sort((a, b) => a.expiryMs - b.expiryMs)[0];
+  if (!soonest) throw new Error('no active BTC oracle with ≥3min to expiry');
+  const snap = await predict.snapshotOracle(soonest.oracleId);
+  if (!snap) throw new Error(`could not snapshot oracle ${soonest.oracleId}`);
+
+  const tYears = (snap.expiryMs - Date.now()) / (365.25 * 24 * 3600 * 1000);
+  const ladder = buildLadder({
+    forward: snap.forward,
+    svi: snap.svi,
+    tYears,
+    cfg: {
+      policy: 'sigma',
+      rungs: rungCount,
+      widthZ,
+      widthBps: 25,
+      minRungPrice: 0.03,
+      maxRungPrice: 0.97,
+    },
+  });
+  if (ladder.length === 0) throw new Error('ladder empty (all rungs outside the price band)');
+
+  console.log(
+    JSON.stringify(
+      {
+        msg: 'svx.mint_ladder.plan',
+        oracleId: snap.oracleId,
+        expiryIso: new Date(snap.expiryMs).toISOString(),
+        forward: snap.forward,
+        rungs: ladder.map((r) => ({
+          band: `(${Math.round(r.lowerStrike)}, ${Math.round(r.higherStrike)}]`,
+          fair: Number(r.fairPrice.toFixed(4)),
+          offset: r.offset,
+        })),
+        notionalPerRung: notional,
+        estCostUsdc: Number(
+          (ladder.reduce((a, r) => a + r.fairPrice, 0) * notional).toFixed(4),
+        ),
+      },
+      null,
+      2,
+    ),
+  );
+  if (dry) return;
+
+  // Live context — same sources as runBot's live mode.
+  const operatorFile = path.join(path.resolve(cfg.dataDir), 'operator.json');
+  const op: { operatorAddress: string; managerId: string } = process.env.OPERATOR_JSON
+    ? JSON.parse(process.env.OPERATOR_JSON)
+    : JSON.parse(fs.readFileSync(operatorFile, 'utf8'));
+  const { keypair } = loadOperatorKey();
+  const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
+
+  for (const rung of ladder) {
+    const tx = buildMintRangeTx({
+      oracleId: snap.oracleId,
+      expiryMs: snap.expiryMs,
+      lowerStrike: rung.lowerStrike,
+      higherStrike: rung.higherStrike,
+      quantityDusdc: notional,
+      managerId: op.managerId,
+    });
+    const result = await submitTx(sui, tx, keypair);
+    console.log(
+      JSON.stringify({
+        msg: result.ok ? 'svx.mint_ladder.rung_ok' : 'svx.mint_ladder.rung_failed',
+        band: `(${Math.round(rung.lowerStrike)}, ${Math.round(rung.higherStrike)}]`,
+        digest: result.digest,
+        ...(result.ok ? {} : { error: result.error, status: result.status }),
+      }),
+    );
+  }
+  console.log(
+    JSON.stringify({
+      msg: 'svx.mint_ladder.done',
+      note: 'ranges have NO permissionless redeem — redeem with the operator key after settlement (predict::redeem_range)',
+    }),
+  );
 }
 
 /**
@@ -108,6 +220,9 @@ Commands:
                     doesn't read the funding event as a booking bug.
   status            Print current bot status from the ledger.
   report            Print PnL summary.
+  mint-ladder       Mint a range ladder (sigma/2 x 5 rungs, the simulation
+                    winner) around ATM on the soonest oracle. --dry to plan
+                    only; --notional N dUSDC per rung (default 2).
 `);
 }
 

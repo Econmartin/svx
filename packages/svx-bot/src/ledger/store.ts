@@ -966,6 +966,54 @@ export class LedgerStore {
     this.db.prepare(`DELETE FROM meta WHERE key = ?`).run(key);
   }
 
+  /**
+   * Rows for the range-ladder simulation: the EARLIEST recorded SVI surface
+   * per oracle (the vault's would-be decision time) joined with the oracle's
+   * settlement. Only settled oracles appear — the sim needs the answer key.
+   */
+  rangeSimRows(): Array<{
+    oracleId: string;
+    tsMs: number;
+    expiryMs: number;
+    forward: number;
+    svi: { a: number; b: number; rho: number; m: number; sigma: number };
+    settlementPrice: number;
+  }> {
+    return this.db
+      .prepare<
+        [],
+        {
+          oracle_id: string;
+          ts_ms: number;
+          expiry_ms: number;
+          forward: number;
+          a: number;
+          b: number;
+          rho: number;
+          m: number;
+          sigma: number;
+          settlement_price: number;
+        }
+      >(
+        `SELECT s.oracle_id, s.ts_ms, st.expiry_ms, s.forward,
+                s.a, s.b, s.rho, s.m, s.sigma, st.settlement_price
+         FROM svi_snapshots s
+         JOIN settlements st ON st.oracle_id = s.oracle_id
+         WHERE s.ts_ms = (
+           SELECT MIN(ts_ms) FROM svi_snapshots s2 WHERE s2.oracle_id = s.oracle_id
+         )`,
+      )
+      .all()
+      .map((r) => ({
+        oracleId: r.oracle_id,
+        tsMs: r.ts_ms,
+        expiryMs: r.expiry_ms,
+        forward: r.forward,
+        svi: { a: r.a, b: r.b, rho: r.rho, m: r.m, sigma: r.sigma },
+        settlementPrice: r.settlement_price,
+      }));
+  }
+
   // ── Butterfly-harvester telemetry ─────────────────────────────────────────
 
   /** Bump the scan counter (persisted so restarts don't zero the denominator). */

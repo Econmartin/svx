@@ -149,6 +149,33 @@ Live execution: `predict::mint_range` / `redeem_range` builders are in
 on-chain. Caveat: ranges have NO permissionless redeem — the operator key
 must redeem after settlement.
 
+## Addendum 2026-07-11 (3) — PLP + tail hedge: both sides of the table
+
+Idea bank #2 ("PLP yield minus crash insurance"), priced with real data
+from both legs (`GET /plp-sim`, reproducible):
+
+- **PLP realized yield ≈ +0.7%/yr** — the share-price series implied by
+  every on-chain supply/withdraw event (1.00191 → 1.00183 over 6.6 days)
+  is flat-to-slightly-negative. Coherent with everything above: the vault
+  is the COUNTERPARTY to the calibration edge — the same underconfidence
+  that pays favorites is paid BY PLP.
+- **Crash insurance, priced per oracle cycle off the recorded surfaces
+  (n=104, avg cycle 5.6h), settled against real outcomes:**
+
+| Crash strike | Premium/cycle | Realized crash rate | Verdict |
+|---|---|---|---|
+| 1.5σ | 7.7% | 3.9% | near tails **overpriced ~2×** |
+| 2σ | 3.2% | 2.9% | roughly fair |
+| 3σ | 0.53% | 1.92% | far tails **underpriced ~3×** (n=2 hits — thin) |
+
+Product verdict: PLP+hedge nets NEGATIVE on today's testnet surface at any
+sensible coverage — not a failed build, a quantified finding. Together
+with the center-calibration report this gives the DeepBook team the full
+smile-shape diagnosis: center underpriced, near wings overpriced, far
+wings underpriced (fat tails beyond the SVI wings). Execution machinery
+ships anyway: `predict::supply`/`withdraw` builders in `exec/ptb.ts` and
+`svx supply-plp --amount N [--dry]` for a live house-side position.
+
 ## Implementation
 
 `packages/svx-bot/src/strategy/divergence-mint.ts` (pure decision module,

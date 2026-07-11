@@ -20,7 +20,7 @@ import { LedgerStore } from './ledger/store.js';
 import { runBot } from './index.js';
 import { setKillFlag, clearKillFlag, isKilled } from './ops/kill.js';
 import { loadOperatorKey } from './exec/keypair.js';
-import { buildMintRangeTx } from './exec/ptb.js';
+import { buildMintRangeTx, buildSupplyPlpTx } from './exec/ptb.js';
 import { submitTx } from './exec/submit.js';
 import { PredictClient } from './pricing/predict.js';
 import { buildLadder } from './strategy/range-ladder.js';
@@ -45,6 +45,8 @@ async function main(): Promise<void> {
       return printReport();
     case 'mint-ladder':
       return mintLadder(rest);
+    case 'supply-plp':
+      return supplyPlp(rest);
     default:
       printHelp();
       process.exit(cmd ? 1 : 0);
@@ -205,6 +207,52 @@ function rebaseline(): void {
   ledger.close();
 }
 
+/**
+ * Supply dUSDC into Predict's PLP vault (the house side). Returns Coin<PLP>
+ * share tokens to the operator wallet. See GET /plp-sim for why this is a
+ * telemetry/demo position, not a yield product on today's surface.
+ *
+ *   svx supply-plp --amount 5 [--dry]
+ */
+async function supplyPlp(rest: string[]): Promise<void> {
+  loadConfig();
+  const i = rest.indexOf('--amount');
+  const amount = i >= 0 && rest[i + 1] ? Number(rest[i + 1]) : 5;
+  const dry = rest.includes('--dry');
+
+  const { keypair, address } = loadOperatorKey();
+  const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
+  const coins = await sui.getCoins({ owner: address, coinType: ADDRESSES.dusdcType });
+  const balance = coins.data.reduce((a, c) => a + Number(c.balance), 0) / 1e6;
+  console.log(
+    JSON.stringify({
+      msg: 'svx.supply_plp.plan',
+      operator: address,
+      walletDusdc: balance,
+      supplyDusdc: amount,
+      coinObjects: coins.data.length,
+    }),
+  );
+  if (balance < amount) throw new Error(`wallet has ${balance} dUSDC < ${amount} requested`);
+  if (dry) return;
+
+  const tx = buildSupplyPlpTx({
+    amountDusdc: amount,
+    dusdcCoinObjectIds: coins.data.map((c) => c.coinObjectId),
+    recipient: address,
+  });
+  const result = await submitTx(sui, tx, keypair);
+  console.log(
+    JSON.stringify({
+      msg: result.ok ? 'svx.supply_plp.ok' : 'svx.supply_plp.failed',
+      digest: result.digest,
+      ...(result.ok
+        ? { note: 'Coin<PLP> transferred to operator wallet; withdraw via predict::withdraw (rate-limited)' }
+        : { error: result.error, status: result.status }),
+    }),
+  );
+}
+
 function printHelp(): void {
   console.log(`Usage: svx <command>
 
@@ -223,6 +271,8 @@ Commands:
   mint-ladder       Mint a range ladder (sigma/2 x 5 rungs, the simulation
                     winner) around ATM on the soonest oracle. --dry to plan
                     only; --notional N dUSDC per rung (default 2).
+  supply-plp        Supply dUSDC into the PLP vault (returns Coin<PLP> share
+                    tokens). --amount N (default 5); --dry to plan only.
 `);
 }
 

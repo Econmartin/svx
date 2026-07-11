@@ -101,6 +101,26 @@ export class PredictClient {
     return data;
   }
 
+  /** PLP supply events (share mints). Share price at event = amount/shares. */
+  async lpSupplies(): Promise<Array<{ tsMs: number; amount: number; shares: number }>> {
+    const { data } = await this.http.get<
+      Array<{ checkpoint_timestamp_ms: number; amount: number; shares_minted: number }>
+    >(PREDICT_ENDPOINTS.lpSupplies);
+    return (data ?? [])
+      .filter((r) => r.shares_minted > 0)
+      .map((r) => ({ tsMs: r.checkpoint_timestamp_ms, amount: r.amount, shares: r.shares_minted }));
+  }
+
+  /** PLP withdrawal events (share burns). */
+  async lpWithdrawals(): Promise<Array<{ tsMs: number; amount: number; shares: number }>> {
+    const { data } = await this.http.get<
+      Array<{ checkpoint_timestamp_ms: number; amount: number; shares_burned: number }>
+    >(PREDICT_ENDPOINTS.lpWithdrawals);
+    return (data ?? [])
+      .filter((r) => r.shares_burned > 0)
+      .map((r) => ({ tsMs: r.checkpoint_timestamp_ms, amount: r.amount, shares: r.shares_burned }));
+  }
+
   /**
    * List all oracles. The response is large (every oracle ever created).
    * Result is cached for `cacheTtlMs` to avoid hammering the indexer; pass

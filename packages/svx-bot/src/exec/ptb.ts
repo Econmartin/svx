@@ -267,6 +267,77 @@ export function buildRedeemRangeTx(
   return tx;
 }
 
+export interface SupplyPlpArgs {
+  /** dUSDC to supply into the PLP vault. */
+  amountDusdc: number;
+  /** Operator's dUSDC coin object ids (merged + split inside). */
+  dusdcCoinObjectIds: string[];
+  /** Recipient of the minted Coin<PLP> (the operator address). */
+  recipient: string;
+  addresses?: PredictAddresses;
+}
+
+/**
+ * Supply dUSDC into Predict's PLP vault: `predict::supply` takes the quote
+ * coin directly and RETURNS a Coin<PLP> (share token) — no manager involved.
+ * First supplier mints 1:1; later suppliers pro-rata to vault value.
+ * Withdrawals are gated by the protocol's rate limiter — check
+ * `predict::available_withdrawal` before building a withdraw.
+ */
+export function buildSupplyPlpTx(args: SupplyPlpArgs): Transaction {
+  const a = args.addresses ?? ADDRESSES;
+  if (!args.dusdcCoinObjectIds.length) throw new Error('no dUSDC coin objects provided');
+  const tx = new Transaction();
+
+  const [primary, ...rest] = args.dusdcCoinObjectIds;
+  const primaryRef = tx.object(primary!);
+  if (rest.length > 0) {
+    tx.mergeCoins(
+      primaryRef,
+      rest.map((id) => tx.object(id)),
+    );
+  }
+  const [supplyCoin] = tx.splitCoins(primaryRef, [bigintFromDusdc(args.amountDusdc)]);
+
+  const plp = tx.moveCall({
+    target: `${a.packageId}::predict::supply`,
+    typeArguments: [a.dusdcType],
+    arguments: [tx.object(a.predictObjectId), supplyCoin!, tx.object(SUI_CLOCK_OBJECT_ID)],
+  });
+  tx.transferObjects([plp], tx.pure.address(args.recipient));
+  return tx;
+}
+
+/**
+ * Burn Coin<PLP> shares back into dUSDC via `predict::withdraw`. Pays out
+ * only if the amount is available after the vault covers current max payout
+ * AND the rate limiter has headroom.
+ */
+export function buildWithdrawPlpTx(args: {
+  plpCoinObjectIds: string[];
+  recipient: string;
+  addresses?: PredictAddresses;
+}): Transaction {
+  const a = args.addresses ?? ADDRESSES;
+  if (!args.plpCoinObjectIds.length) throw new Error('no PLP coin objects provided');
+  const tx = new Transaction();
+  const [primary, ...rest] = args.plpCoinObjectIds;
+  const primaryRef = tx.object(primary!);
+  if (rest.length > 0) {
+    tx.mergeCoins(
+      primaryRef,
+      rest.map((id) => tx.object(id)),
+    );
+  }
+  const quote = tx.moveCall({
+    target: `${a.packageId}::predict::withdraw`,
+    typeArguments: [a.dusdcType],
+    arguments: [tx.object(a.predictObjectId), primaryRef, tx.object(SUI_CLOCK_OBJECT_ID)],
+  });
+  tx.transferObjects([quote], tx.pure.address(args.recipient));
+  return tx;
+}
+
 export function buildCreateManagerTx(addresses: PredictAddresses = ADDRESSES): Transaction {
   const tx = new Transaction();
   tx.moveCall({

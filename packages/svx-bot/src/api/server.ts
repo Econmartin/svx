@@ -20,6 +20,7 @@ import {
 import type { MarginLeverState } from '../strategy/margin-lever.js';
 import { computeBacktest, computeCalibration, type BacktestSide } from '../ops/backtest.js';
 import { computeRangeSim } from '../ops/range-sim.js';
+import { computePlpSim } from '../ops/plp-sim.js';
 import { log } from '../util/log.js';
 
 interface ApiDeps {
@@ -435,6 +436,31 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
         maxRungPrice: clampFloat(req.query.maxPrice, 0, 1, 0.98),
       }),
     );
+  });
+
+  /**
+   * PLP + tail-hedge simulation — realized PLP share-price APY (from
+   * on-chain supply/withdraw events) minus crash insurance priced off every
+   * recorded surface, settled against what actually happened.
+   *
+   *   GET /plp-sim?z=2&coverage=0.5&fee=0.02
+   */
+  app.get('/plp-sim', async (req, res) => {
+    try {
+      const [supplies, withdrawals] = await Promise.all([
+        deps.predict.lpSupplies(),
+        deps.predict.lpWithdrawals(),
+      ]);
+      res.json(
+        computePlpSim(supplies, withdrawals, deps.ledger.rangeSimRows(), {
+          hedgeZ: clampFloat(req.query.z, 0.5, 10, 2),
+          coverageFrac: clampFloat(req.query.coverage, 0, 1, 0.5),
+          fee: clampFloat(req.query.fee, 0, 0.2, 0.02),
+        }),
+      );
+    } catch (e) {
+      res.status(502).json({ error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   /**

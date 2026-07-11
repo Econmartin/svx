@@ -16,6 +16,7 @@ const NAV = [
   ['IV-RV', '/vol-arb'],
   ['Margin-Lever', '/margin-lever'],
   ['Divergence', '/divergence-mint'],
+  ['Vaults', '/vaults'],
   ['Wallets', '/wallets'],
   ['About', '/about'],
 ] as const;

@@ -148,8 +148,15 @@ export default function LandingPage() {
             n={5}
             href="/divergence-mint"
             badge={{ label: 'LIVE ON TESTNET · MAINNET-DAY-ONE', variant: 'live' }}
-            title="Ship the strategy that finding implies"
-            body="Divergence-mint: when the venues disagree by ≥8pp, mint Predict's favorite via predict::mint and redeem permissionlessly at settlement. 94% win rate / +11.9% ROI on May data, 93.5% / +11.5% on July data — two disjoint windows, reproducible from this bot's own ledger via GET /backtest. Live with dUSDC on testnet now; Predict Sui-mainnet launch day is an address swap and one config flip."
+            title="Ship the strategies that finding implies"
+            body="Divergence-mint (venues disagree ≥8pp: 94% win / +11.9% ROI May, 93.5% / +11.5% July) and calibration-harvest (every other favorite below 90¢: 90.6% / +14.2%) — two disjoint bands of the same edge, both minting live dUSDC via predict::mint, both reproducible from this bot's own ledger via GET /backtest. Predict Sui-mainnet launch day is an address swap and one config flip."
+          />
+          <JourneyStep
+            n={6}
+            href="/vaults"
+            badge={{ label: 'SIMULATED — ONE YES, ONE NO', variant: 'outline' }}
+            title="Pressure-test the brief's vault ideas against the same data"
+            body="The range ladder works — but only at σ/2 widths (+10.1% over 104 replayed oracles; ATM rung +29%), and svx mint-ladder mints the winner live via predict::mint_range. PLP + crash-insurance does NOT work on today's surface (PLP realizes ~0.7%/yr as the counterparty to the calibration edge; 1.5σ insurance costs ~2× its realized payout) — published with the numbers, because the NO is the same smile diagnosis from the house's side."
           />
         </ol>
       </section>

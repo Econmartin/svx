@@ -202,6 +202,58 @@ export interface BacktestSummary {
   data_window: { firstTsIso: string | null; lastTsIso: string | null };
 }
 
+/** Response of `GET /range-sim` — the range-ladder vault simulation. */
+export interface RangeSimSummary {
+  policy: 'sigma' | 'fixed_bps';
+  rungs: number;
+  width: { z: number | null; bps: number | null };
+  fee: number;
+  notional_per_rung: number;
+  oracles_simulated: number;
+  rungs_minted: number;
+  total_cost_usdc: number;
+  total_payout_usdc: number;
+  total_pnl_usdc: number;
+  roi: number | null;
+  ladder_hit_rate: number | null;
+  by_offset: Array<{
+    offset: number;
+    n: number;
+    hits: number;
+    hit_rate: number | null;
+    avg_fair_price: number | null;
+    cost_usdc: number;
+    payout_usdc: number;
+    pnl_usdc: number;
+    roi: number | null;
+  }>;
+  data_window: { firstTsIso: string | null; lastTsIso: string | null };
+}
+
+/** Response of `GET /plp-sim` — PLP yield minus surface-priced crash insurance. */
+export interface PlpSimSummary {
+  plp: {
+    events: number;
+    window_days: number | null;
+    share_price_first: number | null;
+    share_price_last: number | null;
+    realized_apy: number | null;
+  };
+  hedge: {
+    z: number;
+    coverage_frac: number;
+    fee: number;
+    oracles_priced: number;
+    avg_premium_frac: number | null;
+    crash_hits: number;
+    crash_hit_rate: number | null;
+    avg_cycle_hours: number | null;
+    annualized_drag_frac: number | null;
+  };
+  net_apy: number | null;
+  data_window: { firstTsIso: string | null; lastTsIso: string | null };
+}
+
 /** Response of `GET /butterfly` — digital-monotonicity violations found on
  *  the fitted SVI surface (butterfly-harvester telemetry). */
 export interface ButterflyReport {
@@ -531,6 +583,11 @@ export function createApi(base: string) {
     calibration: (threshold = 0.08) =>
       get<CalibrationReport>(`/calibration?threshold=${threshold}`),
     butterfly: (limit = 50) => get<ButterflyReport>(`/butterfly?limit=${limit}`),
+    rangeSim: (q: { policy?: 'sigma' | 'fixed_bps'; rungs?: number; width?: number } = {}) =>
+      get<RangeSimSummary>(
+        `/range-sim?policy=${q.policy ?? 'sigma'}&rungs=${q.rungs ?? 5}&width=${q.width ?? 0.5}`,
+      ),
+    plpSim: (z = 2) => get<PlpSimSummary>(`/plp-sim?z=${z}`),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
     surfaceHistory: (oracleId: string, limit = 200) =>
       get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),

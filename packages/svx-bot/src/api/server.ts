@@ -21,6 +21,7 @@ import type { MarginLeverState } from '../strategy/margin-lever.js';
 import { computeBacktest, computeCalibration, type BacktestSide } from '../ops/backtest.js';
 import { computeRangeSim } from '../ops/range-sim.js';
 import { computePlpSim } from '../ops/plp-sim.js';
+import { computeMarginLoopSim } from '../ops/margin-loop-sim.js';
 import { log } from '../util/log.js';
 
 interface ApiDeps {
@@ -461,6 +462,24 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     } catch (e) {
       res.status(502).json({ error: e instanceof Error ? e.message : String(e) });
     }
+  });
+
+  /**
+   * Three-protocol margin-loop SIMULATION (idea bank #4): borrow on
+   * deepbook_margin, deploy into the favored-side Predict strategies, repay
+   * from settlements. Strategy leg = this bot's real settled trades; borrow
+   * APR is an explicit assumption (no public rate feed yet).
+   *
+   *   GET /margin-loop?collateral=100&ltv=0.5&borrowApr=0.1
+   */
+  app.get('/margin-loop', (req, res) => {
+    res.json(
+      computeMarginLoopSim(deps.ledger.settledFavoredTrades(), {
+        collateralUsdc: clampFloat(req.query.collateral, 1, 1_000_000, 100),
+        ltv: clampFloat(req.query.ltv, 0, 0.9, 0.5),
+        borrowApr: clampFloat(req.query.borrowApr, 0, 1, 0.1),
+      }),
+    );
   });
 
   /**

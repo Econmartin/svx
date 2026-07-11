@@ -1014,6 +1014,35 @@ export class LedgerStore {
       }));
   }
 
+  /**
+   * Settled Predict-side trades for the favored-side strategies — the real
+   * strategy leg of the margin-loop simulation (entry/settle times, cost,
+   * realized PnL per trade).
+   */
+  settledFavoredTrades(): Array<{
+    tsMs: number;
+    settledAtMs: number;
+    costUsdc: number;
+    pnlUsdc: number;
+  }> {
+    return this.db
+      .prepare<
+        [],
+        { ts_ms: number; settled_at_ms: number | null; cost_usdc: number; pnl_usdc: number }
+      >(
+        `SELECT ts_ms, settled_at_ms, cost_usdc, pnl_usdc FROM trades
+         WHERE strategy IN ('divergence_mint', 'calibration_harvest')
+           AND settled = 1 AND pnl_usdc IS NOT NULL AND settled_at_ms IS NOT NULL`,
+      )
+      .all()
+      .map((r) => ({
+        tsMs: r.ts_ms,
+        settledAtMs: r.settled_at_ms!,
+        costUsdc: r.cost_usdc,
+        pnlUsdc: r.pnl_usdc,
+      }));
+  }
+
   // ── Butterfly-harvester telemetry ─────────────────────────────────────────
 
   /** Bump the scan counter (persisted so restarts don't zero the denominator). */

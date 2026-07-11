@@ -254,6 +254,33 @@ export interface PlpSimSummary {
   data_window: { firstTsIso: string | null; lastTsIso: string | null };
 }
 
+/** Response of `GET /margin-loop` — the three-protocol margin-loop sim. */
+export interface MarginLoopSummary {
+  strategy: {
+    trades: number;
+    window_days: number | null;
+    roi_per_trade: number | null;
+    win_rate: number | null;
+    avg_hold_hours: number | null;
+    typical_open_exposure_usdc: number | null;
+    daily_pnl_usdc: number | null;
+    annualized_pnl_usdc: number | null;
+    worst_day_pnl_usdc: number | null;
+  };
+  loop: {
+    collateral_usdc: number;
+    ltv: number;
+    borrowed_usdc: number;
+    borrow_apr_assumed: number;
+    interest_per_year_usdc: number;
+    utilization: number | null;
+    levered_net_apy: number | null;
+    unlevered_apy: number | null;
+  };
+  note: string;
+  data_window: { firstTsIso: string | null; lastTsIso: string | null };
+}
+
 /** Response of `GET /butterfly` — digital-monotonicity violations found on
  *  the fitted SVI surface (butterfly-harvester telemetry). */
 export interface ButterflyReport {
@@ -588,6 +615,10 @@ export function createApi(base: string) {
         `/range-sim?policy=${q.policy ?? 'sigma'}&rungs=${q.rungs ?? 5}&width=${q.width ?? 0.5}`,
       ),
     plpSim: (z = 2) => get<PlpSimSummary>(`/plp-sim?z=${z}`),
+    marginLoop: (q: { collateral?: number; ltv?: number; borrowApr?: number } = {}) =>
+      get<MarginLoopSummary>(
+        `/margin-loop?collateral=${q.collateral ?? 100}&ltv=${q.ltv ?? 0.5}&borrowApr=${q.borrowApr ?? 0.1}`,
+      ),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
     surfaceHistory: (oracleId: string, limit = 200) =>
       get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),

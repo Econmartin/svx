@@ -15,7 +15,7 @@
 import { useCallback } from 'react';
 import { useApiClient } from '@/lib/network-context';
 import { usePolling } from '@/lib/usePolling';
-import { type PlpSimSummary, type RangeSimSummary } from '@/lib/api';
+import { type MarginLoopSummary, type PlpSimSummary, type RangeSimSummary } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PageIntro } from '@/components/PageIntro';
@@ -33,19 +33,21 @@ interface PageData {
   plp: PlpSimSummary | null;
   plpNear: PlpSimSummary | null;
   plpFar: PlpSimSummary | null;
+  marginLoop: MarginLoopSummary | null;
 }
 
 export default function VaultsPage() {
   const client = useApiClient();
   const fetcher = useCallback(async (): Promise<PageData> => {
     const grab = <T,>(p: Promise<T>) => p.catch(() => null);
-    const [s05, s10, b25, plpNear, plp, plpFar] = await Promise.all([
+    const [s05, s10, b25, plpNear, plp, plpFar, marginLoop] = await Promise.all([
       grab(client.rangeSim({ policy: 'sigma', width: 0.5 })),
       grab(client.rangeSim({ policy: 'sigma', width: 1 })),
       grab(client.rangeSim({ policy: 'fixed_bps', width: 25 })),
       grab(client.plpSim(1.5)),
       grab(client.plpSim(2)),
       grab(client.plpSim(3)),
+      grab(client.marginLoop({ collateral: 100, ltv: 0.5, borrowApr: 0.1 })),
     ]);
     return {
       ladders: [
@@ -56,6 +58,7 @@ export default function VaultsPage() {
       plp,
       plpNear,
       plpFar,
+      marginLoop,
     };
   }, [client]);
   const { data, error } = usePolling(fetcher, 60_000);
@@ -269,6 +272,74 @@ export default function VaultsPage() {
             </>
           ) : (
             <div className="text-muted text-sm py-6 text-center">Loading…</div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            Three-protocol margin loop
+            <Badge variant="outline" className="text-[10px]">simulated · live when Predict ships mainnet</Badge>
+          </CardTitle>
+          <p className="text-xs text-muted mt-0.5">
+            Borrow dUSDC on <code className="font-mono text-[10px]">deepbook_margin</code> against
+            an <code className="font-mono text-[10px]">iron_bank</code> USDsui share, deploy into
+            the favored-side strategies, repay from settlements. Strategy leg = this bot&apos;s
+            real settled trades; borrow APR is an explicit assumption (no public rate feed).{' '}
+            <code className="font-mono text-[10px]">GET /margin-loop</code>.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {data?.marginLoop && data.marginLoop.strategy.trades > 0 ? (
+            <>
+              <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm font-mono tabular-nums">
+                <span>
+                  <span className="text-muted text-xs uppercase tracking-wider">strategy leg</span>{' '}
+                  {data.marginLoop.strategy.trades} trades ·{' '}
+                  {data.marginLoop.strategy.win_rate != null
+                    ? `${(data.marginLoop.strategy.win_rate * 100).toFixed(0)}% win`
+                    : '—'}{' '}
+                  · {data.marginLoop.strategy.roi_per_trade != null
+                    ? `${(data.marginLoop.strategy.roi_per_trade * 100).toFixed(1)}%/trade`
+                    : '—'}
+                </span>
+                <span>
+                  <span className="text-muted text-xs uppercase tracking-wider">borrow</span>{' '}
+                  ${data.marginLoop.loop.borrowed_usdc} @ {(data.marginLoop.loop.borrow_apr_assumed * 100).toFixed(0)}% (assumed)
+                </span>
+                <span>
+                  <span className="text-muted text-xs uppercase tracking-wider">utilization</span>{' '}
+                  {data.marginLoop.loop.utilization != null
+                    ? `${(data.marginLoop.loop.utilization * 100).toFixed(0)}%`
+                    : '—'}
+                </span>
+                <span>
+                  <span className="text-muted text-xs uppercase tracking-wider">levered net APY</span>{' '}
+                  <span
+                    className={
+                      (data.marginLoop.loop.levered_net_apy ?? 0) >= 0 ? 'text-win' : 'text-loss'
+                    }
+                  >
+                    {data.marginLoop.loop.levered_net_apy != null
+                      ? `${(data.marginLoop.loop.levered_net_apy * 100).toFixed(1)}%`
+                      : '—'}
+                  </span>
+                </span>
+              </div>
+              <p className="text-xs text-muted mt-3 leading-relaxed max-w-3xl">
+                The honest number to watch is <strong>utilization</strong>: a borrow only earns
+                where the signal flow can deploy it. At small clip sizes most of the borrow idles
+                and interest dominates — the loop starts making sense when clip sizes grow into
+                the borrow, which is a post-mainnet scaling decision, not a hackathon one. The
+                execution path (intent builders for all three protocols) already exists from the
+                margin-lever build.
+              </p>
+            </>
+          ) : (
+            <div className="text-muted text-sm py-6 text-center">
+              Fills in as favored-side trades settle on this bot.
+            </div>
           )}
         </CardContent>
       </Card>

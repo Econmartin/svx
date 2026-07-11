@@ -23,6 +23,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.bot
+    # Explicit shared tag: bot and bot-mainnet are byte-identical images
+    # (same Dockerfile, context, args). Building them as two compose targets
+    # exported + unpacked the SAME image twice in parallel, which doubled
+    # the peak disk I/O of every deploy — enough to starve the host's sshd
+    # and drop Coolify's SSH channel (exit 255, "failed" deploys whose
+    # builds actually completed). bot builds once; bot-mainnet runs the tag.
+    image: "svx-bot-${COOLIFY_RESOURCE_UUID:-local}:latest"
     restart: unless-stopped
     environment:
       # Coolify magic env: generates a public FQDN and routes :4321 to it.
@@ -102,9 +109,11 @@ services:
   #   MAINNET_HL_PRIVATE_KEY     — viem-format EVM private key for the HL operator
   # ===========================================================================
   bot-mainnet:
-    build:
-      context: .
-      dockerfile: Dockerfile.bot
+    # No build section on purpose — runs the image the `bot` service builds
+    # (see note there). Runtime env is what differentiates the two bots.
+    image: "svx-bot-${COOLIFY_RESOURCE_UUID:-local}:latest"
+    depends_on:
+      - bot
     restart: unless-stopped
     environment:
       SERVICE_FQDN_BOT_MAINNET_4321: ""

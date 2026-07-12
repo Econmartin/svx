@@ -82,6 +82,7 @@ const baseCfg: SvxConfig = {
   calibrationHarvestNotionalDusdc: 5,
   calibrationHarvestMaxOpen: 10,
   calibrationHarvestDailyLossLimitDusdc: 20,
+  favoredMintMaxTtmHours: 24,
   butterflyCheckIntervalMs: 60_000,
   butterflyMinMarginFrac: 0.01,
   butterflyTradeableMarginFrac: 0.05,

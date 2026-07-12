@@ -164,6 +164,8 @@ const Schema = z.object({
   calibrationHarvestNotionalDusdc: z.number().positive().default(5),
   calibrationHarvestMaxOpen: z.number().int().positive().default(10),
   calibrationHarvestDailyLossLimitDusdc: z.number().positive().default(20),
+  /** Max time-to-expiry for favored-side mints (validated-tenor gate). */
+  favoredMintMaxTtmHours: z.number().positive().default(24),
   // ── Butterfly telemetry (see strategy/butterfly.ts) ──
   butterflyCheckIntervalMs: z.number().int().positive().default(60_000),
   butterflyMinMarginFrac: z.number().min(0).max(1).default(0.01),
@@ -412,6 +414,7 @@ export function loadConfig(): SvxConfig {
     calibrationHarvestNotionalDusdc: TUNABLES.calibrationHarvestNotionalDusdc,
     calibrationHarvestMaxOpen: TUNABLES.calibrationHarvestMaxOpen,
     calibrationHarvestDailyLossLimitDusdc: TUNABLES.calibrationHarvestDailyLossLimitDusdc,
+    favoredMintMaxTtmHours: TUNABLES.favoredMintMaxTtmHours,
     butterflyCheckIntervalMs: TUNABLES.butterflyCheckIntervalMs,
     butterflyMinMarginFrac: TUNABLES.butterflyMinMarginFrac,
     butterflyTradeableMarginFrac: TUNABLES.butterflyTradeableMarginFrac,

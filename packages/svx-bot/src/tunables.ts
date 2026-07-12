@@ -391,6 +391,11 @@ export const TUNABLES = {
   calibrationHarvestMaxOpen: 10,
   /** Stand down for the day at −this realized dUSDC over trailing 24h. */
   calibrationHarvestDailyLossLimitDusdc: 20,
+  /** Shared tenor gate for BOTH favored-side strategies: skip oracles
+   *  expiring beyond this. The 94%/90.6% validation windows averaged
+   *  ~5.6h cycles; Predict also lists weekly oracles — out-of-sample
+   *  tenor where each mint parks a clip for days with no exit. */
+  favoredMintMaxTtmHours: 24,
 
   // ─────────────────────────────────────────────────────────────────────────
   // Butterfly-harvester TELEMETRY (see strategy/butterfly.ts) — counts

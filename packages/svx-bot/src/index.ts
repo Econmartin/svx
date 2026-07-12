@@ -2799,16 +2799,37 @@ async function maybeFavoredMint(args: {
   const { ledger, cfg, live, state, oracleSnap, polySnap, strategy, gates } = args;
   const nowMs = Date.now();
 
+  // Tenor gate: the favored-side edge is validated on sub-day oracle cycles
+  // (~5.6h average). Predict also lists longer-dated oracles (weeklies) —
+  // out-of-sample tenor, and each mint parks a clip until expiry with no
+  // exit primitive. Stand down beyond the validated horizon.
+  const ttmMs = oracleSnap.expiryMs - nowMs;
+  if (ttmMs > cfg.favoredMintMaxTtmHours * 3600_000) {
+    log.debug('svx.divergence.skip', {
+      oracle: oracleSnap.oracleId.slice(0, 10),
+      strategy,
+      reason: `ttm_beyond_validated:${(ttmMs / 3600_000).toFixed(1)}h>${cfg.favoredMintMaxTtmHours}h`,
+    });
+    return;
+  }
+
   // Cross-strategy dedupe: divergence can drift across the band boundary
   // between ticks, so one (oracle, strike) must never hold BOTH a mint and
   // a harvest — that would be double exposure to one settlement event.
+  // ALSO refuse when ANY strategy holds the OPPOSITE direction on this
+  // (oracle, strike): the arb leg runs earlier in the same tick and can
+  // open the other side — stacking UP+DOWN pays the protocol spread on a
+  // partially self-cancelling position (the audit's opposite-block, which
+  // only guarded the arb path, extended to the favored-mint path).
+  const favoredDirection: 'up' | 'down' = args.predictUp >= 0.5 ? 'up' : 'down';
   const hasOpenForSignal =
     ledger.hasOpenStrategyTradeForSignal(oracleSnap.oracleId, polySnap.strike, 'divergence_mint') ||
     ledger.hasOpenStrategyTradeForSignal(
       oracleSnap.oracleId,
       polySnap.strike,
       'calibration_harvest',
-    );
+    ) ||
+    ledger.hasOppositeOpenForSignal(oracleSnap.oracleId, polySnap.strike, favoredDirection);
 
   const decision = decideFavoredMint(
     {

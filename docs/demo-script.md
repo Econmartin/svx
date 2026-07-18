@@ -107,6 +107,17 @@ you can believe the next two pages."**
 
 ## Parking-lot answers (if asked)
 
+- **"Why are there no live trades right now?"** Tell it proactively — it's
+  a strength: Sui's scheduled JSON-RPC shutoff (testnet: week of July 6)
+  broke Mysten's own predict-server indexer — curl their /status and it
+  says "failed to get latest checkpoint: 404". The SVI feed froze July 12;
+  since then our bot has evaluated ~48,000 signals a day and refused every
+  one via the svi_stale filter. The brief asked for "a kill switch on
+  feeder lag" and "a live stress test of the SVI feeder" — both are
+  demonstrating themselves live. The same shutoff hit OUR bot July 9; we
+  diagnosed it and migrated RPC providers within the hour, then reported
+  the feeder outage to the DeepBook team. Open positions are safe on-chain
+  awaiting their settlement crank.
 - **"Why is poly-arb only breakeven?"** The entry edge was real but
   execution slippage ate it — measured at 5–10pp on stops via minute-level
   prices-history. The exit ladder shipped this week; re-measuring over the

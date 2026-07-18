@@ -1,9 +1,18 @@
 # SVX demo-day script (5:00, strict)
 
-**Format:** open `svx.econmartin.xyz/present` full-screen. Seven slides in
-the judging brief's required order. Arrow keys or click to advance. A few
-numbers on the slides are fetched live from the running bots (green dot);
-each has a safe fallback, so nothing can blank mid-talk.
+**Format:** open `svx.econmartin.xyz/present` full-screen. The sequence
+INTERLEAVES slides with the site's real live pages — eleven steps total:
+
+  slide, slide, LIVE /surface, slide, LIVE /poly-arb (mainnet
+  auto-selected), slide, LIVE /vaults, slide, slide, LIVE /divergence-mint,
+  closing slide.
+
+Arrow-Right advances through everything (slides AND pages) from anywhere;
+Arrow-Left goes back; Escape exits presenter mode. On live-page steps a
+small corner chip shows the step number and what to point at — the page
+itself is the real running site. Slide numbers with a green dot are
+fetched live from the bots; each has a safe fallback, so nothing can blank
+mid-talk. Speak the page beats below while the live page is on screen.
 
 **Speak in plain words.** No Greek letters, no equations out loud — the
 script below is written exactly as it should be said.

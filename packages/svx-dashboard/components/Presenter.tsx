@@ -138,8 +138,8 @@ const STEPS: Step[] = [
           </div>
         </div>
         <p className="text-2xl max-w-4xl">
-          SVX is all three — <Big>Predict&apos;s first independent trading desk, external auditor,
-          and infrastructure monitor</Big>. Live today.
+          SVX is all three — <Big>one of Predict&apos;s first independent trading desks, external
+          auditors, and infrastructure monitors</Big>. Live today.
         </p>
       </div>
     ),
@@ -358,8 +358,8 @@ const STEPS: Step[] = [
         </ul>
         <div className="pt-6 border-t border-border max-w-5xl">
           <p className="text-3xl leading-relaxed">
-            SVX: Predict&apos;s first independent trading desk, first external auditor, and first
-            infrastructure monitor. <Big>Live today. Mainnet on day one.</Big>
+            SVX: one of Predict&apos;s first independent trading desks, external auditors, and
+            infrastructure monitors. <Big>Live today. Mainnet on day one.</Big>
           </p>
           <p className="text-xl text-muted mt-4 font-mono">
             svx.econmartin.xyz — everything verifiable now

@@ -26,8 +26,8 @@ strategies that do.
 > bad prices. It needs an outside check that the prices are honest. And it
 > needs tooling that survives real outages.
 >
-> SVX does all three. It is the first outside bot trading Predict, and it
-> is running right now."
+> SVX does all three. It is one of the first outside bots trading Predict,
+> and it is running right now."
 
 ## Slide 2 — What we found (0:40–1:15)
 
@@ -160,7 +160,8 @@ strategies that do.
 > transaction blocks that open a whole ladder of bets in one atomic
 > transaction.
 >
-> SVX. The first outside desk on Predict. Live today. Mainnet on day one.
+> SVX. One of the first outside desks on Predict. Live today. Mainnet on
+> day one.
 > Everything I said, you can check right now at svx dot econmartin dot
 > xyz."
 
@@ -201,7 +202,7 @@ strategies that do.
   vault research. `/wallets` for on-chain proof with transaction digests.
   `/signals` for every refused signal.
 - **"Why would others run this?"** The edge is published and the runbook
-  is public. More operators means tighter prices. We win by being first
+  is public. More operators means tighter prices. We win by being early
   and by selling the services.
 - **"Vault? Token?"** Not until audit and legal sign-off. Single operator
   keeps it clean today.

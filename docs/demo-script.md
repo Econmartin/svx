@@ -18,16 +18,25 @@ strategies that do.
 ## Slide 1 — What SVX is (0:00–0:30)
 
 > "SVX is a trading bot for prediction markets, built on DeepBook Predict,
-> which prices bets like will Bitcoin be above sixty-four thousand at two
-> p.m. from a live volatility surface. But a protocol alone is not a
+> which prices bets like:
+>
+> will Bitcoin be above $64,000 at 2 p.m.
+>
+> from a live volatility surface.
+>
+> But a protocol alone is not a
 > market. A market needs traders, honest-price checks, and tooling that
 > survives outages, and SVX is all three, running right now."
 
 ## Slide 2 — What we found (0:30–1:00)
 
 > "We compared Predict's own prices to what actually happened, with no
-> model of ours involved. Favorites priced around eighty-six cents won
-> every single time, twenty-four out of twenty-four, live from our ledger.
+> model of ours involved.
+>
+> Favorites priced around 86 cents
+> won every single time,
+> 24 out of 24, live from our ledger.
+>
 > Predict prices its favorites too low, and DeepBook's own audit tracks
 > the same finding. Here is the bot, live."
 
@@ -35,10 +44,11 @@ strategies that do.
 
 *Point at: oracle STALE, Signals 24h: 0, bankroll and PnL, the LIVE dot.*
 
-> "The bot is running, but the price feed has been frozen since July
-> twelfth on Predict's side, so it refuses to trade. Zero signals in
-> twenty-four hours, right there. That is the kill switch the brief asked
-> for, working in production."
+> "The bot is running, but the price feed has been frozen since July 12
+> on Predict's side, so it refuses to trade. Zero signals in 24 hours,
+> right there.
+>
+> That is the kill switch the brief asked for, working in production."
 
 ## Slide 3 — How it works (1:30–1:55)
 
@@ -46,14 +56,16 @@ strategies that do.
 > prices everything, Polymarket is where we trade real money, and
 > Hyperliquid measures actual volatility. Position caps, loss limits, and
 > the wallet is checked against our books, with trading pausing on any
-> drift. Here is the real money."
+> drift.
+>
+> Here is the real money."
 
 ## LIVE /poly-arb (mainnet) — what we kept (1:55–2:25)
 
 *Point at: the top cards. Fills, win rate, strategy PnL.*
 
-> "These are real Polymarket trades with our own money, three hundred
-> eighty-eight settled and eighty-one percent profitable. The strategy is
+> "These are real Polymarket trades with our own money, 388 settled and
+> 81% profitable. The strategy is
 > simple: when the two venues disagree on the same bet, we buy the cheap
 > side. And the next page is the one that failed."
 
@@ -63,19 +75,19 @@ strategies that do.
 
 > "Our first idea was wrong. We tried to trade implied against realized
 > volatility using a perpetual future, which is just a rolling bet on
-> price, so there was nothing to harvest. Five thousand trades and
-> twenty-nine dollars of fees for two dollars of movement, and we shut it
-> off in code. Overall real money is down seven dollars, up six from what
-> we kept and down thirteen from what we killed, and showing you that is
-> the point."
+> price, so there was nothing to harvest. 5,219 trades and $29 of fees
+> for $2 of movement, and we shut it off in code.
+>
+> Overall real money is down $7, up $6 from what we kept and down $13
+> from what we killed, and showing you that is the point."
 
 ## Slide 4 — Getting to mainnet (2:55–3:30)
 
 > "Three reasons we are ready. Everything we call is in the audited
 > package headed to mainnet, and the basic cycle runs end to end on
 > testnet. The vault ideas are answered by simulation, where narrow
-> ladders earned about ten percent over a hundred oracles and the
-> insurance idea lost money, so we published both. And the hard part
+> ladders earned about 10% over 100 oracles and the insurance idea lost
+> money, so we published both. And the hard part
 > already happened: Sui's RPC shutoff broke their feed and hit us too. We
 > migrated within the hour and reported it, and their fix is merged."
 
@@ -122,19 +134,18 @@ strategies that do.
 ## Q&A answers (short, honest)
 
 - **"What's your win rate?"** Two numbers, kept separate. Real money:
-  three hundred eighty-eight settled Polymarket fills, eighty-one percent
-  profitable. The ninety-four percent is a backtest of the favorites
-  strategy, recomputable live from our ledger. Executed favorites so far:
-  six settled, six wins (one live, five paper) plus four still open.
-- **"Why is real money down?"** Down seven total. Up six from the kept
-  strategies. Down thirteen from the hedge experiment we killed and wrote
-  up.
+  388 settled Polymarket fills, 81% profitable. The 94% is a backtest of
+  the favorites strategy, recomputable live from our ledger. Executed
+  favorites so far: 6 settled, 6 wins (1 live, 5 paper) plus 4 still
+  open.
+- **"Why is real money down?"** Down $7 total. Up $6 from the kept
+  strategies. Down $13 from the hedge experiment we killed and wrote up.
 - **"Why no trades right now?"** Sui turned off its old RPC. That broke
-  Predict's feed on July twelfth. Our bot sees tens of thousands of
+  Predict's feed on July 12. Our bot sees tens of thousands of
   candidates a day and refuses all of them: stale feed. Same shutoff hit
-  us July ninth; we fixed ours within the hour and reported theirs.
+  us July 9; we fixed ours within the hour and reported theirs.
 - **"When do trades resume?"** We checked on-chain: the feeder wallet went
-  silent at seventeen forty-eight UTC on July twelfth. Their fix is merged
+  silent at 17:48 UTC on July 12. Their fix is merged
   in their repo, not yet deployed. The moment their feed returns, our bot
   resumes by itself. Zero changes needed on our side.
 - **"Could your model be wrong about the mispricing?"** There is no model
@@ -196,10 +207,10 @@ strategies that do.
 
 > "This is where we tested the brief's vault ideas before risking money.
 > The ladder table replays a strategy that spreads bets across a range of
-> strikes. In the archived hundred-oracle study, narrow rungs earned about
-> ten percent. The live table only replays what the database still holds,
-> which is three oracles since the feed froze, and the note on the card
-> says exactly that. Below it is the liquidity-plus-insurance idea, which
+> strikes. In the archived 100-oracle study, narrow rungs earned about
+> 10%. The live table only replays what the database still holds, which
+> is 3 oracles since the feed froze, and the note on the card says
+> exactly that. Below it is the liquidity-plus-insurance idea, which
 > lost money in simulation, so we published the no."
 
 ### /wallets — the on-chain proof
@@ -208,10 +219,10 @@ strategies that do.
 the Polygon and Hyperliquid balances.*
 
 > "Everything I have claimed is checkable here. This is the bot's Sui
-> account: it started with five thousand test dollars and the balance now
-> reads about five thousand eighty, so up around eighty, with four open
-> positions still waiting on the stalled settlement. Realized profit
-> across all closed trades is plus one hundred fifty-four; the difference
+> account: it started with 5,000 test dollars and the balance now reads
+> about 5,080, so up around 80, with 4 open positions still waiting on
+> the stalled settlement. Realized profit across all closed trades is
+> plus 154; the difference
 > is capital sitting inside those open positions until the crank resumes.
 > Every transaction digest here is clickable and goes to the Sui explorer.
 > Below that, the real-money Polygon wallet and the Hyperliquid account,

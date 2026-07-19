@@ -159,7 +159,7 @@ strategies that do.
   hedge costs more than it saves. Re-enable conditions are on the page.
 - **"Your vaults page says three oracles?"** The live page recomputes on
   what the bot's database still holds: three, since the feed froze. The
-  hundred-oracle result is the archived study in our backtest report. Two
+  100-oracle result is the archived study in our backtest report. Two
   datasets, both labelled.
 - **"Show me the math."** `/surface` for the pricing. `/vaults` for the
   vault research. `/wallets` for on-chain proof with transaction digests.
@@ -179,7 +179,7 @@ strategies that do.
 
 ## Things to NOT say
 
-- Never "ninety-four percent win rate" without "backtest" in the same
+- Never "94% win rate" without "backtest" in the same
   sentence.
 - Never "we executed range ladders / LP supply on-chain". Coded and
   simulated only; the feed froze first.

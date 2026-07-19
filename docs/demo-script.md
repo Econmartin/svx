@@ -147,9 +147,13 @@ strategies that do.
 
 ## Slide 6 — How it pays for itself (4:20–4:40)
 
-> "Simple. The bot trades its own money. We find mispricings, test them,
-> and trade the ones that survive. Winners fund the operation. Losers get
-> shut off and written up.
+> "Simple. The bot trades its own money, in small positions on purpose.
+> We find mispricings, test them, and trade the ones that survive.
+> Winners fund the operation. Losers get shut off and written up.
+>
+> The next step is scale. As the strategies keep proving out, the position
+> sizes grow with them. And we keep building out the analytics and the
+> strategy checks.
 >
 > No token. No deposits. No pooled funds. If that ever changes, it happens
 > after an audit and legal sign-off, not before."

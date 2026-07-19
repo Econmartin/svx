@@ -307,13 +307,13 @@ const STEPS: Step[] = [
         <div className="grid grid-cols-3 gap-6 max-w-5xl text-xl">
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">Now</div>
-            The bot trades its own balance. Strategies that survive testing fund the operation.
-            Strategies that fail are shut off and written up.
+            The bot trades its own balance, in deliberately small positions. Strategies that
+            survive testing fund the operation. Strategies that fail are shut off and written up.
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
-            <div className="text-accent text-sm uppercase tracking-wider mb-2">At mainnet</div>
-            Same discipline, real economics. We keep finding mispricings, testing them, and
-            trading the ones that survive.
+            <div className="text-accent text-sm uppercase tracking-wider mb-2">Next</div>
+            Scale. As strategies keep proving out, position sizes grow with them. Alongside:
+            deeper analytics and more strategy checks.
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">

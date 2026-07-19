@@ -30,8 +30,8 @@ strategies that do.
 
 ## Slide 2 — What we found (0:30–1:00)
 
-> "We compared Predict's own prices to what actually happened, with no
-> model of ours involved.
+> "Here is what we found: we compared Predict's own prices to what
+> actually happened, with no model of ours involved.
 >
 > Favorites priced around 86 cents
 > won every single time,
@@ -64,10 +64,14 @@ strategies that do.
 
 *Point at: the top cards. Fills, win rate, strategy PnL.*
 
-> "These are real Polymarket trades with our own money, 388 settled and
-> 81% profitable. The strategy is
-> simple: when the two venues disagree on the same bet, we buy the cheap
-> side. And the next page is the one that failed."
+> "These are real Polymarket trades with our own money,
+>
+> 388 settled and 81% profitable.
+>
+> The strategy is simple: when the two venues disagree on the same bet,
+> we buy the cheap side.
+>
+> And the next page is the one that failed."
 
 ## LIVE /vol-arb (mainnet) — what failed (2:25–2:55)
 

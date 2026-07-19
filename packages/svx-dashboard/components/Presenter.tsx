@@ -119,29 +119,25 @@ const STEPS: Step[] = [
           SVX <span className="text-muted font-normal">· Surface Volatility Executor</span>
         </h1>
         <p className="text-2xl leading-relaxed max-w-4xl">
-          A trading bot for prediction markets, built on DeepBook Predict.
-        </p>
-        <p className="text-2xl leading-relaxed max-w-4xl">
-          Predict can price every strike from a live volatility surface. But a protocol alone is
-          not yet a <Big>market</Big>. A market needs three things:
+          A trading bot for prediction markets, built on DeepBook Predict. A market needs three
+          things a protocol cannot ship for itself:
         </p>
         <div className="grid grid-cols-3 gap-6 max-w-4xl text-xl">
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">1 · Traders</div>
-            professional participants who trade mispricings away
+            who trade mispricings away
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">2 · Verification</div>
-            an independent check that the prices are honest
+            that the prices are honest
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">3 · Operations</div>
-            tooling that survives real production conditions
+            that survive real outages
           </div>
         </div>
         <p className="text-2xl max-w-4xl">
-          SVX is all three: <Big>one of the first independent trading desks, price auditors, and
-          infrastructure monitors on Predict</Big>. Live today.
+          SVX is all three: <Big>one of the first outside desks on Predict</Big>. Live today.
         </p>
       </div>
     ),
@@ -154,20 +150,14 @@ const STEPS: Step[] = [
         <h2 className="text-4xl font-semibold tracking-tight">
           We measured the surface against reality
         </h2>
-        <p className="text-2xl leading-relaxed max-w-4xl">
-          Across <Big>{n.calibN} settled oracles</Big>
-          <LiveDot on={n.live} />, with no model of ours in the loop, Predict&apos;s favorites
-          quoted at an average of <Big>{n.calibQuoted}</Big> actually won{' '}
+        <p className="text-3xl leading-relaxed max-w-4xl">
+          <Big>{n.calibN} settled oracles</Big>
+          <LiveDot on={n.live} />: favorites quoted at <Big>{n.calibQuoted}</Big> won{' '}
           <Big>{n.calibRealized}</Big> of the time.
         </p>
-        <p className="text-2xl leading-relaxed max-w-4xl">
-          The surface is systematically <Big>underconfident below ninety cents</Big>.
-          DeepBook&apos;s own public pre-deployment audit tracks the same finding as open items
-          P-2 and O-1.
-        </p>
-        <p className="text-xl text-muted max-w-4xl">
-          We found it from the outside with live trading. Their auditors found it from the
-          inside. Same conclusion.
+        <p className="text-2xl leading-relaxed max-w-4xl text-muted">
+          Predict prices its favorites too low. DeepBook&apos;s own audit tracks the same
+          finding (P-2, O-1).
         </p>
         <p className="text-sm text-muted font-mono">next: the live bot, mid-outage →</p>
       </div>
@@ -190,28 +180,24 @@ const STEPS: Step[] = [
             <div className="text-accent text-sm uppercase tracking-wider mb-2">
               Predict (testnet)
             </div>
-            The pricing brain. We solve implied vol from the on-chain surface and mint live,
-            settled and redeemed on-chain. Range ladders and LP supply: built and simulated,
-            gated only by the frozen feed.
+            The pricing brain. Mint, settle, redeem, live on-chain.
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-warn text-sm uppercase tracking-wider mb-2">
               Polymarket (real money)
             </div>
             <Big>{n.polyFills} settled fills</Big>
-            <LiveDot on={n.live} /> on Polygon mainnet at a <Big>{n.polyWinRate} win rate</Big>,
-            reconciled against the wallet continuously. Trading pauses on unexplained drift.
+            <LiveDot on={n.live} /> at a <Big>{n.polyWinRate} win rate</Big>,
+            wallet-reconciled.
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-muted text-sm uppercase tracking-wider mb-2">Hyperliquid</div>
-            Realized-volatility feed from Bitcoin perpetual futures. The delta hedge we built
-            here was mis-sized: measured, post-mortemed, shut off.
+            Realized-volatility feed.
           </div>
         </div>
         <p className="text-2xl max-w-4xl leading-relaxed">
-          Honest ledger: real-money net is <Big>minus seven dollars</Big>. Plus six from the
-          strategies, minus thirteen from the hedge experiment we killed.{' '}
-          <span className="text-muted">Showing you the minus thirteen is the point.</span>
+          Real-money net: <Big>minus seven dollars</Big>. Plus six from what we kept, minus
+          thirteen from what we killed.
         </p>
         <p className="text-sm text-muted font-mono">next: the real-money side, live →</p>
       </div>
@@ -236,32 +222,24 @@ const STEPS: Step[] = [
     body: () => (
       <div className="space-y-7">
         <h2 className="text-4xl font-semibold tracking-tight">
-          Mainnet day one is a config flip — proven three ways
+          Mainnet day one is a config flip, proven three ways
         </h2>
-        <ol className="space-y-5 text-2xl max-w-5xl list-none">
+        <ol className="space-y-6 text-2xl max-w-5xl list-none">
           <li>
-            <Big>1.</Big> Every primitive we use (mint, permissionless redeem, ranges, LP supply)
-            is confirmed in the audited, mainnet-bound package. Binaries we have executed
-            <Big> end to end on testnet</Big>. Ranges and LP supply are built against the same
-            package and validated in simulation.
+            <Big>1.</Big> Every primitive is in the audited mainnet package. Binaries executed{' '}
+            <Big>end to end on testnet</Big>.
           </li>
           <li>
-            <Big>2.</Big> The strategy questions are pre-answered by simulation, as the track
-            requires. In our archived hundred-oracle replay, half-sigma range ladders returned{' '}
-            <Big>+10 percent</Big>. The LP-plus-insurance vault loses money, and we published
-            that <Big>no</Big> with its numbers.
+            <Big>2.</Big> Vault ideas answered by simulation: ladders <Big>yes (+10%)</Big>,
+            insurance <Big>no</Big>. Both published.
           </li>
           <li>
-            <Big>3.</Big> The production migration already happened to us. Sui&apos;s RPC shutoff
-            broke Predict&apos;s own feed, frozen since July 12. The fix is merged upstream, so it
-            looks like it is getting fixed. Our bot hit the same shutoff:{' '}
-            <Big>we migrated within the hour</Big>, reported the outage, and you just saw the
-            kill switch refusing signals live.
+            <Big>3.</Big> Sui&apos;s RPC shutoff hit us and them. <Big>We migrated within the
+            hour</Big>; their fix is merged.
           </li>
         </ol>
         <p className="text-xl text-muted max-w-4xl">
-          Mainnet also opens what testnet can&apos;t: real Predict economics, the three-protocol
-          margin loop (already built and simulated), multi-asset when they list Ethereum.
+          Mainnet adds: real economics, the margin loop, multi-asset.
         </p>
         <p className="text-sm text-muted font-mono">next: the Predict-native strategy, live →</p>
       </div>
@@ -281,19 +259,16 @@ const STEPS: Step[] = [
         <h2 className="text-4xl font-semibold tracking-tight">Who can use it</h2>
         <div className="space-y-6 text-2xl max-w-5xl">
           <p>
-            <Big>The Predict and Sui teams.</Big> An independent bot exercises their protocol end
-            to end, every day. When we find issues, mispricing or outages, we report them. The
-            current feed outage is a live example.
+            <Big>The Predict and Sui teams.</Big> An independent bot exercising their protocol
+            daily, reporting what it finds.
           </p>
           <p>
-            <Big>Independent operators.</Big> The whole stack is open source with a runbook.
-            Every additional operator is another trader pulling Predict&apos;s prices toward
-            fair, which is how the market gets trustworthy enough for size.
+            <Big>Independent operators.</Big> Open source with a runbook. More operators,
+            tighter prices.
           </p>
         </div>
         <p className="text-xl text-muted max-w-4xl">
-          Today it is one operator. The edge is measured and published; that is what attracts
-          the next one.
+          Today: one operator. The edge is published; that attracts the next one.
         </p>
       </div>
     ),
@@ -307,26 +282,19 @@ const STEPS: Step[] = [
         <div className="grid grid-cols-3 gap-6 max-w-5xl text-xl">
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">Now</div>
-            The bot trades its own balance, in deliberately small positions. Strategies that
-            survive testing fund the operation. Strategies that fail are shut off and written up.
+            Trades its own balance, small on purpose. Winners fund the operation.
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">Next</div>
-            Scale. As strategies keep proving out, position sizes grow with them. Alongside:
-            deeper analytics and more strategy checks.
+            Scale positions, deeper analytics, more strategy checks.
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">
               Deliberately not
             </div>
-            No token. No deposits. No pooled funds. Anything like that would come only after an
-            audit and legal sign-off.
+            No token, no deposits, no pooled funds without audit and legal sign-off.
           </div>
         </div>
-        <p className="text-xl text-muted max-w-4xl">
-          If the strategies are good, they pay for the operation. If they are not, we say so and
-          shut them off. That is the whole model.
-        </p>
         <p className="text-sm text-muted font-mono">next: why Sui →</p>
       </div>
     ),
@@ -339,25 +307,22 @@ const STEPS: Step[] = [
         <h2 className="text-4xl font-semibold tracking-tight">This cannot be built elsewhere</h2>
         <ul className="space-y-5 text-2xl max-w-5xl list-none">
           <li>
-            Predict is the <Big>only prediction protocol we know of priced from a live
-            volatility surface</Big>, and it exists because of Sui.
+            The <Big>only prediction protocol we know of priced from a live vol surface</Big>.
           </li>
           <li>
-            <Big>Sub-second finality</Big> makes sub-hour option cycles real.
+            <Big>Sub-second finality</Big> makes sub-hour markets real.
           </li>
           <li>
-            The <Big>object model</Big> gives us a manager account we mint, settle, and redeem
-            against in code.
+            <Big>Objects</Big> we mint, settle, and redeem against in code.
           </li>
           <li>
-            <Big>Programmable transaction blocks</Big> open an entire range ladder, or the full
-            three-protocol margin loop, atomically in one transaction.
+            <Big>One atomic transaction</Big> opens an entire ladder of bets.
           </li>
         </ul>
         <div className="pt-6 border-t border-border max-w-5xl">
           <p className="text-3xl leading-relaxed">
-            SVX: one of the first independent trading desks, price auditors, and infrastructure
-            monitors on Predict. <Big>Live today. Mainnet on day one.</Big>
+            SVX: one of the first outside desks on Predict.{' '}
+            <Big>Live today. Mainnet on day one.</Big>
           </p>
           <p className="text-xl text-muted mt-4 font-mono">svx.econmartin.xyz</p>
           <p className="text-sm text-muted font-mono mt-6">next: the live site →</p>

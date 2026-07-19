@@ -15,165 +15,107 @@ strategies that do.
 
 ---
 
-## Slide 1 — What SVX is (0:00–0:40)
+## Slide 1 — What SVX is (0:00–0:30)
 
-> "SVX is a trading bot. It trades prediction markets. Bets like: will
-> Bitcoin be above sixty-four thousand at two p.m.
->
-> DeepBook Predict is a new Sui protocol that prices those bets with real
-> options math, from a live volatility surface.
->
-> But a protocol alone is not a market. A market needs traders who correct
-> bad prices. It needs an outside check that the prices are honest. And it
-> needs tooling that survives real outages.
->
-> SVX does all three. It is one of the first outside bots trading Predict,
-> and it is running right now."
+> "SVX is a trading bot for prediction markets, built on DeepBook Predict,
+> which prices bets like will Bitcoin be above sixty-four thousand at two
+> p.m. from a live volatility surface. But a protocol alone is not a
+> market. A market needs traders, honest-price checks, and tooling that
+> survives outages, and SVX is all three, running right now."
 
-## Slide 2 — What we found (0:40–1:15)
+## Slide 2 — What we found (0:30–1:00)
 
-> "Here is our main finding. We compared Predict's own prices to what
-> actually happened. No model of ours involved.
->
-> When Predict priced a bet around eighty-six cents, meaning an
-> eighty-six percent chance, it won every single time. Twenty-four out of
-> twenty-four in the current window. That number is live from our ledger.
->
-> In short: Predict prices its favorites too low.
->
-> And DeepBook's own audit found the same issue: items P-two and O-one on
-> their public list. We found it from the outside. They found it from the
-> inside. Same answer.
->
-> Now the bot itself, live."
+> "We compared Predict's own prices to what actually happened, with no
+> model of ours involved. Favorites priced around eighty-six cents won
+> every single time, twenty-four out of twenty-four, live from our ledger.
+> Predict prices its favorites too low, and DeepBook's own audit tracks
+> the same finding. Here is the bot, live."
 
-## LIVE /overview — the bot, mid-outage (1:15–1:40)
+## LIVE /overview — the bot, mid-outage (1:00–1:30)
 
-*Point at: oracle STALE, the last-update age, Signals 24h: 0, the LIVE dot.*
+*Point at: oracle STALE, Signals 24h: 0, bankroll and PnL, the LIVE dot.*
 
-> "This is the real dashboard. The bot is running. But look: the price
-> feed is stale. It has been frozen since July twelfth, on Predict's side,
-> not ours.
->
-> So the bot refuses to trade. Zero signals in twenty-four hours. That
-> number right there. Trading on a frozen feed is trading on garbage.
->
-> The brief asked for a kill switch on feed lag. This is it. Working."
+> "The bot is running, but the price feed has been frozen since July
+> twelfth on Predict's side, so it refuses to trade. Zero signals in
+> twenty-four hours, right there. That is the kill switch the brief asked
+> for, working in production."
 
-## Slide 3 — How it works (1:40–2:10)
+## Slide 3 — How it works (1:30–1:55)
 
-> "Three venues. Predict, on Sui testnet: we read the surface, compute
-> fair prices, and mint bets on-chain: mint, settle, redeem, all executed
-> live. Polymarket, on Polygon: real money. That is where we proved we
-> can execute. Hyperliquid: gives us Bitcoin's actual volatility.
->
-> One risk stack over all of it. Position caps. Loss limits. And the
-> wallet is checked against our books. If they drift apart, trading
-> pauses itself.
->
-> Here is the real money."
+> "Under the hood there are three venues and one risk stack. Predict
+> prices everything, Polymarket is where we trade real money, and
+> Hyperliquid measures actual volatility. Position caps, loss limits, and
+> the wallet is checked against our books, with trading pausing on any
+> drift. Here is the real money."
 
-## LIVE /poly-arb (mainnet) — what we kept (2:10–2:35)
+## LIVE /poly-arb (mainnet) — what we kept (1:55–2:25)
 
 *Point at: the top cards. Fills, win rate, strategy PnL.*
 
-> "Real Polymarket trades, our own money. Three hundred eighty-eight
-> settled. Eighty-one percent made a profit. Live numbers.
->
-> The strategy is simple: when Predict and Polymarket disagree on the same
-> bet, buy the cheap side.
->
-> This page is a winner we kept. The next page is the one that failed."
+> "These are real Polymarket trades with our own money, three hundred
+> eighty-eight settled and eighty-one percent profitable. The strategy is
+> simple: when the two venues disagree on the same bet, we buy the cheap
+> side. And the next page is the one that failed."
 
-## LIVE /vol-arb (mainnet) — what failed (2:35–3:00)
+## LIVE /vol-arb (mainnet) — what failed (2:25–2:55)
 
-*Point at: the "Execution CUT" banner, the fee numbers, the ticker below.*
+*Point at: the "Execution CUT" banner, the fee numbers, the live ticker.*
 
-> "Our first idea. It was wrong. We tried to profit when implied
-> volatility disagreed with actual volatility, by trading a perpetual
-> future on Hyperliquid. A perpetual future is just a rolling bet on
-> Bitcoin's price. It moves with price, not volatility. So there was
-> nothing to harvest.
->
-> The bill: five thousand two hundred trades, twenty-nine dollars of fees,
-> two dollars of movement. We shut it off in code.
->
-> Across everything, real money is down seven dollars. Up six from what we
-> kept. Down thirteen from what we killed. We show the losses because that
-> is how you know the wins are real."
+> "Our first idea was wrong. We tried to trade implied against realized
+> volatility using a perpetual future, which is just a rolling bet on
+> price, so there was nothing to harvest. Five thousand trades and
+> twenty-nine dollars of fees for two dollars of movement, and we shut it
+> off in code. Overall real money is down seven dollars, up six from what
+> we kept and down thirteen from what we killed, and showing you that is
+> the point."
 
-## Slide 4 — Getting to mainnet (3:00–3:40)
+## Slide 4 — Getting to mainnet (2:55–3:30)
 
-> "Three reasons we are ready.
->
-> One: every function we call is in the
-> audited package headed to mainnet. The basic cycle we have run end to
-> end on testnet. Ranges and LP supply are coded and simulated, waiting
-> only on the frozen feed.
->
-> Two: we tested the vault ideas by simulation before risking money. Our
-> replay over a hundred settled oracles showed narrow range ladders
-> earning about ten percent. The insurance idea lost money, because the
-> insurance costs more than the yield. We published both answers.
->
-> Three: the hard part of production already happened to us. Sui switched
-> off its old RPC. It broke Predict's own feed. That is the freeze you
-> saw. It hit us too. We swapped providers within the hour and reported
-> the outage. Their fix is merged, so it looks like it is getting fixed."
+> "Three reasons we are ready. Everything we call is in the audited
+> package headed to mainnet, and the basic cycle runs end to end on
+> testnet. The vault ideas are answered by simulation, where narrow
+> ladders earned about ten percent over a hundred oracles and the
+> insurance idea lost money, so we published both. And the hard part
+> already happened: Sui's RPC shutoff broke their feed and hit us too. We
+> migrated within the hour and reported it, and their fix is merged."
 
-## LIVE /divergence-mint — what the failures taught us (3:40–4:00)
+## LIVE /divergence-mint — what the failures taught us (3:30–4:00)
 
 *Point at: the two strategy bands, the result cards, the backtest label.*
 
 > "The failures pointed at the real edge. Predict underprices favorites,
-> so we built two strategies that buy them. One buys when Predict and
-> Polymarket disagree by a lot. The other buys favorites in the quiet
-> cases. No overlap between them.
->
-> Every settled trade so far has won: one live here, five in the mainnet
-> mirror. Small sample; the feed froze days after launch. The replay below
-> says exactly what it is: a backtest."
+> so we built two strategies that buy them, one for big disagreements
+> between the venues and one for the quiet cases. Every settled trade so
+> far has won, on a small sample, and the replay down here is labelled
+> exactly what it is, a backtest."
 
-## Slide 5 — Who can use it (4:00–4:20)
+## Slide 5 — Who can use it (4:00–4:15)
 
-> "Two audiences. The Predict and Sui teams: we run their protocol end to
-> end every day, independently. When we find issues, we report them. The
-> feed outage you saw is a live example.
->
-> And other operators. The code is open source with a runbook, and every
-> new operator makes Predict's prices tighter.
->
-> Today it is one operator. The edge is measured and published, and that
-> is what attracts the next one."
+> "Two audiences. The Predict and Sui teams, because an independent bot
+> exercises their protocol daily and reports what it finds. And other
+> operators, because it is open source with a runbook, and every new
+> operator makes the prices tighter."
 
-## Slide 6 — How it pays for itself (4:20–4:40)
+## Slide 6 — How it pays for itself (4:15–4:35)
 
-> "Simple. The bot trades its own money, in small positions on purpose.
-> We find mispricings, test them, and trade the ones that survive.
-> Winners fund the operation. Losers get shut off and written up.
->
-> The next step is scale. As the strategies keep proving out, the position
-> sizes grow with them. And we keep building out the analytics and the
-> strategy checks.
->
-> No token. No deposits. No pooled funds. If that ever changes, it happens
-> after an audit and legal sign-off, not before."
+> "It pays for itself by trading its own money, in small positions on
+> purpose. Winners fund the operation and losers get shut off and written
+> up. The next step is scale, with deeper analytics and more strategy
+> checks along the way. And no token, no deposits, no pooled funds without
+> an audit and legal sign-off."
 
-## Slide 7 — Why Sui, and close (4:40–5:00)
+## Slide 7 — Why Sui, and close (4:35–4:55)
 
-> "Predict only exists on Sui, and it needs Sui. Settlement fast enough
-> for hour-long bets. Objects we can hold and redeem in code. And
-> transaction blocks that open a whole ladder of bets in one atomic
-> transaction.
->
-> SVX. One of the first outside desks on Predict. Live today. Mainnet on
-> day one."
+> "Why Sui? Because Predict only exists here: settlement fast enough for
+> hour-long bets, objects we can hold and redeem in code, and one atomic
+> transaction can open a whole ladder. SVX, one of the first outside desks
+> on Predict, live today, mainnet on day one."
 
 ## Step 12 — the live homepage (close)
 
 *One more Arrow-Right lands on the homepage. Leave it up for Q&A.*
 
-> "And this is it, live, right now."
+> "So that's SVX, live, looking forward to mainnet."
 
 ---
 

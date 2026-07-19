@@ -124,15 +124,15 @@ const STEPS: Step[] = [
           But a protocol is not yet a <Big>market</Big>.
         </p>
         <div className="grid grid-cols-3 gap-6 max-w-4xl text-xl">
-          <div className="rounded-xl border border-border p-5">
+          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-muted text-sm uppercase tracking-wider mb-2">Markets need</div>
             professional participants who trade mispricings away
           </div>
-          <div className="rounded-xl border border-border p-5">
+          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-muted text-sm uppercase tracking-wider mb-2">Markets need</div>
             independent verification that prices are honest
           </div>
-          <div className="rounded-xl border border-border p-5">
+          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-muted text-sm uppercase tracking-wider mb-2">Markets need</div>
             tooling that survives real production conditions
           </div>
@@ -184,7 +184,7 @@ const STEPS: Step[] = [
       <div className="space-y-8">
         <h2 className="text-4xl font-semibold tracking-tight">Three venues, one risk stack</h2>
         <div className="grid grid-cols-3 gap-6 max-w-5xl text-xl">
-          <div className="rounded-xl border border-border p-5">
+          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">
               Predict (testnet)
             </div>
@@ -192,7 +192,7 @@ const STEPS: Step[] = [
             settled and redeemed on-chain. Range ladders + LP supply: built and simulated,
             gated only by the frozen feed.
           </div>
-          <div className="rounded-xl border border-border p-5">
+          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-warn text-sm uppercase tracking-wider mb-2">
               Polymarket (real money)
             </div>
@@ -200,7 +200,7 @@ const STEPS: Step[] = [
             <LiveDot on={n.live} /> on Polygon mainnet at a <Big>{n.polyWinRate} win rate</Big>,
             reconciled against the wallet continuously — trading pauses on unexplained drift.
           </div>
-          <div className="rounded-xl border border-border p-5">
+          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-muted text-sm uppercase tracking-wider mb-2">Hyperliquid</div>
             Realized-volatility feed. The delta hedge we built here was mis-sized — measured,
             post-mortemed, shut off.
@@ -306,18 +306,18 @@ const STEPS: Step[] = [
       <div className="space-y-8">
         <h2 className="text-4xl font-semibold tracking-tight">Sustainability in three phases</h2>
         <div className="grid grid-cols-3 gap-6 max-w-5xl text-xl">
-          <div className="rounded-xl border border-border p-5">
+          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">Phase 1 — now</div>
             The bot trades its own balance. The strategies fund the operation.
           </div>
-          <div className="rounded-xl border border-border p-5">
+          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">
               Phase 2 — mainnet week one
             </div>
             Calibration feed + settled-redeem keeper as operator services — permissionless
             redeem is in the package; we run it as a paid service. Revenue from day one.
           </div>
-          <div className="rounded-xl border border-border p-5">
+          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">
               Phase 3 — post-audit
             </div>
@@ -450,28 +450,58 @@ export function Presenter() {
     );
   }
 
-  // Slide step: full-screen overlay above everything.
+  // Slide step: full-screen overlay above everything, styled to match the
+  // landing hero (same charcoal gradient, accent glows, and masked grid).
   return (
     <div
-      className="fixed inset-0 z-[60] bg-bg text-fg flex flex-col cursor-pointer select-none"
+      className="fixed inset-0 z-[60] text-fg flex flex-col cursor-pointer select-none"
+      style={{ background: 'linear-gradient(180deg, #0a1311 0%, #050807 90%)' }}
       onClick={(e) => {
         const x = e.clientX / window.innerWidth;
         if (x < 0.33) go(step - 1);
         else go(step + 1);
       }}
     >
-      <div className="flex items-center justify-between px-10 pt-6 text-sm text-muted">
-        <span className="uppercase tracking-widest">{s.tag}</span>
-        <span className="font-mono">
+      <div
+        aria-hidden
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(ellipse 90% 60% at 80% 10%, rgba(30, 255, 138, 0.18), transparent 70%), radial-gradient(ellipse 110% 70% at 0% 100%, rgba(30, 255, 138, 0.08), transparent 60%)',
+        }}
+      />
+      <div
+        aria-hidden
+        className="absolute inset-0 pointer-events-none opacity-70"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px)',
+          backgroundSize: '64px 64px',
+          maskImage: 'radial-gradient(ellipse 85% 80% at 60% 40%, black 30%, transparent 100%)',
+          WebkitMaskImage:
+            'radial-gradient(ellipse 85% 80% at 60% 40%, black 30%, transparent 100%)',
+        }}
+      />
+      <div className="relative flex items-center justify-between px-10 pt-6">
+        <span className="rounded-full border border-accent/40 bg-accent/10 text-accent px-3.5 py-1 text-[11px] font-medium uppercase tracking-[0.16em]">
+          {s.tag}
+        </span>
+        <span className="font-mono text-sm text-white/50">
           {step + 1} / {STEPS.length}
         </span>
       </div>
-      <div className="flex-1 flex items-center px-10 md:px-20 overflow-y-auto">
+      <div className="relative flex-1 flex items-center px-10 md:px-20 overflow-y-auto">
         <div className="w-full py-8">{s.body(n)}</div>
       </div>
-      <div className="px-10 pb-6 flex items-center justify-between text-xs text-muted">
+      <div className="relative px-10 pb-4 flex items-center justify-between text-xs text-white/40">
         <span>arrow keys or click to advance · Esc exits presenter mode</span>
         <span className="font-mono">svx.econmartin.xyz</span>
+      </div>
+      <div className="relative h-0.5 bg-white/10">
+        <div
+          className="h-full bg-accent transition-all duration-300"
+          style={{ width: `${((step + 1) / STEPS.length) * 100}%` }}
+        />
       </div>
     </div>
   );

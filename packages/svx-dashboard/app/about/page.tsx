@@ -139,8 +139,8 @@ export default function AboutPage() {
               body={
                 <>
                   If <code className="code">P_predict − P_poly_ask &gt; threshold</code> we buy <strong>Yes</strong> on
-                  Poly (cheap). The opposite spread side buys <strong>No</strong>. Default threshold is 3 percentage
-                  points.
+                  Poly (cheap). The opposite spread side buys <strong>No</strong>. Default threshold is 8 percentage
+                  points (raised from 3 after the July audit showed sub-8pp divergences carried no edge net of the book spread).
                 </>
               }
             />
@@ -275,7 +275,7 @@ export default function AboutPage() {
                 />
                 <SpecRow
                   req="Trades the spread when it exceeds a threshold"
-                  built="Live on Polygon mainnet via POLY_1271 Deposit Wallet flow. Default spread threshold 3pp; tunable in tunables.ts."
+                  built="Live on Polygon mainnet via POLY_1271 Deposit Wallet flow. Default spread threshold 8pp (raised from 3pp post-audit); tunable in tunables.ts."
                 />
                 <SpecRow
                   req="Stretch: delta-hedge the binary on Hyperliquid perps"

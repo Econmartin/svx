@@ -165,8 +165,10 @@ export default function PolyArbPage() {
             waiting hours.
           </>,
           <>
-            The HL hedge strips directional BTC exposure: short when we bought Yes,
-            long when we bought No. Total PnL = poly leg + hedge leg + funding.
+            The HL hedge (now <strong>disabled</strong>) stripped directional BTC exposure: short
+            when we bought Yes, long when we bought No. The 2026-07 audit found it sized at the
+            wrong expiry and it was shut off — historical rows still show poly leg + hedge leg +
+            funding.
           </>,
         ]}
       />

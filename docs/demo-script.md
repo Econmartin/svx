@@ -3,9 +3,9 @@
 **Format:** open `svx.econmartin.xyz/present` full-screen. The sequence
 INTERLEAVES slides with the site's real live pages — eleven steps total:
 
-  slide, slide, LIVE /surface, slide, LIVE /poly-arb (mainnet
-  auto-selected), slide, LIVE /vaults, slide, slide, LIVE /divergence-mint,
-  closing slide.
+  slide, slide, LIVE /overview, slide, LIVE /poly-arb (mainnet
+  auto-selected), LIVE /vol-arb (mainnet), slide, LIVE /divergence-mint,
+  slide, slide, closing slide.
 
 Arrow-Right advances through everything (slides AND pages) from anywhere;
 Arrow-Left goes back; Escape exits presenter mode. On live-page steps a
@@ -14,12 +14,15 @@ itself is the real running site. Slide numbers with a green dot are
 fetched live from the bots; each has a safe fallback, so nothing can blank
 mid-talk. Speak the page beats below while the live page is on screen.
 
+`/surface` and `/vaults` are deliberately NOT in the timed flow — they are
+the Q&A appendix (math and vault-simulation depth, on demand).
+
 **Speak in plain words.** No Greek letters, no equations out loud — the
 script below is written exactly as it should be said.
 
 ---
 
-## Slide 1 — Problem, solution, value (0:00–0:45)
+## Slide 1 — Problem, solution, value (0:00–0:40)
 
 > "Prediction markets today can't become real market structure, because
 > they're priced by vibes — hand-listed events, slow settlement, no
@@ -34,7 +37,7 @@ script below is written exactly as it should be said.
 > SVX is all three, running today: Predict's first independent trading
 > desk, its first external auditor, and its first infrastructure monitor."
 
-## Slide 2 — The proof (0:45–1:30)
+## Slide 2 — The proof (0:40–1:15)
 
 > "Here's the proof it matters. Across every settled oracle — with no
 > model of ours in the loop, just Predict's own quoted prices versus what
@@ -45,31 +48,59 @@ script below is written exactly as it should be said.
 > And here's the part I love: DeepBook's own public pre-deployment audit
 > tracks the same finding as open items P-two and O-one. We found it from
 > the outside with live trading; their auditors found it from the inside.
-> Same conclusion. That is exactly what an independent market participant
-> is for — and this number recomputes live from the bot's ledger; the URL
-> is on screen."
+> Same conclusion. Now let me show you the bot itself — live, in the
+> middle of a real outage."
 
-## Slide 3 — Technical implementation (1:30–2:25)
+## LIVE /overview — the kill switch, working (1:15–1:40)
+
+*Point at: oracle STALE and the last-update age; Signals 24h: zero; the
+testnet bankroll and realized PnL; the LIVE indicator at the bottom.*
+
+> "This is the real dashboard, right now. The bot process is live — but
+> Predict's oracle feed is stale; those are deliberately separate health
+> states. Instead of trading the enormous fake spreads that expired data
+> produces, every signal is being rejected. The brief asked for a kill
+> switch on feeder lag — this is it, demonstrating itself in production."
+
+## Slide 3 — Technical implementation (1:40–2:10)
 
 > "Under the hood: three venues, one risk stack. On Predict testnet we
 > solve implied volatility from the on-chain surface and mint live — both
 > binaries and range ladders, settled and redeemed on-chain. On Polymarket
-> we trade real money on Polygon mainnet: three hundred eighty-six settled
-> fills at an eighty-two percent win rate, and every cent reconciles — a
+> we trade real money on Polygon mainnet — and every cent reconciles: a
 > wallet-versus-ledger check pauses trading on unexplained drift.
 > Hyperliquid supplies our realized-volatility feed.
 >
-> And the honest ledger: real-money net is minus seven dollars — plus six
-> from the strategies, minus thirteen from a delta-hedge experiment we
-> measured, published the post-mortem for, and shut off. We think showing
-> you the minus thirteen is the point. We killed three strategies with
-> data; that's why you can trust the ones we kept."
+> Let me show you the real-money side — including the part that lost."
 
-*(If asked about the ninety-four percent later: that is a BACKTEST over
-the recorded signal stream, reproducible live from the bot's own ledger;
-the live executed sample is six for six, small but clean.)*
+## LIVE /poly-arb (mainnet) — real-money proof (2:10–2:35)
 
-## Slide 4 — Path to production (2:25–3:20)
+*Point at: the top cards — mainnet, real money; settled-trade count; win
+rate; strategy PnL. Mention the wallet-vs-ledger reconciliation.*
+
+> "This is not simulated. Three hundred eighty-six settled Polymarket
+> fills with the operator's own money, at an eighty-two percent win rate.
+> The retained strategy is positive. The total at the bottom includes a
+> failed experiment — which deserves its own page."
+
+## LIVE /vol-arb (mainnet) — the honest failure (2:35–3:00)
+
+*Point at: the "Execution CUT by the 2026-07 audit" banner; the $29.12 in
+fees for −$1.80 over 5,219 fills; the 2-second realized-vol ticker still
+running below.*
+
+> "Our first thesis was wrong, and here's the page that says so. A linear
+> perp has no volatility exposure, so it can't harvest an
+> implied-versus-realized spread: five thousand two hundred nineteen fills,
+> twenty-nine dollars in fees, for less than two dollars of price moves. We
+> reconciled it to the cent, hard-disabled it in code, and kept the useful
+> part — the realized-vol feed still runs and now protects the strategies
+> we kept. Real-money net across everything is minus seven dollars: plus
+> six from the keepers, minus thirteen from the experiments we killed.
+> Showing you the minus thirteen is the point — we kill strategies with
+> data, and that's why you can trust the ones we kept."
+
+## Slide 4 — Path to production (3:00–3:40)
 
 > "Mainnet day one isn't a promise for us — it's a config flip, and we can
 > prove readiness three ways.
@@ -83,50 +114,52 @@ the live executed sample is six for six, small but clean.)*
 > says: half-sigma-width rungs, plus ten percent. Our LP-plus-insurance
 > simulation says: don't — and we published that no with its numbers.
 >
-> Three — and this is the unusual one — the production migration already
-> happened to us. Sui deprecated its old RPC interface two weeks ago. It
-> broke Predict's own indexer; the feed has been frozen since July
-> twelfth — you can check their status endpoint yourself. Our bot hit the
-> same shutoff, we migrated providers within the hour, reported the outage
-> to the DeepBook team, and our feeder-lag kill switch has correctly
-> refused about forty-eight thousand signals a day ever since. That is
-> what production operations actually look like, and we've already done
-> them.
+> Three: the production migration already happened to us. Sui deprecated
+> its old RPC interface two weeks ago; it broke Predict's own feed — frozen
+> since July twelfth, their fix already merged upstream and awaiting
+> redeploy. Our bot hit the same shutoff, we migrated providers within the
+> hour, reported the outage to the DeepBook team — and you saw the result
+> two minutes ago: the kill switch refusing about forty-eight thousand
+> signals a day, correctly.
 >
 > And mainnet opens things testnet can't: real economics on the Predict
 > leg, the three-protocol margin loop becomes physically possible for the
-> first time — today those protocols live on different networks, and we've
-> already built and simulated it — and multi-asset the day they list
-> Ethereum."
+> first time — already built and simulated — and multi-asset the day they
+> list Ethereum."
 
-## Slide 5 — Users and product-market fit (3:20–3:55)
+## LIVE /divergence-mint — the Predict-native strategy (3:40–4:00)
+
+*Point at: both strategy bands (divergence-mint + calibration-harvest);
+the live result cards; the replay card with its explicit backtest label.*
+
+> "The failures led to the actual finding. That calibration gap became two
+> non-overlapping strategies: large cross-venue divergences, and the
+> remaining favorites below ninety cents. These are live testnet results,
+> and the replay below is labelled exactly what it is — a backtest."
+
+## Slide 5 — Users and product-market fit (4:00–4:20)
 
 > "Three users, in adoption order. Today: the protocol team — our
 > calibration feed and infrastructure monitoring are the analytics this
 > brief asked for; we're already effectively Predict's external test desk.
 > At mainnet: operators — the whole stack is open source with a runbook,
 > and every additional SVX instance is an independent arbitrageur pulling
-> the surface toward truth, which is how Predict's pricing becomes
-> trustworthy enough for size. Later: LPs, once the vault phase is
-> audited.
+> the surface toward truth. Later: LPs, once the vault phase is audited.
 >
 > Why they adopt is simple: quants go where there is measurable edge, and
 > we published the measurement."
 
-## Slide 6 — Monetization and roadmap (3:55–4:30)
+## Slide 6 — Monetization and roadmap (4:20–4:40)
 
 > "Sustainability in three phases, matching those users. Phase one, now:
 > the bot trades its own balance — the strategies fund the operation.
 > Phase two, mainnet week one: the calibration feed and a settled-redeem
 > keeper as services — the keeper claims other users' winning positions
 > for a tip, which is revenue from day one. Phase three, post-audit: the
-> tokenized vault — LPs deposit, the validated strategies run, with
-> on-chain economics anyone can audit.
->
-> Deliberately no token and no pooled funds until audit and legal
-> sign-off. That's a compliance choice, not a gap."
+> tokenized vault. Deliberately no token and no pooled funds until audit
+> and legal sign-off — that's a compliance choice, not a gap."
 
-## Slide 7 — Why Sui, and close (4:30–5:00)
+## Slide 7 — Why Sui, and close (4:40–5:00)
 
 > "Why Sui? Because this cannot be built anywhere else. Predict is the
 > only volatility-surface-priced prediction protocol in existence, and Sui
@@ -163,6 +196,15 @@ the live executed sample is six for six, small but clean.)*
   refuses every one via the staleness filter. The brief asked for a kill
   switch on feeder lag — it's demonstrating itself live. Same shutoff hit
   our bot July ninth; we migrated within the hour and reported the outage.
+- **"When do trades resume?" (follow-up)** We verified this on-chain, not
+  just through their API: the surface feeder's wallet posted its last
+  transaction at seventeen forty-eight UTC on July twelfth and has been
+  silent since — same minute their API's last surface row shows. The
+  server-side fix is already merged upstream — the DeepBook repo migrated
+  those reads to the new interface on July thirteenth — it just isn't
+  deployed yet. The moment their feeder resumes, our surface unfreezes and
+  trading restarts with zero changes on our side — the staleness gate
+  simply lifts itself.
 - **"Could the calibration gap be your model being wrong?"** No model of
   ours is in the loop — it compares Predict's own quoted probability
   against realized settlement outcomes. Our surface reader is validated to
@@ -170,11 +212,19 @@ the live executed sample is six for six, small but clean.)*
 - **"How do you know mainnet will have what you need?"** The primitives
   are in the audited mainnet-bound package — we read it. Their public
   pre-deploy tracker shows two remaining deploy gates, so mainnet is
-  weeks, not days — and we're a config flip behind it.
+  weeks, not days — and we're a config flip behind it. (Config flip means
+  our migration architecture is ready — if final mainnet interfaces shift,
+  that's an adapter change, not a redesign.)
 - **"Where's the delta hedge the brief suggested?"** Built, exercised with
   real money, then disabled: it sized the hedge at the wrong expiry, and
   at our clip sizes a correct hedge costs more than the risk it removes.
   The page documents the re-enable conditions.
+- **"Show me the math / the vault research."** The Q&A appendix pages:
+  `/surface` for the SVI smile, no-arbitrage checker, and butterfly
+  telemetry; `/vaults` for the ladder policy shoot-out, the PLP-plus-
+  insurance NO, and the margin-loop simulation. `/wallets` has the
+  on-chain proof — PredictManager objects and clickable Sui transaction
+  digests; `/signals` shows every current svi-stale rejection.
 - **"Why should anyone else run this?"** Because the edge is published and
   the runbook is public. Each new operator is an independent arbitrageur —
   and the more there are, the tighter Predict's surface gets. We win by

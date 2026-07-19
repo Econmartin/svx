@@ -167,15 +167,15 @@ const STEPS: Step[] = [
           We found it from the outside with live trading. Their auditors found it from the
           inside. Same conclusion.
         </p>
-        <p className="text-sm text-muted font-mono">next: the pricing brain, live →</p>
+        <p className="text-sm text-muted font-mono">next: the live bot, mid-outage →</p>
       </div>
     ),
   },
   {
     kind: 'page',
-    href: '/surface',
+    href: '/overview',
     network: 'testnet',
-    note: 'Point at: the SVI smile, the arbitrage-free checker, the butterfly telemetry card.',
+    note: 'Point at: oracle STALE + last-update age; Signals 24h = 0; bankroll + realized PnL; the LIVE indicator. This is the kill switch working.',
   },
   {
     kind: 'slide',
@@ -221,6 +221,12 @@ const STEPS: Step[] = [
     note: 'MAINNET auto-selected. Point at: settled trade rows with real PnL; mention the wallet-vs-ledger reconciliation.',
   },
   {
+    kind: 'page',
+    href: '/vol-arb',
+    network: 'mainnet',
+    note: 'The failure story. Point at: "Execution CUT by the 2026-07 audit" banner; $29.12 fees for −$1.80 over 5,219 fills; the 2s RV ticker still feeding convergence.',
+  },
+  {
     kind: 'slide',
     tag: 'Path to production',
     network: 'testnet',
@@ -243,24 +249,24 @@ const STEPS: Step[] = [
           </li>
           <li>
             <Big>3.</Big> The production migration already happened to us. Sui&apos;s RPC shutoff
-            broke Predict&apos;s own indexer — the feed has been frozen since July 12. Our bot hit
-            the same shutoff, <Big>we migrated within the hour</Big>, reported the outage, and our
-            feeder-lag kill switch has refused forty-eight thousand signals a day since.
+            broke Predict&apos;s own feed — frozen since July 12, their fix merged upstream and
+            awaiting redeploy. Our bot hit the same shutoff, <Big>we migrated within the hour</Big>,
+            reported the outage — and you just saw the kill switch refusing signals live.
           </li>
         </ol>
         <p className="text-xl text-muted max-w-4xl">
           Mainnet also opens what testnet can&apos;t: real Predict economics, the three-protocol
           margin loop (already built and simulated), multi-asset when they list Ethereum.
         </p>
-        <p className="text-sm text-muted font-mono">next: the vault simulations, live →</p>
+        <p className="text-sm text-muted font-mono">next: the Predict-native strategy, live →</p>
       </div>
     ),
   },
   {
     kind: 'page',
-    href: '/vaults',
+    href: '/divergence-mint',
     network: 'testnet',
-    note: 'Point at: ladder policy shoot-out (half-sigma wins), the PLP verdict table (the honest NO), margin-loop card.',
+    note: 'Point at: both strategy bands (mint + harvest); the live replay card with its backtest label; result cards. (Tx digests are on /wallets if asked.)',
   },
   {
     kind: 'slide',
@@ -321,15 +327,9 @@ const STEPS: Step[] = [
           Deliberately no token and no pooled funds until audit and legal sign-off — a compliance
           choice, not a gap.
         </p>
-        <p className="text-sm text-muted font-mono">next: the Predict-native strategy, live →</p>
+        <p className="text-sm text-muted font-mono">next: why Sui →</p>
       </div>
     ),
-  },
-  {
-    kind: 'page',
-    href: '/divergence-mint',
-    network: 'testnet',
-    note: 'Point at: live testnet mints with Sui transaction digests; both bands (mint + harvest); the live replay card.',
   },
   {
     kind: 'slide',

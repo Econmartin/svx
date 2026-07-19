@@ -83,7 +83,7 @@ strategies that do.
 > for $2 of movement, and we shut it off in code.
 >
 > Overall real money is down $7, up $6 from what we kept and down $13
-> from what we killed, and showing you that is the point."
+> from what we killed."
 
 ## Slide 4 — Getting to mainnet (2:55–3:30)
 
@@ -122,7 +122,7 @@ strategies that do.
 
 ## Slide 7 — Why Sui, and close (4:35–4:55)
 
-> "Why Sui? Because Predict only exists here: settlement fast enough for
+> "Why Sui? Because Predict only exists here: settlement is fast enough for
 > hour-long bets, objects we can hold and redeem in code, and one atomic
 > transaction can open a whole ladder. SVX, one of the first outside desks
 > on Predict, live today, mainnet on day one."

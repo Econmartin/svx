@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { NetworkProvider } from '@/lib/network-context';
 import { NetworkToggle } from '@/components/NetworkToggle';
 import { NavLinks } from '@/components/NavLinks';
-import { Presenter } from '@/components/Presenter';
 import { StatusTicker } from '@/components/StatusTicker';
 
 export const metadata: Metadata = {
@@ -34,8 +33,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <NetworkProvider>
-          {/* Demo-day presenter overlay — inert unless /present is visited. */}
-          <Presenter />
           {/* Ambient atmosphere — fixed-position, no interaction cost. */}
           <div className="svx-ambient" aria-hidden />
           <div className="svx-grid" aria-hidden />

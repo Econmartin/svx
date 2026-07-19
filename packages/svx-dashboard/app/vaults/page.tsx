@@ -140,6 +140,13 @@ export default function VaultsPage() {
             5 rungs around ATM per settled oracle, priced off the surface the vault would have
             seen, 2% fee. <code className="font-mono text-[10px]">GET /range-sim</code>.
           </p>
+          <p className="text-xs text-warn mt-1.5">
+            <strong>Live replay window:</strong> this table recomputes on the settled oracles the
+            running bot still retains full surface data for — few since the feed froze July 12.
+            The research verdict (half-sigma rungs, <span className="font-mono">+10.1%</span>) is
+            the archived <strong>104-oracle replay</strong> in the repo&apos;s backtest report;
+            this card exists to show the method runs live, not to restate that result.
+          </p>
         </CardHeader>
         <CardContent>
           {data ? (

@@ -16,7 +16,7 @@ strategies that do.
 
 ## Slide 1 — What SVX is (0:00–0:40)
 
-> "SVX is a trading bot. It trades prediction markets — bets like: will
+> "SVX is a trading bot. It trades prediction markets. Bets like: will
 > Bitcoin be above sixty-four thousand at two p.m.
 >
 > DeepBook Predict is a new Sui protocol that prices those bets with real
@@ -34,13 +34,13 @@ strategies that do.
 > "Here is our main finding. We compared Predict's own prices to what
 > actually happened. No model of ours involved.
 >
-> When Predict priced a bet around eighty-six cents — an eighty-six
-> percent chance — it won every single time. Twenty-four out of
+> When Predict priced a bet around eighty-six cents, meaning an
+> eighty-six percent chance, it won every single time. Twenty-four out of
 > twenty-four in the current window. That number is live from our ledger.
 >
 > In short: Predict prices its favorites too low.
 >
-> And DeepBook's own audit found the same issue — items P-two and O-one on
+> And DeepBook's own audit found the same issue: items P-two and O-one on
 > their public list. We found it from the outside. They found it from the
 > inside. Same answer.
 >
@@ -50,11 +50,11 @@ strategies that do.
 
 *Point at: oracle STALE, the last-update age, Signals 24h: 0, the LIVE dot.*
 
-> "This is the real dashboard. The bot is running. But look — the price
+> "This is the real dashboard. The bot is running. But look: the price
 > feed is stale. It has been frozen since July twelfth, on Predict's side,
 > not ours.
 >
-> So the bot refuses to trade. Zero signals in twenty-four hours — that
+> So the bot refuses to trade. Zero signals in twenty-four hours. That
 > number right there. Trading on a frozen feed is trading on garbage.
 >
 > The brief asked for a kill switch on feed lag. This is it. Working."
@@ -62,12 +62,12 @@ strategies that do.
 ## Slide 3 — How it works (1:40–2:10)
 
 > "Three venues. Predict, on Sui testnet: we read the surface, compute
-> fair prices, and mint bets on-chain — mint, settle, redeem, all executed
-> live. Polymarket, on Polygon: real money — that is where we proved we
+> fair prices, and mint bets on-chain: mint, settle, redeem, all executed
+> live. Polymarket, on Polygon: real money. That is where we proved we
 > can execute. Hyperliquid: gives us Bitcoin's actual volatility.
 >
 > One risk stack over all of it. Position caps. Loss limits. And the
-> wallet is checked against our books — if they drift apart, trading
+> wallet is checked against our books. If they drift apart, trading
 > pauses itself.
 >
 > Here is the real money."
@@ -89,9 +89,10 @@ strategies that do.
 *Point at: the "Execution CUT" banner, the fee numbers, the ticker below.*
 
 > "Our first idea. It was wrong. We tried to profit when implied
-> volatility disagreed with actual volatility, by trading a perp. But a
-> perp only moves with price, not volatility. There was nothing to
-> harvest.
+> volatility disagreed with actual volatility, by trading a perpetual
+> future on Hyperliquid. A perpetual future is just a rolling bet on
+> Bitcoin's price. It moves with price, not volatility. So there was
+> nothing to harvest.
 >
 > The bill: five thousand two hundred trades, twenty-nine dollars of fees,
 > two dollars of movement. We shut it off in code.
@@ -104,54 +105,54 @@ strategies that do.
 
 > "Three reasons we are ready.
 >
-> One: everything we call — mint, redeem, ranges, LP supply — is in the
+> One: every function we call is in the
 > audited package headed to mainnet. The basic cycle we have run end to
 > end on testnet. Ranges and LP supply are coded and simulated, waiting
 > only on the frozen feed.
 >
-> Two: we tested the vault ideas by simulation before risking money.
-> Range ladders: yes — plus ten percent in our archived hundred-oracle
-> replay. LP plus insurance: no — the insurance costs more than the yield.
-> We published both answers.
+> Two: we tested the vault ideas by simulation before risking money. Our
+> replay over a hundred settled oracles showed narrow range ladders
+> earning about ten percent. The insurance idea lost money, because the
+> insurance costs more than the yield. We published both answers.
 >
 > Three: the hard part of production already happened to us. Sui switched
-> off its old RPC. It broke Predict's own feed — that is the freeze you
-> saw. It hit us too. We swapped providers within the hour and reported it
-> to the DeepBook team. Their fix is merged and waiting on a redeploy.
-> Ours has been live for ten days."
+> off its old RPC. It broke Predict's own feed. That is the freeze you
+> saw. It hit us too. We swapped providers within the hour and reported
+> the outage. Their fix is merged, so it looks like it is getting fixed."
 
 ## LIVE /divergence-mint — what the failures taught us (3:40–4:00)
 
 *Point at: the two strategy bands, the result cards, the backtest label.*
 
-> "The failures pointed at the real edge. Predict underprices favorites —
+> "The failures pointed at the real edge. Predict underprices favorites,
 > so we built two strategies that buy them. One buys when Predict and
 > Polymarket disagree by a lot. The other buys favorites in the quiet
 > cases. No overlap between them.
 >
-> Every settled trade so far has won — one live here, five in the mainnet
+> Every settled trade so far has won: one live here, five in the mainnet
 > mirror. Small sample; the feed froze days after launch. The replay below
 > says exactly what it is: a backtest."
 
-## Slide 5 — Who uses it (4:00–4:20)
+## Slide 5 — Who can use it (4:00–4:20)
 
-> "Today: the Predict team. We are already their outside test desk — we
-> find issues and report them.
+> "Two audiences. The Predict and Sui teams: we run their protocol end to
+> end every day, independently. When we find issues, we report them. The
+> feed outage you saw is a live example.
 >
-> At mainnet: other operators. The code is open source with a runbook, and
-> every new operator makes Predict's prices tighter.
+> And other operators. The code is open source with a runbook, and every
+> new operator makes Predict's prices tighter.
 >
-> Later: people who just deposit into a vault. After an audit. Not before."
+> Today it is one operator. The edge is measured and published, and that
+> is what attracts the next one."
 
 ## Slide 6 — How it pays for itself (4:20–4:40)
 
-> "Now: the bot trades its own money.
+> "Simple. The bot trades its own money. We find mispricings, test them,
+> and trade the ones that survive. Winners fund the operation. Losers get
+> shut off and written up.
 >
-> Mainnet week one: two services. Our price-accuracy feed. And a redeem
-> service — we claim winnings for users who forget, for a fee.
->
-> Later: the vault. No token and no pooled money until audit and legal
-> sign-off. That is deliberate."
+> No token. No deposits. No pooled funds. If that ever changes, it happens
+> after an audit and legal sign-off, not before."
 
 ## Slide 7 — Why Sui, and close (4:40–5:00)
 
@@ -161,9 +162,7 @@ strategies that do.
 > transaction.
 >
 > SVX. One of the first outside desks on Predict. Live today. Mainnet on
-> day one.
-> Everything I said, you can check right now at svx dot econmartin dot
-> xyz."
+> day one."
 
 ---
 
@@ -173,13 +172,13 @@ strategies that do.
   three hundred eighty-eight settled Polymarket fills, eighty-one percent
   profitable. The ninety-four percent is a backtest of the favorites
   strategy, recomputable live from our ledger. Executed favorites so far:
-  six settled, six wins — one live, five paper — plus four still open.
+  six settled, six wins (one live, five paper) plus four still open.
 - **"Why is real money down?"** Down seven total. Up six from the kept
   strategies. Down thirteen from the hedge experiment we killed and wrote
   up.
 - **"Why no trades right now?"** Sui turned off its old RPC. That broke
   Predict's feed on July twelfth. Our bot sees tens of thousands of
-  candidates a day and refuses all of them — stale feed. Same shutoff hit
+  candidates a day and refuses all of them: stale feed. Same shutoff hit
   us July ninth; we fixed ours within the hour and reported theirs.
 - **"When do trades resume?"** We checked on-chain: the feeder wallet went
   silent at seventeen forty-eight UTC on July twelfth. Their fix is merged
@@ -188,14 +187,14 @@ strategies that do.
 - **"Could your model be wrong about the mispricing?"** There is no model
   of ours in that number. It is Predict's own price versus what actually
   happened.
-- **"Will mainnet have what you need?"** Yes — we read the package. Their
+- **"Will mainnet have what you need?"** Yes. We read the package. Their
   tracker shows two open gates, so mainnet is weeks away. If an interface
   shifts, that is an adapter change for us, not a redesign.
 - **"Where's the delta hedge?"** Built, run with real money, then
   disabled. It hedged at the wrong expiry, and at our sizes a correct
   hedge costs more than it saves. Re-enable conditions are on the page.
 - **"Your vaults page says three oracles?"** The live page recomputes on
-  what the bot's database still holds — three, since the feed froze. The
+  what the bot's database still holds: three, since the feed froze. The
   hundred-oracle result is the archived study in our backtest report. Two
   datasets, both labelled.
 - **"Show me the math."** `/surface` for the pricing. `/vaults` for the
@@ -203,9 +202,10 @@ strategies that do.
   `/signals` for every refused signal.
 - **"Why would others run this?"** The edge is published and the runbook
   is public. More operators means tighter prices. We win by being early
-  and by selling the services.
-- **"Vault? Token?"** Not until audit and legal sign-off. Single operator
-  keeps it clean today.
+  and by knowing the edges best.
+- **"Vault? Token?"** Neither exists and neither is promised. If we ever
+  pool funds, it happens after an audit and legal sign-off. Single
+  operator keeps it clean today.
 
 ## Fallbacks
 
@@ -217,10 +217,10 @@ strategies that do.
 
 - Never "ninety-four percent win rate" without "backtest" in the same
   sentence.
-- Never "we executed range ladders / LP supply on-chain" — coded and
+- Never "we executed range ladders / LP supply on-chain". Coded and
   simulated only; the feed froze first.
-- Never "the keeper earns a protocol tip" — the protocol has permissionless
-  redeem, no tip. The fee is our service.
-- Never "delta-neutral" — the hedge is off.
+- Never promise services or a vault as products. The model is: trade our
+  own money, publish the results.
+- Never "delta-neutral". The hedge is off.
 - Never "risk-free."
-- Never promise a mainnet date — point at their tracker.
+- Never promise a mainnet date. Point at their tracker.

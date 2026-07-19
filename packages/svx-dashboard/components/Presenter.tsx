@@ -116,30 +116,32 @@ const STEPS: Step[] = [
     body: () => (
       <div className="space-y-8">
         <h1 className="text-5xl font-semibold tracking-tight leading-tight">
-          SVX <span className="text-muted font-normal">— Surface Volatility Executor</span>
+          SVX <span className="text-muted font-normal">· Surface Volatility Executor</span>
         </h1>
         <p className="text-2xl leading-relaxed max-w-4xl">
-          A protocol can price every strike off a live volatility surface.
-          <br />
-          But a protocol is not yet a <Big>market</Big>.
+          A trading bot for prediction markets, built on DeepBook Predict.
+        </p>
+        <p className="text-2xl leading-relaxed max-w-4xl">
+          Predict can price every strike from a live volatility surface. But a protocol alone is
+          not yet a <Big>market</Big>. A market needs three things:
         </p>
         <div className="grid grid-cols-3 gap-6 max-w-4xl text-xl">
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
-            <div className="text-muted text-sm uppercase tracking-wider mb-2">Markets need</div>
+            <div className="text-accent text-sm uppercase tracking-wider mb-2">1 · Traders</div>
             professional participants who trade mispricings away
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
-            <div className="text-muted text-sm uppercase tracking-wider mb-2">Markets need</div>
-            independent verification that prices are honest
+            <div className="text-accent text-sm uppercase tracking-wider mb-2">2 · Verification</div>
+            an independent check that the prices are honest
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
-            <div className="text-muted text-sm uppercase tracking-wider mb-2">Markets need</div>
+            <div className="text-accent text-sm uppercase tracking-wider mb-2">3 · Operations</div>
             tooling that survives real production conditions
           </div>
         </div>
         <p className="text-2xl max-w-4xl">
-          SVX is all three — <Big>one of Predict&apos;s first independent trading desks, external
-          auditors, and infrastructure monitors</Big>. Live today.
+          SVX is all three: <Big>one of the first independent trading desks, price auditors, and
+          infrastructure monitors on Predict</Big>. Live today.
         </p>
       </div>
     ),
@@ -154,12 +156,12 @@ const STEPS: Step[] = [
         </h2>
         <p className="text-2xl leading-relaxed max-w-4xl">
           Across <Big>{n.calibN} settled oracles</Big>
-          <LiveDot on={n.live} /> — no model of ours in the loop — Predict&apos;s favorites quoted
-          at an average of <Big>{n.calibQuoted}</Big> actually won <Big>{n.calibRealized}</Big> of
-          the time.
+          <LiveDot on={n.live} />, with no model of ours in the loop, Predict&apos;s favorites
+          quoted at an average of <Big>{n.calibQuoted}</Big> actually won{' '}
+          <Big>{n.calibRealized}</Big> of the time.
         </p>
         <p className="text-2xl leading-relaxed max-w-4xl">
-          The surface is systematically <Big>underconfident below ninety cents</Big> — and
+          The surface is systematically <Big>underconfident below ninety cents</Big>.
           DeepBook&apos;s own public pre-deployment audit tracks the same finding as open items
           P-2 and O-1.
         </p>
@@ -188,8 +190,8 @@ const STEPS: Step[] = [
             <div className="text-accent text-sm uppercase tracking-wider mb-2">
               Predict (testnet)
             </div>
-            The pricing brain. We solve implied vol from the on-chain surface and mint live —
-            settled and redeemed on-chain. Range ladders + LP supply: built and simulated,
+            The pricing brain. We solve implied vol from the on-chain surface and mint live,
+            settled and redeemed on-chain. Range ladders and LP supply: built and simulated,
             gated only by the frozen feed.
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
@@ -198,16 +200,16 @@ const STEPS: Step[] = [
             </div>
             <Big>{n.polyFills} settled fills</Big>
             <LiveDot on={n.live} /> on Polygon mainnet at a <Big>{n.polyWinRate} win rate</Big>,
-            reconciled against the wallet continuously — trading pauses on unexplained drift.
+            reconciled against the wallet continuously. Trading pauses on unexplained drift.
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-muted text-sm uppercase tracking-wider mb-2">Hyperliquid</div>
-            Realized-volatility feed. The delta hedge we built here was mis-sized — measured,
-            post-mortemed, shut off.
+            Realized-volatility feed from Bitcoin perpetual futures. The delta hedge we built
+            here was mis-sized: measured, post-mortemed, shut off.
           </div>
         </div>
         <p className="text-2xl max-w-4xl leading-relaxed">
-          Honest ledger: real-money net is <Big>minus seven dollars</Big> — plus six from the
+          Honest ledger: real-money net is <Big>minus seven dollars</Big>. Plus six from the
           strategies, minus thirteen from the hedge experiment we killed.{' '}
           <span className="text-muted">Showing you the minus thirteen is the point.</span>
         </p>
@@ -238,22 +240,23 @@ const STEPS: Step[] = [
         </h2>
         <ol className="space-y-5 text-2xl max-w-5xl list-none">
           <li>
-            <Big>1.</Big> Every primitive we use — mint, permissionless redeem, ranges, LP supply
-            — is confirmed in the audited, mainnet-bound package. Binaries we have executed
-            <Big> end to end on testnet</Big>; ranges and LP supply are built against the same
+            <Big>1.</Big> Every primitive we use (mint, permissionless redeem, ranges, LP supply)
+            is confirmed in the audited, mainnet-bound package. Binaries we have executed
+            <Big> end to end on testnet</Big>. Ranges and LP supply are built against the same
             package and validated in simulation.
           </li>
           <li>
             <Big>2.</Big> The strategy questions are pre-answered by simulation, as the track
-            requires: range ladders won at <Big>half-sigma widths (+10 percent</Big>, archived
-            hundred-oracle replay); the LP-plus-insurance vault does <Big>not</Big> — and we
-            published that NO with its numbers.
+            requires. In our archived hundred-oracle replay, half-sigma range ladders returned{' '}
+            <Big>+10 percent</Big>. The LP-plus-insurance vault loses money, and we published
+            that <Big>no</Big> with its numbers.
           </li>
           <li>
             <Big>3.</Big> The production migration already happened to us. Sui&apos;s RPC shutoff
-            broke Predict&apos;s own feed — frozen since July 12, their fix merged upstream and
-            awaiting redeploy. Our bot hit the same shutoff, <Big>we migrated within the hour</Big>,
-            reported the outage — and you just saw the kill switch refusing signals live.
+            broke Predict&apos;s own feed, frozen since July 12. The fix is merged upstream, so it
+            looks like it is getting fixed. Our bot hit the same shutoff:{' '}
+            <Big>we migrated within the hour</Big>, reported the outage, and you just saw the
+            kill switch refusing signals live.
           </li>
         </ol>
         <p className="text-xl text-muted max-w-4xl">
@@ -272,29 +275,25 @@ const STEPS: Step[] = [
   },
   {
     kind: 'slide',
-    tag: 'Target users · product-market fit',
+    tag: 'Who can use it',
     body: () => (
       <div className="space-y-8">
-        <h2 className="text-4xl font-semibold tracking-tight">Three users, in adoption order</h2>
+        <h2 className="text-4xl font-semibold tracking-tight">Who can use it</h2>
         <div className="space-y-6 text-2xl max-w-5xl">
           <p>
-            <Big>Today — the protocol team.</Big> Our calibration feed and infrastructure
-            monitoring are the analytics the brief asked for. We are already, in practice,
-            Predict&apos;s external test desk.
+            <Big>The Predict and Sui teams.</Big> An independent bot exercises their protocol end
+            to end, every day. When we find issues, mispricing or outages, we report them. The
+            current feed outage is a live example.
           </p>
           <p>
-            <Big>At mainnet — operators.</Big> Open source with a runbook. Every additional SVX
-            instance is an independent arbitrageur pulling the surface toward truth — how
-            Predict&apos;s pricing becomes trustworthy enough for size.
-          </p>
-          <p>
-            <Big>Later — LPs.</Big> Once audited, the vault phase wraps the validated strategies
-            in tokenized shares.
+            <Big>Independent operators.</Big> The whole stack is open source with a runbook.
+            Every additional operator is another trader pulling Predict&apos;s prices toward
+            fair, which is how the market gets trustworthy enough for size.
           </p>
         </div>
         <p className="text-xl text-muted max-w-4xl">
-          Why they adopt: quants go where there is measurable edge — and we published the
-          measurement.
+          Today it is one operator. The edge is measured and published; that is what attracts
+          the next one.
         </p>
       </div>
     ),
@@ -304,30 +303,29 @@ const STEPS: Step[] = [
     tag: 'Monetization · roadmap',
     body: () => (
       <div className="space-y-8">
-        <h2 className="text-4xl font-semibold tracking-tight">Sustainability in three phases</h2>
+        <h2 className="text-4xl font-semibold tracking-tight">How it pays for itself</h2>
         <div className="grid grid-cols-3 gap-6 max-w-5xl text-xl">
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
-            <div className="text-accent text-sm uppercase tracking-wider mb-2">Phase 1 — now</div>
-            The bot trades its own balance. The strategies fund the operation.
+            <div className="text-accent text-sm uppercase tracking-wider mb-2">Now</div>
+            The bot trades its own balance. Strategies that survive testing fund the operation.
+            Strategies that fail are shut off and written up.
+          </div>
+          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
+            <div className="text-accent text-sm uppercase tracking-wider mb-2">At mainnet</div>
+            Same discipline, real economics. We keep finding mispricings, testing them, and
+            trading the ones that survive.
           </div>
           <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">
-              Phase 2 — mainnet week one
+              Deliberately not
             </div>
-            Calibration feed + settled-redeem keeper as operator services — permissionless
-            redeem is in the package; we run it as a paid service. Revenue from day one.
-          </div>
-          <div className="rounded-xl border border-border/70 bg-white/[0.03] p-5">
-            <div className="text-accent text-sm uppercase tracking-wider mb-2">
-              Phase 3 — post-audit
-            </div>
-            The tokenized vault: LPs deposit, validated strategies run, on-chain economics anyone
-            can audit.
+            No token. No deposits. No pooled funds. Anything like that would come only after an
+            audit and legal sign-off.
           </div>
         </div>
         <p className="text-xl text-muted max-w-4xl">
-          Deliberately no token and no pooled funds until audit and legal sign-off — a compliance
-          choice, not a gap.
+          If the strategies are good, they pay for the operation. If they are not, we say so and
+          shut them off. That is the whole model.
         </p>
         <p className="text-sm text-muted font-mono">next: why Sui →</p>
       </div>
@@ -341,29 +339,27 @@ const STEPS: Step[] = [
         <h2 className="text-4xl font-semibold tracking-tight">This cannot be built elsewhere</h2>
         <ul className="space-y-5 text-2xl max-w-5xl list-none">
           <li>
-            Predict is the <Big>only vol-surface-priced prediction protocol anywhere</Big> — and
-            it exists because of Sui.
+            Predict is the <Big>only prediction protocol we know of priced from a live
+            volatility surface</Big>, and it exists because of Sui.
           </li>
           <li>
             <Big>Sub-second finality</Big> makes sub-hour option cycles real.
           </li>
           <li>
             The <Big>object model</Big> gives us a manager account we mint, settle, and redeem
-            against programmatically.
+            against in code.
           </li>
           <li>
-            <Big>Programmable transaction blocks</Big> open an entire range ladder — or the full
-            three-protocol margin loop — atomically, in one transaction.
+            <Big>Programmable transaction blocks</Big> open an entire range ladder, or the full
+            three-protocol margin loop, atomically in one transaction.
           </li>
         </ul>
         <div className="pt-6 border-t border-border max-w-5xl">
           <p className="text-3xl leading-relaxed">
-            SVX: one of Predict&apos;s first independent trading desks, external auditors, and
-            infrastructure monitors. <Big>Live today. Mainnet on day one.</Big>
+            SVX: one of the first independent trading desks, price auditors, and infrastructure
+            monitors on Predict. <Big>Live today. Mainnet on day one.</Big>
           </p>
-          <p className="text-xl text-muted mt-4 font-mono">
-            svx.econmartin.xyz — everything verifiable now
-          </p>
+          <p className="text-xl text-muted mt-4 font-mono">svx.econmartin.xyz</p>
         </div>
       </div>
     ),

@@ -39,11 +39,11 @@ interface LiveNumbers {
 
 const FALLBACK: LiveNumbers = {
   live: false,
-  calibQuoted: '87 cents',
-  calibRealized: '98 percent',
-  calibN: '46',
-  polyFills: '386',
-  polyWinRate: '82 percent',
+  calibQuoted: '86 cents',
+  calibRealized: '100 percent',
+  calibN: '24',
+  polyFills: '388',
+  polyWinRate: '81 percent',
 };
 
 function useLiveNumbers(active: boolean): LiveNumbers {
@@ -189,7 +189,8 @@ const STEPS: Step[] = [
               Predict (testnet)
             </div>
             The pricing brain. We solve implied vol from the on-chain surface and mint live —
-            binaries <em>and</em> range ladders, settled and redeemed on-chain.
+            settled and redeemed on-chain. Range ladders + LP supply: built and simulated,
+            gated only by the frozen feed.
           </div>
           <div className="rounded-xl border border-border p-5">
             <div className="text-warn text-sm uppercase tracking-wider mb-2">
@@ -197,7 +198,7 @@ const STEPS: Step[] = [
             </div>
             <Big>{n.polyFills} settled fills</Big>
             <LiveDot on={n.live} /> on Polygon mainnet at a <Big>{n.polyWinRate} win rate</Big>,
-            every cent reconciled against the wallet.
+            reconciled against the wallet continuously — trading pauses on unexplained drift.
           </div>
           <div className="rounded-xl border border-border p-5">
             <div className="text-muted text-sm uppercase tracking-wider mb-2">Hyperliquid</div>
@@ -238,14 +239,15 @@ const STEPS: Step[] = [
         <ol className="space-y-5 text-2xl max-w-5xl list-none">
           <li>
             <Big>1.</Big> Every primitive we use — mint, permissionless redeem, ranges, LP supply
-            — is confirmed in the audited, mainnet-bound package. We have already executed all of
-            them on testnet.
+            — is confirmed in the audited, mainnet-bound package. Binaries we have executed
+            <Big> end to end on testnet</Big>; ranges and LP supply are built against the same
+            package and validated in simulation.
           </li>
           <li>
             <Big>2.</Big> The strategy questions are pre-answered by simulation, as the track
-            requires: range ladders work at <Big>half-sigma widths (+10 percent)</Big>; the
-            LP-plus-insurance vault does <Big>not</Big> — and we published that NO with its
-            numbers.
+            requires: range ladders won at <Big>half-sigma widths (+10 percent</Big>, archived
+            hundred-oracle replay); the LP-plus-insurance vault does <Big>not</Big> — and we
+            published that NO with its numbers.
           </li>
           <li>
             <Big>3.</Big> The production migration already happened to us. Sui&apos;s RPC shutoff
@@ -312,8 +314,8 @@ const STEPS: Step[] = [
             <div className="text-accent text-sm uppercase tracking-wider mb-2">
               Phase 2 — mainnet week one
             </div>
-            Calibration feed + settled-redeem keeper as services — the keeper claims winning
-            positions for a tip. Revenue from day one.
+            Calibration feed + settled-redeem keeper as operator services — permissionless
+            redeem is in the package; we run it as a paid service. Revenue from day one.
           </div>
           <div className="rounded-xl border border-border p-5">
             <div className="text-accent text-sm uppercase tracking-wider mb-2">

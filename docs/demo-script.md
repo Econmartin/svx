@@ -39,11 +39,12 @@ script below is written exactly as it should be said.
 
 ## Slide 2 — The proof (0:40–1:15)
 
-> "Here's the proof it matters. Across every settled oracle — with no
-> model of ours in the loop, just Predict's own quoted prices versus what
-> actually happened — Predict's favorites quoted at around eighty-seven
-> cents actually won about ninety-eight percent of the time. The surface
-> is systematically underconfident below ninety cents.
+> "Here's the proof it matters. Across every settled oracle in the current
+> window — with no model of ours in the loop, just Predict's own quoted
+> prices versus what actually happened — Predict's favorites quoted in the
+> mid-eighty cents won every single time. The number on screen is
+> recomputing live from the bot's ledger, and the longer archive shows the
+> same shape. The surface is systematically underconfident.
 >
 > And here's the part I love: DeepBook's own public pre-deployment audit
 > tracks the same finding as open items P-two and O-one. We found it from
@@ -65,11 +66,12 @@ testnet bankroll and realized PnL; the LIVE indicator at the bottom.*
 ## Slide 3 — Technical implementation (1:40–2:10)
 
 > "Under the hood: three venues, one risk stack. On Predict testnet we
-> solve implied volatility from the on-chain surface and mint live — both
-> binaries and range ladders, settled and redeemed on-chain. On Polymarket
-> we trade real money on Polygon mainnet — and every cent reconciles: a
-> wallet-versus-ledger check pauses trading on unexplained drift.
-> Hyperliquid supplies our realized-volatility feed.
+> solve implied volatility from the on-chain surface and mint live —
+> settled and redeemed on-chain; range ladders and LP supply are built and
+> simulated, gated only by the frozen feed. On Polymarket we trade real
+> money on Polygon mainnet — reconciled continuously: a wallet-versus-ledger
+> check pauses trading on unexplained drift. Hyperliquid supplies our
+> realized-volatility feed.
 >
 > Let me show you the real-money side — including the part that lost."
 
@@ -78,10 +80,11 @@ testnet bankroll and realized PnL; the LIVE indicator at the bottom.*
 *Point at: the top cards — mainnet, real money; settled-trade count; win
 rate; strategy PnL. Mention the wallet-vs-ledger reconciliation.*
 
-> "This is not simulated. Three hundred eighty-six settled Polymarket
-> fills with the operator's own money, at an eighty-two percent win rate.
-> The retained strategy is positive. The total at the bottom includes a
-> failed experiment — which deserves its own page."
+> "This is not simulated. Three hundred eighty-eight settled Polymarket
+> fills with the operator's own money — the count on screen is live — with
+> eighty-one percent of them closing profitable. The retained strategy is
+> positive. The total at the bottom includes a failed experiment — which
+> deserves its own page."
 
 ## LIVE /vol-arb (mainnet) — the honest failure (2:35–3:00)
 
@@ -106,21 +109,24 @@ running below.*
 > prove readiness three ways.
 >
 > One: every primitive we use — mint, permissionless redeem, ranges, LP
-> supply — is confirmed in the audited, mainnet-bound package, and we've
-> already executed every one of them on testnet.
+> supply — is confirmed in the audited, mainnet-bound package. The binary
+> lifecycle we've executed end to end on testnet — mint, settle, redeem;
+> ranges and LP supply are built against the same package and validated in
+> simulation, held back from live execution only by the frozen feed.
 >
 > Two: the strategy questions are pre-answered by simulation, which this
-> track requires. Our range-ladder replay over a hundred settled oracles
-> says: half-sigma-width rungs, plus ten percent. Our LP-plus-insurance
-> simulation says: don't — and we published that no with its numbers.
+> track requires. Our archived range-ladder replay over a hundred settled
+> oracles says: half-sigma-width rungs, plus ten percent. Our
+> LP-plus-insurance simulation says: don't — and we published that no with
+> its numbers.
 >
 > Three: the production migration already happened to us. Sui deprecated
 > its old RPC interface two weeks ago; it broke Predict's own feed — frozen
 > since July twelfth, their fix already merged upstream and awaiting
 > redeploy. Our bot hit the same shutoff, we migrated providers within the
 > hour, reported the outage to the DeepBook team — and you saw the result
-> two minutes ago: the kill switch refusing about forty-eight thousand
-> signals a day, correctly.
+> two minutes ago: the kill switch refusing every stale candidate, tens of
+> thousands of evaluations a day."
 >
 > And mainnet opens things testnet can't: real economics on the Predict
 > leg, the three-protocol margin loop becomes physically possible for the
@@ -154,8 +160,9 @@ the live result cards; the replay card with its explicit backtest label.*
 > "Sustainability in three phases, matching those users. Phase one, now:
 > the bot trades its own balance — the strategies fund the operation.
 > Phase two, mainnet week one: the calibration feed and a settled-redeem
-> keeper as services — the keeper claims other users' winning positions
-> for a tip, which is revenue from day one. Phase three, post-audit: the
+> keeper as operator services — permissionless redeem is in the package,
+> and we run it as a paid service, which is revenue from day one. Phase
+> three, post-audit: the
 > tokenized vault. Deliberately no token and no pooled funds until audit
 > and legal sign-off — that's a compliance choice, not a gap."
 
@@ -179,12 +186,15 @@ the live result cards; the replay card with its explicit backtest label.*
 ## Q&A parking-lot answers (plain words, honest labels)
 
 - **"What's your actual win rate?"** Separate the two claims. Executed,
-  real money: three hundred eighty-six settled Polymarket fills, eighty-two
-  percent winners, net slightly positive. The ninety-four percent belongs
-  to the favored-side strategy and is a BACKTEST over the recorded signal
-  stream — reproducible live from the bot's own ledger with one URL. The
-  live executed sample there is six for six — small, because the strategy
-  went live days before the feeder froze.
+  real money: three hundred eighty-eight settled Polymarket fills,
+  eighty-one percent closing profitable, net slightly positive. The
+  ninety-four percent belongs to the favored-side strategy and is a
+  BACKTEST over the recorded signal stream — reproducible live from the
+  bot's own ledger with one URL. The executed favored sample is tiny and
+  perfect so far: one settled live on testnet, five settled paper mirrors
+  on mainnet — all winners — and four more open, waiting on the stalled
+  settlement crank. Small, because the strategy went live days before the
+  feeder froze.
 - **"Why is real-money PnL negative?"** Minus seven dollars total: plus
   six from strategies, minus thirteen from the delta-hedge experiment we
   measured and killed. The losers are documented post-mortems; the
@@ -193,9 +203,12 @@ the live result cards; the replay card with its explicit backtest label.*
   shutoff broke Predict's own indexer — their status endpoint returns a
   four-oh-four on checkpoint fetch. The surface froze July twelfth; since
   then our bot evaluates about forty-eight thousand signals a day and
-  refuses every one via the staleness filter. The brief asked for a kill
-  switch on feeder lag — it's demonstrating itself live. Same shutoff hit
-  our bot July ninth; we migrated within the hour and reported the outage.
+  refuses every one via the staleness filter — tens of thousands of
+  candidate evaluations a day, zero persisted signals in the last
+  twenty-four hours, and that zero is on the overview page. The brief
+  asked for a kill switch on feeder lag — it's demonstrating itself live.
+  Same shutoff hit our bot July ninth; we migrated within the hour and
+  reported the outage.
 - **"When do trades resume?" (follow-up)** We verified this on-chain, not
   just through their API: the surface feeder's wallet posted its last
   transaction at seventeen forty-eight UTC on July twelfth and has been
@@ -219,6 +232,12 @@ the live result cards; the replay card with its explicit backtest label.*
   real money, then disabled: it sized the hedge at the wrong expiry, and
   at our clip sizes a correct hedge costs more than the risk it removes.
   The page documents the re-enable conditions.
+- **"Your vaults page shows only three oracles, not a hundred."** The live
+  bot database keeps a rolling retention window, and the vaults page
+  recomputes on whatever is currently retained — three oracles since the
+  feed froze. The hundred-oracle result is the archived research replay,
+  published with its full policy table in the repo's backtest report. Two
+  datasets, both labelled; same conclusion at every window size we've run.
 - **"Show me the math / the vault research."** The Q&A appendix pages:
   `/surface` for the SVI smile, no-arbitrage checker, and butterfly
   telemetry; `/vaults` for the ladder policy shoot-out, the PLP-plus-
@@ -244,6 +263,10 @@ the live result cards; the replay card with its explicit backtest label.*
 
 - Do not say "we have a ninety-four percent win rate" without the word
   "backtest" in the same sentence.
+- Do not say we "executed" range ladders or LP supply on-chain — they are
+  built and simulated; the feed froze before live execution.
+- Do not say "the keeper earns a protocol tip" — the protocol has
+  permissionless redeem but no native tip; the fee is our service layer.
 - "Delta-neutral by construction" — the hedge is off; that claim is dead.
 - "Risk-free" — no such thing.
 - Don't promise mainnet dates — cite their public tracker instead.

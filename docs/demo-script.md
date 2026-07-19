@@ -177,3 +177,47 @@ strategies that do.
 - Never "delta-neutral". The hedge is off.
 - Never "risk-free."
 - Never promise a mainnet date. Point at their tracker.
+
+## Extra time — the appendix pages (speak these if you have spare minutes)
+
+### /surface — the pricing math, live
+
+*Point at: the smile curve, the no-arbitrage checker, the butterfly card.*
+
+> "This is Predict's volatility surface, live from the chain. The curve
+> shows the implied volatility the protocol quotes at every strike. We
+> re-derive every price ourselves, matched to one part in a million
+> against a reference implementation, and run a no-arbitrage check on
+> every update. Any violation shows up here as a butterfly alert."
+
+### /vaults — the vault research
+
+*Point at: the ladder table, the live-window warning note, the PLP card.*
+
+> "This is where we tested the brief's vault ideas before risking money.
+> The ladder table replays a strategy that spreads bets across a range of
+> strikes. In the archived hundred-oracle study, narrow rungs earned about
+> ten percent. The live table only replays what the database still holds,
+> which is three oracles since the feed froze, and the note on the card
+> says exactly that. Below it is the liquidity-plus-insurance idea, which
+> lost money in simulation, so we published the no."
+
+### /wallets — the on-chain proof
+
+*Point at: the Sui manager balance, the clickable transaction digests,
+the Polygon and Hyperliquid balances.*
+
+> "Everything I have claimed is checkable here. This is the bot's Sui
+> account: it started with five thousand test dollars and the balance now
+> reads about five thousand eighty, so up around eighty, with four open
+> positions still waiting on the stalled settlement. Realized profit
+> across all closed trades is plus one hundred fifty-four; the difference
+> is capital sitting inside those open positions until the crank resumes.
+> Every transaction digest here is clickable and goes to the Sui explorer.
+> Below that, the real-money Polygon wallet and the Hyperliquid account,
+> which reconcile against our books continuously."
+
+*Numbers note: balance up ~80 dUSDC vs the 5,000 start; realized PnL
++154 counts closed trades only. The ~74 gap is cost locked in the 4 open
+positions on the expired-but-unsettled weekly oracle. They pay out when
+Mysten's settlement crank resumes; nothing to do on our side.*

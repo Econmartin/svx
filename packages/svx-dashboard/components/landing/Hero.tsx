@@ -83,9 +83,10 @@ export function Hero({
             </h1>
 
             <p className="text-base sm:text-lg text-white/75 max-w-xl leading-relaxed">
-              One operator, three venues, pure-vol PnL. A single-operator bot
-              that prices binaries off Predict's SVI surface, executes on
-              Polymarket, and hedges on Hyperliquid — fully open source.
+              One operator, three venues. A bot that prices bets off
+              Predict's volatility surface, executes real money on
+              Polymarket, and reads realized volatility from Hyperliquid.
+              Fully open source.
             </p>
 
             <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3 pt-2 max-w-3xl">

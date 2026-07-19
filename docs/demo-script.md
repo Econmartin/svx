@@ -1,7 +1,8 @@
 # SVX demo-day script (5:00, strict)
 
-**Format:** open `svx.econmartin.xyz/present` full-screen. Eleven steps:
-slides interleaved with the real live site. Arrow-Right advances through
+**Format:** open `svx.econmartin.xyz/present` full-screen. Twelve steps:
+slides interleaved with the real live site. The final step lands on the
+live homepage, which stays on screen for Q&A. Arrow-Right advances through
 everything. Arrow-Left goes back. Escape exits. On live pages, a corner
 chip tells you what to point at. Numbers with a green dot are live from
 the bots and have safe fallbacks.
@@ -167,6 +168,12 @@ strategies that do.
 >
 > SVX. One of the first outside desks on Predict. Live today. Mainnet on
 > day one."
+
+## Step 12 — the live homepage (close)
+
+*One more Arrow-Right lands on the homepage. Leave it up for Q&A.*
+
+> "And this is it, live, right now."
 
 ---
 

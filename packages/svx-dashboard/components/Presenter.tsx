@@ -360,9 +360,16 @@ const STEPS: Step[] = [
             monitors on Predict. <Big>Live today. Mainnet on day one.</Big>
           </p>
           <p className="text-xl text-muted mt-4 font-mono">svx.econmartin.xyz</p>
+          <p className="text-sm text-muted font-mono mt-6">next: the live site →</p>
         </div>
       </div>
     ),
+  },
+  {
+    kind: 'page',
+    href: '/',
+    network: 'testnet',
+    note: 'The close: the live homepage. Leave it on screen for Q&A. Esc exits presenter mode.',
   },
 ];
 

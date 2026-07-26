@@ -5,6 +5,7 @@ import { NetworkProvider } from '@/lib/network-context';
 import { NetworkToggle } from '@/components/NetworkToggle';
 import { NavLinks } from '@/components/NavLinks';
 import { StatusTicker } from '@/components/StatusTicker';
+import { FeedNotice } from '@/components/FeedNotice';
 
 export const metadata: Metadata = {
   title: 'SVX — Cross-venue vol-arb on DeepBook Predict',
@@ -33,6 +34,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <NetworkProvider>
+          {/* Temporary: frozen-feed notice; remove when the upstream feeder resumes. */}
+          <FeedNotice />
           {/* Ambient atmosphere — fixed-position, no interaction cost. */}
           <div className="svx-ambient" aria-hidden />
           <div className="svx-grid" aria-hidden />

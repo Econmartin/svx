@@ -30,6 +30,10 @@ import { LedgerStore } from './ledger/store.js';
 import { PredictClient } from './pricing/predict.js';
 import { PredictV2Client, type PredictReader } from './pricing/predict-v2.js';
 import {
+  recordV2CalibrationProbes,
+  resolveV2CalibrationProbes,
+} from './ops/calibration-v2.js';
+import {
   PolymarketClient,
   type PolyOrderBook,
   type PolyStrikeMarket,
@@ -480,6 +484,26 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   // cfg.volArbTickMs (default 2s) so signal detection and order submission
   // aren't gated by Polymarket HTTP latency. Only spawned when HL credentials
   // are present (read-only or live); skipped in --once mode.
+  // V2 calibration recorder: probe each market's own quoted probabilities
+  // shortly before expiry and resolve them against settlement. Pure
+  // telemetry (no execution) — this is what re-validates the favorites
+  // edge on V2 before predictV2LiveEnabled ever flips.
+  let calibV2Timer: NodeJS.Timeout | undefined;
+  if (!opts.onceOnly && cfg.predictV2) {
+    let calibInFlight = false;
+    calibV2Timer = setInterval(() => {
+      if (calibInFlight) return;
+      calibInFlight = true;
+      recordV2CalibrationProbes({ predict, ledger })
+        .then(() => resolveV2CalibrationProbes({ predict, ledger }))
+        .catch((e) => log.warn('svx.calib_v2.step_error', { err: errMsg(e) }))
+        .finally(() => {
+          calibInFlight = false;
+        });
+    }, 10_000);
+    log.info('svx.calib_v2.recorder_started', { tickMs: 10_000 });
+  }
+
   let volArbTimer: NodeJS.Timeout | undefined;
   if (!opts.onceOnly && hlExec) {
     let volArbInFlight = false;
@@ -553,6 +577,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     if (opts.onceOnly) {
       if (volArbTimer) clearInterval(volArbTimer);
       if (marginLeverTimer) clearInterval(marginLeverTimer);
+      if (calibV2Timer) clearInterval(calibV2Timer);
       stopApi?.();
       ledger.close();
       return;

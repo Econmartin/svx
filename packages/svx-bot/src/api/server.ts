@@ -19,6 +19,7 @@ import {
 } from '../pricing/svi-arb.js';
 import type { MarginLeverState } from '../strategy/margin-lever.js';
 import { computeBacktest, computeCalibration, type BacktestSide } from '../ops/backtest.js';
+import { computeV2Calibration } from '../ops/calibration-v2.js';
 import { computeRangeSim } from '../ops/range-sim.js';
 import { computePlpSim } from '../ops/plp-sim.js';
 import { computeMarginLoopSim } from '../ops/margin-loop-sim.js';
@@ -410,6 +411,17 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
         divergenceThreshold: threshold,
       }),
     );
+  });
+
+  /**
+   * V2 calibration: Predict's own near-expiry quoted probabilities vs
+   * settlement outcomes, favored-side buckets. No Polymarket in the loop.
+   *
+   *   GET /calibration-v2?sinceMs=<epoch-ms>
+   */
+  app.get('/calibration-v2', (req, res) => {
+    const sinceMs = clampFloat(req.query.sinceMs, 0, Number.MAX_SAFE_INTEGER, 0);
+    res.json(computeV2Calibration(deps.ledger, sinceMs));
   });
 
   /**

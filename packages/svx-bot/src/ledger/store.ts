@@ -186,6 +186,28 @@ CREATE TABLE IF NOT EXISTS butterfly_events (
 );
 CREATE INDEX IF NOT EXISTS ix_butterfly_ts ON butterfly_events(ts_ms);
 
+/* V2 calibration probes: Predict's OWN quoted probability (derived from its
+   on-chain surface, no model of ours) sampled shortly before each market's
+   expiry, resolved against the settlement price. Pure telemetry - this is
+   the auditor function rebuilt for V2, and it needs no Polymarket match. */
+CREATE TABLE IF NOT EXISTS v2_calibration_probes (
+  id TEXT PRIMARY KEY,
+  market_id TEXT NOT NULL,
+  underlying TEXT NOT NULL,
+  expiry_ms INTEGER NOT NULL,
+  strike REAL NOT NULL,
+  prob_up REAL NOT NULL,
+  spot REAL NOT NULL,
+  ttm_ms INTEGER NOT NULL,
+  recorded_at_ms INTEGER NOT NULL,
+  settlement_price REAL,
+  outcome_up INTEGER,
+  settled_at_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_v2probe_market ON v2_calibration_probes(market_id);
+CREATE INDEX IF NOT EXISTS ix_v2probe_unsettled
+  ON v2_calibration_probes(expiry_ms) WHERE settlement_price IS NULL;
+
 /* One-row-per-key operational state that must survive restarts: one-shot
    migration markers, the wallet-reconciliation baseline, etc. */
 CREATE TABLE IF NOT EXISTS meta (
@@ -1121,6 +1143,97 @@ export class LedgerStore {
         upHigher: r.up_higher,
         marginFrac: r.margin_frac,
         tradeable: r.tradeable === 1,
+      }));
+  }
+
+  // ── V2 calibration probes ─────────────────────────────────────────────────
+
+  insertV2CalibrationProbe(p: {
+    marketId: string;
+    underlying: string;
+    expiryMs: number;
+    strike: number;
+    probUp: number;
+    spot: number;
+    ttmMs: number;
+    recordedAtMs: number;
+  }): string {
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO v2_calibration_probes (id, market_id, underlying, expiry_ms,
+           strike, prob_up, spot, ttm_ms, recorded_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        p.marketId,
+        p.underlying,
+        p.expiryMs,
+        p.strike,
+        p.probUp,
+        p.spot,
+        p.ttmMs,
+        p.recordedAtMs,
+      );
+    return id;
+  }
+
+  hasV2ProbesForMarket(marketId: string): boolean {
+    const row = this.db
+      .prepare<[string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM v2_calibration_probes WHERE market_id = ?`,
+      )
+      .get(marketId);
+    return (row?.c ?? 0) > 0;
+  }
+
+  /** Markets with unresolved probes whose expiry has passed. */
+  unsettledV2ProbeMarkets(nowMs: number, limit = 50): Array<{ marketId: string }> {
+    return this.db
+      .prepare<[number, number], { market_id: string }>(
+        `SELECT DISTINCT market_id FROM v2_calibration_probes
+         WHERE settlement_price IS NULL AND expiry_ms < ?
+         ORDER BY expiry_ms ASC LIMIT ?`,
+      )
+      .all(nowMs, limit)
+      .map((r) => ({ marketId: r.market_id }));
+  }
+
+  /** Resolve every probe of a market against its settlement price. */
+  resolveV2ProbesForMarket(marketId: string, settlementPrice: number, settledAtMs: number): number {
+    const res = this.db
+      .prepare(
+        `UPDATE v2_calibration_probes
+         SET settlement_price = ?,
+             settled_at_ms = ?,
+             outcome_up = CASE WHEN ? > strike THEN 1 ELSE 0 END
+         WHERE market_id = ? AND settlement_price IS NULL`,
+      )
+      .run(settlementPrice, settledAtMs, settlementPrice, marketId);
+    return res.changes;
+  }
+
+  settledV2Probes(sinceMs = 0): Array<{
+    probUp: number;
+    outcomeUp: boolean;
+    ttmMs: number;
+    expiryMs: number;
+  }> {
+    return this.db
+      .prepare<
+        [number],
+        { prob_up: number; outcome_up: number; ttm_ms: number; expiry_ms: number }
+      >(
+        `SELECT prob_up, outcome_up, ttm_ms, expiry_ms FROM v2_calibration_probes
+         WHERE settlement_price IS NOT NULL AND recorded_at_ms >= ?`,
+      )
+      .all(sinceMs)
+      .map((r) => ({
+        probUp: r.prob_up,
+        outcomeUp: r.outcome_up === 1,
+        ttmMs: r.ttm_ms,
+        expiryMs: r.expiry_ms,
       }));
   }
 

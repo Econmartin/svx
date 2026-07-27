@@ -118,5 +118,5 @@ order_id, close_quantity, root, clock)` — permissionless, no protocol tip.
    exactly those mispricings.
 3. The 4 open V1 positions (~74 dUSDC) are stranded on the retired package;
    ask Mysten whether the old deployment gets a settlement pass. Not blocking.
-4. dUSDC package differs from V1's — old coins are not V2 collateral; the bot
-   needs V2 dUSDC (faucet/mint path TBD).
+4. dUSDC package is UNCHANGED from V1 (0xe95040…) — the existing ~5,077 dUSDC
+   bankroll is valid V2 collateral. Fund the new AccountWrapper from it.

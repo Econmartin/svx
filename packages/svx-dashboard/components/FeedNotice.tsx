@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from 'react';
 
-const KEY = 'svx-feed-notice-dismissed-v1';
+const KEY = 'svx-feed-notice-dismissed-v2';
 
 export function FeedNotice() {
   const [visible, setVisible] = useState(false);
@@ -47,11 +47,11 @@ export function FeedNotice() {
         </button>
       </div>
       <p className="text-muted leading-snug">
-        Predict&apos;s testnet price feed has been frozen since July 12: Sui&apos;s RPC
-        deprecation stopped the upstream Block Scholes feeder, and the DeepBook / Mysten team is
-        actively replacing it with a signed-oracle pipeline. Until fresh data returns, the bot
-        evaluates signals and refuses them all via its staleness kill switch. Trading resumes
-        automatically.{' '}
+        Predict&apos;s testnet feed is back: on July 26 the DeepBook / Mysten team replaced the
+        old feeder with a new signed-oracle pipeline and a new protocol deployment. SVX&apos;s
+        integration targets the previous deployment, so trading stays safely paused while we
+        migrate to the new package and API. The staleness kill switch held for the full
+        two-week outage.{' '}
         <a
           className="text-accent hover:underline"
           href="https://github.com/blockscholes/sui-signed-oracle"

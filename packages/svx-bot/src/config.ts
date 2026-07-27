@@ -39,6 +39,14 @@ if (fs.existsSync(workspaceEnv)) {
 
 const Schema = z.object({
   paperTrading: z.boolean().default(true),
+  /** Use the V2 (2026-07-26 cutover) Predict integration: markets API +
+   *  propbook oracle-lane SVI. While true and predictV2LiveEnabled is false,
+   *  all Predict mints are forced to paper — the V1 exec path targets the
+   *  retired package and V2 exec ships separately. */
+  predictV2: z.boolean().default(true),
+  /** Allow live V2 minting once the V2 exec layer lands + calibration
+   *  re-validates. Guarded separately from paperTrading on purpose. */
+  predictV2LiveEnabled: z.boolean().default(false),
   spreadThreshold: z.number().min(0).max(1).default(0.03),
   // Week-1 live defaults: per-trade $15, 10 concurrent, daily loss limit $150.
   // Worst-case 24h loss = 10 * $15 = $150 (matches the daily auto-pause).
@@ -329,6 +337,8 @@ export function loadConfig(): SvxConfig {
   return Schema.parse({
     // ── Execution gates (env — safety + per-deployment) ──
     paperTrading: parseBool(process.env.PAPER_TRADING, true),
+    predictV2: parseBool(process.env.PREDICT_V2, true),
+    predictV2LiveEnabled: parseBool(process.env.PREDICT_V2_LIVE, false),
     polyExecutionEnabled: parseBool(process.env.POLY_EXECUTION_ENABLED, false),
     hlExecutionEnabled: parseBool(process.env.HL_EXECUTION_ENABLED, false),
     // HARD OFF (2026-07 audit): the IV-RV perp strategy paid $29.12 in fees

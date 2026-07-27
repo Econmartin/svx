@@ -10,7 +10,7 @@ import cors from 'cors';
 import type { LedgerStore } from '../ledger/store.js';
 import type { SvxConfig } from '../config.js';
 import type { PredictAddresses } from 'svx-shared/addresses';
-import type { PredictClient } from '../pricing/predict.js';
+import type { PredictReader } from '../pricing/predict-v2.js';
 import {
   butterflyDensity,
   calendarCheck,
@@ -90,7 +90,7 @@ interface ApiDeps {
     /** Margin-Lever (paper) strategy state — see strategy/margin-lever.ts. */
     marginLever?: MarginLeverState;
   };
-  predict: PredictClient;
+  predict: PredictReader;
   addresses: PredictAddresses;
 }
 

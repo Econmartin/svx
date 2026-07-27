@@ -32,6 +32,8 @@ import type { OracleSnapshot } from 'svx-shared/types';
 
 const baseCfg: SvxConfig = {
   paperTrading: true,
+  predictV2: true,
+  predictV2LiveEnabled: false,
   spreadThreshold: 0.03,
   maxPositionDusdc: 15,
   maxPositionPct: 0.5,

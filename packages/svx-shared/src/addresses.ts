@@ -49,7 +49,9 @@ export const ADDRESSES: PredictAddresses = {
   registryId: env('PREDICT_REGISTRY_ID', PREDICT_REGISTRY_ID_TESTNET),
   dusdcType: env('DUSDC_TYPE', DUSDC_TYPE_TESTNET),
   dusdcCurrencyId: env('DUSDC_CURRENCY_ID', DUSDC_CURRENCY_ID_TESTNET),
-  rpcUrl: env('SUI_RPC_URL', 'https://fullnode.testnet.sui.io:443'),
+  // Default to publicnode: Sui deactivated JSON-RPC on its own fullnodes in
+  // July 2026 (fullnode.testnet.sui.io now 404s).
+  rpcUrl: env('SUI_RPC_URL', 'https://sui-testnet-rpc.publicnode.com'),
   predictServerUrl: env('PREDICT_SERVER_URL', 'https://predict-server.testnet.mystenlabs.com'),
 };
 

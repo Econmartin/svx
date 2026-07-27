@@ -28,6 +28,7 @@ import type {
 import { loadConfig, type SvxConfig } from './config.js';
 import { LedgerStore } from './ledger/store.js';
 import { PredictClient } from './pricing/predict.js';
+import { PredictV2Client, type PredictReader } from './pricing/predict-v2.js';
 import {
   PolymarketClient,
   type PolyOrderBook,
@@ -230,7 +231,9 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   const dataDir = path.resolve(cfg.dataDir);
   const ledger = new LedgerStore(path.join(dataDir, 'svx.sqlite'));
   const risk = new RiskGate(ledger, cfg);
-  const predict = new PredictClient();
+  // V2 cutover (2026-07-26): the V1 API/package is retired; the V2 client
+  // serves the same interface from the markets API + propbook lanes.
+  const predict = cfg.predictV2 ? new PredictV2Client() : new PredictClient();
   const poly = new PolymarketClient(cfg.polymarketGammaBase, cfg.polymarketClobBase);
 
   // Clear any persisted pause flag if configured (default OFF since the
@@ -592,7 +595,7 @@ interface LoopDeps {
   state: BotState;
   ledger: LedgerStore;
   risk: RiskGate;
-  predict: PredictClient;
+  predict: PredictReader;
   poly: PolymarketClient;
   live?: LiveContext;
   polyExec?: PolymarketExecClient;
@@ -970,7 +973,12 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         } else if (sized.quantityDusdc <= 0) {
           action = 'filtered';
         } else {
-          action = cfg.paperTrading ? 'paper_executed' : 'live_executed';
+          // V2: force paper until the V2 exec layer lands and calibration
+          // re-validates (the V1 mint path targets the retired package).
+          action =
+            cfg.paperTrading || (cfg.predictV2 && !cfg.predictV2LiveEnabled)
+              ? 'paper_executed'
+              : 'live_executed';
           signalNotional = sized.quantityDusdc;
           signalCost = sized.costUsdc;
         }
@@ -2556,7 +2564,7 @@ async function runVolArbStep(args: {
   ledger: LedgerStore;
   risk: RiskGate;
   hlExec: HyperliquidExecClient;
-  predict: PredictClient;
+  predict: PredictReader;
 }): Promise<void> {
   const { cfg, state, ledger, risk, hlExec, predict } = args;
   const nowMs = Date.now();
@@ -2868,7 +2876,7 @@ async function maybeFavoredMint(args: {
   let txDigest: string | undefined;
   let mode: 'paper' | 'live' = 'paper';
 
-  if (!cfg.paperTrading && live) {
+  if (!cfg.paperTrading && !(cfg.predictV2 && !cfg.predictV2LiveEnabled) && live) {
     // Mirror the arb leg's top-up rule: refill the manager from the wallet
     // only when the wallet can actually cover it (testnet wallets hold dust).
     const wantedTopUpDusdc = Math.min(costUsdc * 1.5, quantityDusdc);
@@ -2948,7 +2956,7 @@ async function maybeFavoredMint(args: {
 }
 
 async function reconcileSettlements(
-  predict: PredictClient,
+  predict: PredictReader,
   ledger: LedgerStore,
   live?: LiveContext,
 ): Promise<void> {
@@ -3092,7 +3100,7 @@ function estimateHlFees(
 async function runMarginLeverStep(args: {
   cfg: SvxConfig;
   state: BotState;
-  predict: PredictClient;
+  predict: PredictReader;
 }): Promise<void> {
   const { cfg, state, predict } = args;
   if (!cfg.marginLeverEnabled) return;

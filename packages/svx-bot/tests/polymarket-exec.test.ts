@@ -22,6 +22,7 @@ const baseCfg: SvxConfig = {
   paperTrading: true,
   predictV2: true,
   predictV2LiveEnabled: false,
+  favoredMintMinCostPrice: 0.6,
   spreadThreshold: 0.03,
   maxPositionDusdc: 15,
   maxPositionPct: 0.5,

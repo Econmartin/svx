@@ -21,6 +21,12 @@ import { runBot } from './index.js';
 import { setKillFlag, clearKillFlag, isKilled } from './ops/kill.js';
 import { loadOperatorKey } from './exec/keypair.js';
 import { buildMintRangeTx, buildSupplyPlpTx } from './exec/ptb.js';
+import {
+  buildCreateV2AccountTx,
+  buildV2DepositTx,
+  resolveV2Objects,
+} from './exec/ptb-v2.js';
+import axios from 'axios';
 import { submitTx } from './exec/submit.js';
 import { PredictClient } from './pricing/predict.js';
 import { buildLadder } from './strategy/range-ladder.js';
@@ -47,6 +53,10 @@ async function main(): Promise<void> {
       return mintLadder(rest);
     case 'supply-plp':
       return supplyPlp(rest);
+    case 'setup-account-v2':
+      return setupAccountV2(rest);
+    case 'deposit-v2':
+      return depositV2(rest);
     default:
       printHelp();
       process.exit(cmd ? 1 : 0);
@@ -214,6 +224,97 @@ function rebaseline(): void {
  *
  *   svx supply-plp --amount 5 [--dry]
  */
+/** Resolve V2 objects off the live deployment (predict pkg from /markets). */
+async function v2Objects() {
+  const { data: markets } = await axios.get<Array<{ package: string }>>(
+    `${ADDRESSES.predictServerUrl}/markets`,
+    { timeout: 15_000 },
+  );
+  const pkg = markets[0]?.package;
+  if (!pkg) throw new Error('no V2 markets visible — cannot resolve package');
+  return resolveV2Objects(pkg);
+}
+
+/**
+ * One-time V2 setup: create + share the operator's canonical account wrapper.
+ * Prints the wrapper id — set PREDICT_V2_WRAPPER_ID to it in the deployment.
+ *
+ *   svx setup-account-v2 [--dry]
+ */
+async function setupAccountV2(rest: string[]): Promise<void> {
+  loadConfig();
+  const dry = rest.includes('--dry');
+  const { keypair, address } = loadOperatorKey();
+  const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
+  const o = await v2Objects();
+  console.log(JSON.stringify({ msg: 'svx.setup_v2.plan', operator: address, objects: o }));
+  if (dry) return;
+  const result = await submitTx(sui, buildCreateV2AccountTx(o), keypair);
+  let sharedCreated: Array<{ id: string; owner: unknown }> = [];
+  if (result.ok) {
+    const txd = await sui.getTransactionBlock({
+      digest: result.digest,
+      options: { showEffects: true },
+    });
+    sharedCreated = (txd.effects?.created ?? [])
+      .map((c) => ({ id: c.reference.objectId, owner: c.owner }))
+      .filter((c) => typeof c.owner === 'object' && c.owner !== null && 'Shared' in c.owner);
+  }
+  console.log(
+    JSON.stringify({
+      msg: result.ok ? 'svx.setup_v2.ok' : 'svx.setup_v2.failed',
+      digest: result.digest,
+      error: result.error,
+      sharedCreated,
+      note: 'set PREDICT_V2_WRAPPER_ID to the AccountWrapper id above',
+    }),
+  );
+}
+
+/**
+ * Deposit dUSDC from the operator wallet into the V2 account wrapper.
+ *
+ *   svx deposit-v2 --amount 50 [--wrapper 0x…] [--dry]
+ */
+async function depositV2(rest: string[]): Promise<void> {
+  loadConfig();
+  const i = rest.indexOf('--amount');
+  const amount = i >= 0 && rest[i + 1] ? Number(rest[i + 1]) : 50;
+  const w = rest.indexOf('--wrapper');
+  const wrapperId = w >= 0 && rest[w + 1] ? rest[w + 1]! : process.env.PREDICT_V2_WRAPPER_ID;
+  if (!wrapperId) throw new Error('pass --wrapper 0x… or set PREDICT_V2_WRAPPER_ID');
+  const dry = rest.includes('--dry');
+  const { keypair, address } = loadOperatorKey();
+  const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
+  const coins = await sui.getCoins({ owner: address, coinType: ADDRESSES.dusdcType });
+  const balance = coins.data.reduce((a, c) => a + Number(c.balance), 0) / 1e6;
+  const o = await v2Objects();
+  console.log(
+    JSON.stringify({
+      msg: 'svx.deposit_v2.plan',
+      operator: address,
+      wrapperId,
+      walletDusdc: balance,
+      depositDusdc: amount,
+    }),
+  );
+  if (balance < amount) throw new Error(`wallet has ${balance} dUSDC < ${amount} requested`);
+  if (dry) return;
+  const tx = buildV2DepositTx(o, {
+    wrapperId,
+    dusdcCoinObjectIds: coins.data.map((c) => c.coinObjectId),
+    amountDusdc: amount,
+  });
+  const result = await submitTx(sui, tx, keypair);
+  console.log(
+    JSON.stringify({
+      msg: result.ok ? 'svx.deposit_v2.ok' : 'svx.deposit_v2.failed',
+      digest: result.digest,
+      error: result.error,
+    }),
+  );
+}
+
 async function supplyPlp(rest: string[]): Promise<void> {
   loadConfig();
   const i = rest.indexOf('--amount');

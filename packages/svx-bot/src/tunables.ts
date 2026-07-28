@@ -362,8 +362,15 @@ export const TUNABLES = {
   /** Min |Predict − Poly| divergence. 0.08 is the validated gate: May-2026
    *  94% win/+11.9% ROI, July-2026 ~87.5%/+18% (deduped, 2% fee). */
   divergenceMintThreshold: 0.08,
-  /** Refuse favored-side entries above this — no payoff room after fee. */
-  divergenceMintMaxCostPrice: 0.95,
+  /** Refuse favored-side entries above this — no payoff room after fee.
+   *  Lowered 0.95 → 0.90 on 2026-07-28: the V2 calibration recorder
+   *  (GET /calibration-v2, n=11.5k) shows the 90–100¢ band is now
+   *  well-calibrated (+0.7pp) after upstream's DBU-655 roll-down fix. */
+  divergenceMintMaxCostPrice: 0.9,
+  /** Refuse favored-side entries BELOW this. V2 calibration: the residual
+   *  edge lives in the 60–90¢ bands (+5.7 to +7.3pp); near-coin-flip
+   *  favorites carry too little payoff to clear fee + inventory skew. */
+  favoredMintMinCostPrice: 0.6,
   /** Fixed dUSDC clip per trade. */
   divergenceMintNotionalDusdc: 5,
   /** Max simultaneous open divergence positions (distinct oracle/strike). */

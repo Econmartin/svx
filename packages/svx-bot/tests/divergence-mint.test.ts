@@ -16,6 +16,7 @@ import {
 const cfg: DivergenceMintCfg = {
   divergenceMintThreshold: 0.08,
   divergenceMintMaxCostPrice: 0.95,
+    favoredMintMinCostPrice: 0.5,
   divergenceMintNotionalDusdc: 5,
   divergenceMintMaxOpen: 10,
   divergenceMintDailyLossLimitDusdc: 20,
@@ -98,6 +99,7 @@ describe('calibration harvest (complement band)', () => {
     minDivergence: 0,
     maxDivergenceExclusive: 0.08, // = divergenceMintThreshold
     maxCostPrice: 0.9,
+    minCostPrice: 0.6,
     maxOpen: 10,
     dailyLossLimitDusdc: 20,
   };
@@ -136,5 +138,25 @@ describe('calibration harvest (complement band)', () => {
     );
     expect(d.enter).toBe(false);
     expect(d.reason).toMatch(/^too_rich/);
+  });
+});
+
+describe('V2 band floor (calibration-v2 finding)', () => {
+  const { cfg: _cfg, ...noCfg } = base;
+  it('refuses favored entries quoted below the band floor', () => {
+    const d = decideFavoredMint(
+      { ...noCfg, predictUp: 0.55, divergence: 0.02 },
+      {
+        minDivergence: 0,
+        maxDivergenceExclusive: 1,
+        maxCostPrice: 0.9,
+        minCostPrice: 0.6,
+        maxOpen: 10,
+        dailyLossLimitDusdc: 20,
+      },
+      'calibration_harvest',
+    );
+    expect(d.enter).toBe(false);
+    expect(d.reason).toContain('below_band_price');
   });
 });

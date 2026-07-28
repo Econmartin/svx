@@ -162,7 +162,8 @@ const Schema = z.object({
   // ── Divergence-mint strategy (see strategy/divergence-mint.ts) ──
   divergenceMintEnabled: z.boolean().default(true),
   divergenceMintThreshold: z.number().min(0).max(1).default(0.08),
-  divergenceMintMaxCostPrice: z.number().min(0.5).max(1).default(0.95),
+  divergenceMintMaxCostPrice: z.number().min(0.5).max(1).default(0.9),
+  favoredMintMinCostPrice: z.number().min(0.5).max(1).default(0.6),
   divergenceMintNotionalDusdc: z.number().positive().default(5),
   divergenceMintMaxOpen: z.number().int().positive().default(10),
   divergenceMintDailyLossLimitDusdc: z.number().positive().default(20),
@@ -413,6 +414,7 @@ export function loadConfig(): SvxConfig {
     ),
     divergenceMintThreshold: TUNABLES.divergenceMintThreshold,
     divergenceMintMaxCostPrice: TUNABLES.divergenceMintMaxCostPrice,
+    favoredMintMinCostPrice: TUNABLES.favoredMintMinCostPrice,
     divergenceMintNotionalDusdc: TUNABLES.divergenceMintNotionalDusdc,
     divergenceMintMaxOpen: TUNABLES.divergenceMintMaxOpen,
     divergenceMintDailyLossLimitDusdc: TUNABLES.divergenceMintDailyLossLimitDusdc,

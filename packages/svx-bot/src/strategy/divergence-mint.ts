@@ -33,6 +33,7 @@ export interface DivergenceMintCfg {
   divergenceMintThreshold: number;
   /** Refuse entries above this favored-side price (no payoff room left). */
   divergenceMintMaxCostPrice: number;
+  favoredMintMinCostPrice?: number;
   /** dUSDC notional per trade (fixed clip). */
   divergenceMintNotionalDusdc: number;
   /** Max simultaneous open divergence-mint positions. */
@@ -56,6 +57,8 @@ export interface FavoredMintGates {
   /** Exclusive upper bound on divergence (Infinity = no upper bound). */
   maxDivergenceExclusive: number;
   maxCostPrice: number;
+  /** Refuse entries quoted BELOW this (V2 calibration: no edge near 50¢). */
+  minCostPrice: number;
   maxOpen: number;
   dailyLossLimitDusdc: number;
 }
@@ -123,6 +126,13 @@ export function decideFavoredMint(
       reason: `above_band:${divergence.toFixed(3)}>=${gates.maxDivergenceExclusive}`,
     };
   }
+  if (costPrice < gates.minCostPrice) {
+    return {
+      ...base,
+      enter: false,
+      reason: `below_band_price:${costPrice.toFixed(3)}<${gates.minCostPrice}`,
+    };
+  }
   if (costPrice > gates.maxCostPrice) {
     return { ...base, enter: false, reason: `too_rich:${costPrice.toFixed(3)}` };
   }
@@ -161,6 +171,7 @@ export function decideDivergenceMint(
       minDivergence: cfg.divergenceMintThreshold,
       maxDivergenceExclusive: Infinity,
       maxCostPrice: cfg.divergenceMintMaxCostPrice,
+      minCostPrice: cfg.favoredMintMinCostPrice ?? 0.6,
       maxOpen: cfg.divergenceMintMaxOpen,
       dailyLossLimitDusdc: cfg.divergenceMintDailyLossLimitDusdc,
     },

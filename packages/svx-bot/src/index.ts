@@ -33,6 +33,8 @@ import {
   recordV2CalibrationProbes,
   resolveV2CalibrationProbes,
 } from './ops/calibration-v2.js';
+import { buildV2MintTx, resolveV2Objects, type V2Objects } from './exec/ptb-v2.js';
+import axios from 'axios';
 import {
   PolymarketClient,
   type PolyOrderBook,
@@ -1592,6 +1594,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
               gates: {
                 minDivergence: cfg.divergenceMintThreshold,
                 maxDivergenceExclusive: Infinity,
+                minCostPrice: cfg.favoredMintMinCostPrice,
                 maxCostPrice: cfg.divergenceMintMaxCostPrice,
                 maxOpen: cfg.divergenceMintMaxOpen,
                 dailyLossLimitDusdc: cfg.divergenceMintDailyLossLimitDusdc,
@@ -1605,6 +1608,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
               gates: {
                 minDivergence: 0,
                 maxDivergenceExclusive: cfg.divergenceMintThreshold,
+                minCostPrice: cfg.favoredMintMinCostPrice,
                 maxCostPrice: cfg.calibrationHarvestMaxCostPrice,
                 maxOpen: cfg.calibrationHarvestMaxOpen,
                 dailyLossLimitDusdc: cfg.calibrationHarvestDailyLossLimitDusdc,
@@ -2813,6 +2817,30 @@ async function runVolArbStep(args: {
  * Settlement, PnL, and redeem ride the existing oracle-settlement machinery —
  * the trade row is a normal Predict trade tagged with the strategy.
  */
+/** Cached V2 exec objects; re-resolved when the deployment package changes
+ *  (testnet republishes under new ids on non-upgrade-safe changes). */
+let v2ExecCache: { objects: V2Objects; fetchedAtMs: number } | null = null;
+async function getV2Objects(
+  marketId: string,
+): Promise<{ objects: V2Objects; tickSizeRaw: number }> {
+  const { data: st } = await axios.get<{
+    market?: { tick_size?: number | string; package?: string };
+  }>(`${ADDRESSES.predictServerUrl}/markets/${marketId}/state`, { timeout: 10_000 });
+  const tickSizeRaw = Number(st?.market?.tick_size);
+  const pkg = st?.market?.package;
+  if (!Number.isFinite(tickSizeRaw) || tickSizeRaw <= 0 || !pkg) {
+    throw new Error('v2 market state missing tick_size/package');
+  }
+  if (
+    !v2ExecCache ||
+    Date.now() - v2ExecCache.fetchedAtMs > 3600_000 ||
+    v2ExecCache.objects.predictPackageId !== pkg
+  ) {
+    v2ExecCache = { objects: await resolveV2Objects(pkg), fetchedAtMs: Date.now() };
+  }
+  return { objects: v2ExecCache.objects, tickSizeRaw };
+}
+
 async function maybeFavoredMint(args: {
   ledger: LedgerStore;
   cfg: SvxConfig;
@@ -2901,7 +2929,50 @@ async function maybeFavoredMint(args: {
   let txDigest: string | undefined;
   let mode: 'paper' | 'live' = 'paper';
 
-  if (!cfg.paperTrading && !(cfg.predictV2 && !cfg.predictV2LiveEnabled) && live) {
+  if (!cfg.paperTrading && cfg.predictV2 && cfg.predictV2LiveEnabled && live) {
+    // ── V2 live mint (2026-07 cutover) ───────────────────────────────────
+    // Funds come from the shared AccountWrapper (pre-deposited via the
+    // `deposit-v2` CLI); the PTB loads a live pricer and mints with an
+    // all-in cost cap and an entry-probability cap so inventory skew or
+    // quote drift can only make the fill BETTER than modeled, never worse.
+    const wrapperId = process.env.PREDICT_V2_WRAPPER_ID;
+    if (!wrapperId) {
+      log.warn('svx.favored.v2_no_wrapper', {
+        note: 'set PREDICT_V2_WRAPPER_ID (run `svx setup-account-v2` once)',
+      });
+      return;
+    }
+    try {
+      const v2o = await getV2Objects(oracleSnap.oracleId);
+      const tx = buildV2MintTx(v2o.objects, {
+        marketId: oracleSnap.oracleId,
+        wrapperId,
+        strike: polySnap.strike,
+        direction: decision.direction,
+        tickSizeRaw: v2o.tickSizeRaw,
+        quantityDusdc,
+        // All-in cap: modeled cost + fee headroom (protocol base fee 2% +
+        // near-expiry ramp) + small slippage margin.
+        maxCostDusdc: costUsdc * 1.08 + 0.05,
+        maxProbability: Math.min(decision.costPrice + 0.03, 0.97),
+      });
+      const result = await submitTx(live.sui, tx, live.keypair);
+      if (!result.ok) {
+        log.warn('svx.favored.v2_live_failed', {
+          digest: result.digest,
+          error: result.error,
+          status: result.status,
+        });
+        return;
+      }
+      txDigest = result.digest;
+      mode = 'live';
+    } catch (e) {
+      log.warn('svx.favored.v2_live_error', { err: errMsg(e) });
+      return;
+    }
+  } else if (!cfg.paperTrading && !cfg.predictV2 && live) {
+    // ── V1 live mint (retired path, kept until V2 is proven) ─────────────
     // Mirror the arb leg's top-up rule: refill the manager from the wallet
     // only when the wallet can actually cover it (testnet wallets hold dust).
     const wantedTopUpDusdc = Math.min(costUsdc * 1.5, quantityDusdc);

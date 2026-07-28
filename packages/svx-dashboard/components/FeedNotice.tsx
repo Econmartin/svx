@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from 'react';
 
-const KEY = 'svx-feed-notice-dismissed-v2';
+const KEY = 'svx-feed-notice-dismissed-v3';
 
 export function FeedNotice() {
   const [visible, setVisible] = useState(false);
@@ -47,11 +47,10 @@ export function FeedNotice() {
         </button>
       </div>
       <p className="text-muted leading-snug">
-        Predict&apos;s testnet feed is back: on July 26 the DeepBook / Mysten team replaced the
-        old feeder with a new signed-oracle pipeline and a new protocol deployment. SVX&apos;s
-        integration targets the previous deployment, so trading stays safely paused while we
-        migrate to the new package and API. The staleness kill switch held for the full
-        two-week outage.{' '}
+        SVX has migrated to Predict&apos;s new V2 deployment (the July 26 cutover). The bot
+        now reads the new markets and surface live, and is re-measuring Predict&apos;s price
+        calibration around the clock — see the V2 calibration card on the Overview page.
+        Trading stays paper-only until that fresh data re-validates the edge.{' '}
         <a
           className="text-accent hover:underline"
           href="https://github.com/blockscholes/sui-signed-oracle"

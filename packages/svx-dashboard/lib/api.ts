@@ -334,6 +334,25 @@ export interface CalibrationReport {
   data_window: { firstTsIso: string | null; lastTsIso: string | null };
 }
 
+/** Response of `GET /calibration-v2` — Predict V2's own near-expiry quoted
+ *  probabilities vs settlement outcomes, favored-side buckets. Accrues from
+ *  the probe recorder (9 strikes per market, markets settle every ~3 min). */
+export interface CalibrationV2Report {
+  n: number;
+  wins: number;
+  avg_quoted: number;
+  realized: number;
+  buckets: Array<{
+    lo: number;
+    hi: number;
+    n: number;
+    wins: number;
+    avg_quoted: number;
+    realized: number;
+    gap_pp: number;
+  }>;
+}
+
 export interface OracleSummary {
   oracleId: string;
   underlyingAsset: string;
@@ -609,6 +628,7 @@ export function createApi(base: string) {
       ),
     calibration: (threshold = 0.08) =>
       get<CalibrationReport>(`/calibration?threshold=${threshold}`),
+    calibrationV2: () => get<CalibrationV2Report>(`/calibration-v2`),
     butterfly: (limit = 50) => get<ButterflyReport>(`/butterfly?limit=${limit}`),
     rangeSim: (q: { policy?: 'sigma' | 'fixed_bps'; rungs?: number; width?: number } = {}) =>
       get<RangeSimSummary>(

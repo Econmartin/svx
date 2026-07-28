@@ -7,6 +7,7 @@ import { usePolling } from '@/lib/usePolling';
 import { StatRow } from '@/components/StatRow';
 import { StatusBadge } from '@/components/StatusBadge';
 import { HealthPanel } from '@/components/HealthPanel';
+import { V2CalibrationCard } from '@/components/V2CalibrationCard';
 import { PageIntro } from '@/components/PageIntro';
 import { PnlChart } from '@/components/PnlChart';
 import { StrategyStats } from '@/components/StrategyStats';
@@ -105,6 +106,8 @@ export default function OverviewPage() {
       />
 
       <HealthPanel status={status} showAllLegs={isMainnet} />
+
+      <V2CalibrationCard />
 
       <OverviewStats status={status} isMainnet={isMainnet} closedCount={closedForChart.length} winRate={winRate} wins={wins} />
 

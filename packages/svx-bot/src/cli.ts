@@ -57,6 +57,8 @@ async function main(): Promise<void> {
       return setupAccountV2(rest);
     case 'deposit-v2':
       return depositV2(rest);
+    case 'withdraw-v1':
+      return withdrawV1(rest);
     default:
       printHelp();
       process.exit(cmd ? 1 : 0);
@@ -233,6 +235,53 @@ async function v2Objects() {
   const pkg = markets[0]?.package;
   if (!pkg) throw new Error('no V2 markets visible — cannot resolve package');
   return resolveV2Objects(pkg);
+}
+
+/**
+ * Withdraw dUSDC from the RETIRED V1 PredictManager back to the operator
+ * wallet (the V1 package is retired but still on-chain and callable). Used
+ * to free the old bankroll so `deposit-v2` can fund the V2 account.
+ *
+ *   svx withdraw-v1 --amount 100 [--dry]
+ */
+async function withdrawV1(rest: string[]): Promise<void> {
+  loadConfig();
+  const i = rest.indexOf('--amount');
+  const amount = i >= 0 && rest[i + 1] ? Number(rest[i + 1]) : 100;
+  const dry = rest.includes('--dry');
+  const { keypair, address } = loadOperatorKey();
+  const op: { operatorAddress: string; managerId: string } = process.env.OPERATOR_JSON
+    ? JSON.parse(process.env.OPERATOR_JSON)
+    : JSON.parse(
+        fs.readFileSync(path.join(path.resolve('data'), 'operator.json'), 'utf8'),
+      );
+  const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
+  console.log(
+    JSON.stringify({
+      msg: 'svx.withdraw_v1.plan',
+      operator: address,
+      managerId: op.managerId,
+      v1Package: ADDRESSES.packageId,
+      withdrawDusdc: amount,
+    }),
+  );
+  if (dry) return;
+  const { Transaction } = await import('@mysten/sui/transactions');
+  const tx = new Transaction();
+  const [coin] = tx.moveCall({
+    target: `${ADDRESSES.packageId}::predict_manager::withdraw`,
+    typeArguments: [ADDRESSES.dusdcType],
+    arguments: [tx.object(op.managerId), tx.pure.u64(BigInt(Math.round(amount * 1e6)))],
+  });
+  tx.transferObjects([coin!], address);
+  const result = await submitTx(sui, tx, keypair);
+  console.log(
+    JSON.stringify({
+      msg: result.ok ? 'svx.withdraw_v1.ok' : 'svx.withdraw_v1.failed',
+      digest: result.digest,
+      error: result.error,
+    }),
+  );
 }
 
 /**

@@ -496,7 +496,30 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     calibV2Timer = setInterval(() => {
       if (calibInFlight) return;
       calibInFlight = true;
-      recordV2CalibrationProbes({ predict, ledger })
+      recordV2CalibrationProbes({
+        predict,
+        ledger,
+        onSnapshot: (snap) => {
+          if (!state.lastBtcSpot || snap.timestampMs > state.lastBtcSpot.updatedAtMs) {
+            state.lastBtcSpot = { value: snap.spot, updatedAtMs: snap.timestampMs };
+          }
+        },
+      })
+        .then(async () => {
+          // Ambient freshness: when no market is inside the probe window for
+          // a while, refresh spot from the soonest active market so /status
+          // (and the dashboard health row) reflect the live V2 feed.
+          if (!state.lastBtcSpot || Date.now() - state.lastBtcSpot.updatedAtMs > 60_000) {
+            const active = await predict.listActiveOracles().catch(() => []);
+            const soonest = active.sort((a, b) => a.expiryMs - b.expiryMs)[0];
+            const snap = soonest
+              ? await predict.snapshotOracle(soonest.oracleId).catch(() => null)
+              : null;
+            if (snap && (!state.lastBtcSpot || snap.timestampMs > state.lastBtcSpot.updatedAtMs)) {
+              state.lastBtcSpot = { value: snap.spot, updatedAtMs: snap.timestampMs };
+            }
+          }
+        })
         .then(() => resolveV2CalibrationProbes({ predict, ledger }))
         .catch((e) => log.warn('svx.calib_v2.step_error', { err: errMsg(e) }))
         .finally(() => {

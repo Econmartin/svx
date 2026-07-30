@@ -34,6 +34,9 @@ export async function recordV2CalibrationProbes(deps: {
   predict: PredictReader;
   ledger: LedgerStore;
   nowMs?: number;
+  /** Called with every fresh snapshot taken — lets the caller keep ambient
+   *  state (e.g. /status spot price) alive without extra fetches. */
+  onSnapshot?: (snap: import('svx-shared/types').OracleSnapshot) => void;
 }): Promise<number> {
   const { predict, ledger } = deps;
   const now = deps.nowMs ?? Date.now();
@@ -44,7 +47,9 @@ export async function recordV2CalibrationProbes(deps: {
     if (ttm < PROBE_WINDOW_MS.min || ttm > PROBE_WINDOW_MS.max) continue;
     if (ledger.hasV2ProbesForMarket(o.oracleId)) continue;
     const snap = await predict.snapshotOracle(o.oracleId).catch(() => null);
-    if (!snap || snap.isSettled) continue;
+    if (!snap) continue;
+    deps.onSnapshot?.(snap);
+    if (snap.isSettled) continue;
     if (now - snap.timestampMs > MAX_SNAPSHOT_AGE_MS) continue; // stale surface
     const wAtm = evalTotalVariance(0, snap.svi);
     if (!(wAtm > 0)) continue;

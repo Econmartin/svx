@@ -36,6 +36,7 @@ interface ApiDeps {
     managerBalanceUsdc?: number;
     lastManagerBalanceAtMs?: number;
     lastBtcSpot?: { value: number; updatedAtMs: number };
+    v2Wrapper?: { id: string; balanceUsdc: number; updatedAtMs: number };
     /** Polymarket pUSD wallet balance — populated by main loop when polyExec
      *  is active. `address` is the FUNDER (Safe or EOA depending on
      *  signature mode); pUSD balance is read from this address. */
@@ -131,7 +132,17 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       navUsdc: deps.state.navUsdc,
       managerBalanceUsdc: deps.state.managerBalanceUsdc ?? 0,
       managerBalanceAtMs: deps.state.lastManagerBalanceAtMs ?? null,
-      totalBalanceUsdc: deps.state.navUsdc + (deps.state.managerBalanceUsdc ?? 0),
+      // V2 bankroll lives in the AccountWrapper; the V1 manager remainder and
+      // the operator wallet are the legacy tail.
+      totalBalanceUsdc:
+        deps.state.navUsdc +
+        (deps.state.managerBalanceUsdc ?? 0) +
+        (deps.state.v2Wrapper?.balanceUsdc ?? 0),
+      v2WrapperId: deps.state.v2Wrapper?.id ?? process.env.PREDICT_V2_WRAPPER_ID ?? null,
+      v2WrapperBalanceUsdc: deps.state.v2Wrapper?.balanceUsdc ?? null,
+      v2WrapperBalanceAtMs: deps.state.v2Wrapper?.updatedAtMs ?? null,
+      predictV2: deps.cfg.predictV2,
+      predictV2LiveEnabled: deps.cfg.predictV2LiveEnabled,
       realizedPnlUsdc: realizedAllTime,
       realizedPnl24hUsdc: realized24h,
       unrealizedPnlUsdc: 0,
@@ -295,6 +306,8 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
             navUsdc: deps.state.navUsdc,
             managerBalanceUsdc: deps.state.managerBalanceUsdc ?? 0,
             managerBalanceAtMs: deps.state.lastManagerBalanceAtMs ?? null,
+            v2WrapperId: deps.state.v2Wrapper?.id ?? process.env.PREDICT_V2_WRAPPER_ID ?? null,
+            v2WrapperBalanceUsdc: deps.state.v2Wrapper?.balanceUsdc ?? null,
             predictPackageId: deps.addresses.packageId,
             // Open positions inside the PredictManager — inferred from the
             // local ledger (on-chain has the source of truth via dynamic-

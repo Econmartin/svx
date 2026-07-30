@@ -394,6 +394,13 @@ export const TUNABLES = {
   calibrationHarvestMaxCostPrice: 0.9,
   /** Fixed dUSDC clip per trade. */
   calibrationHarvestNotionalDusdc: 5,
+  /** Harvest-V2 (surface-only entries on V2's short markets — the trigger
+   *  the calibration recorder validates). Window mirrors the measurement:
+   *  enter 45–150s before expiry, prefer ~75¢ favorites. */
+  harvestV2Enabled: true,
+  harvestV2MinTtmSec: 45,
+  harvestV2MaxTtmSec: 150,
+  harvestV2TargetProb: 0.75,
   /** Max simultaneous open harvest positions (distinct oracle/strike). */
   calibrationHarvestMaxOpen: 10,
   /** Stand down for the day at −this realized dUSDC over trailing 24h. */

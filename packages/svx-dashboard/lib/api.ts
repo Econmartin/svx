@@ -27,6 +27,11 @@ export interface BotStatus {
   managerBalanceAtMs?: number | null;
   /** wallet + manager — the operator's full bankroll. */
   totalBalanceUsdc?: number;
+  v2WrapperId?: string | null;
+  v2WrapperBalanceUsdc?: number | null;
+  v2WrapperBalanceAtMs?: number | null;
+  predictV2?: boolean;
+  predictV2LiveEnabled?: boolean;
   /** All-time realized PnL across every settled trade (survives restarts). */
   realizedPnlUsdc: number;
   /** Realized PnL over the last rolling 24h — ties to the daily loss limit. */
@@ -518,6 +523,8 @@ export interface WalletsSnapshot {
     managerId: string | null;
     navUsdc: number;
     managerBalanceUsdc: number;
+    v2WrapperId?: string | null;
+    v2WrapperBalanceUsdc?: number | null;
     managerBalanceAtMs: number | null;
     predictPackageId: string;
     paperTrading: boolean;

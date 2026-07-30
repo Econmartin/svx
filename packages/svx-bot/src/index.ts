@@ -33,7 +33,13 @@ import {
   recordV2CalibrationProbes,
   resolveV2CalibrationProbes,
 } from './ops/calibration-v2.js';
-import { buildV2MintTx, resolveV2Objects, type V2Objects } from './exec/ptb-v2.js';
+import {
+  buildV2MintTx,
+  readV2WrapperDusdc,
+  resolveV2Objects,
+  type V2Objects,
+} from './exec/ptb-v2.js';
+import { decideHarvestV2 } from './strategy/harvest-v2.js';
 import axios from 'axios';
 import {
   PolymarketClient,
@@ -110,6 +116,7 @@ interface BotState {
    *  main loop on each iteration so the dashboard can colour open positions
    *  ITM/OTM without making its own oracle calls. */
   lastBtcSpot?: { value: number; updatedAtMs: number };
+  v2Wrapper?: { id: string; balanceUsdc: number; updatedAtMs: number };
   /** Polymarket pUSD + gas balance, refreshed periodically when polyExec is
    *  configured. Surfaced on /status so the dashboard can show poly bankroll.
    *  `address` = the FUNDER (Safe in POLY_GNOSIS_SAFE mode, EOA in EOA mode).
@@ -308,6 +315,13 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   // true payout booked + shares redeemed instead of written off.
   {
     const requeued = ledger.resetAbandonedPolyTrades();
+    const legacyMarked = ledger.markLegacyV1OpenTrades();
+    if (legacyMarked > 0) {
+      log.info('svx.boot.legacy_v1_marked', {
+        rows: legacyMarked,
+        note: 'pre-cutover V1 positions settled at 0 PnL; collateral stays in the V1 manager',
+      });
+    }
     if (requeued > 0) {
       log.warn('svx.boot.requeued_abandoned_poly', {
         count: requeued,
@@ -521,6 +535,20 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
           }
         })
         .then(() => resolveV2CalibrationProbes({ predict, ledger }))
+        .then(async () => {
+          // V2 bankroll: keep the wrapper balance fresh for /status.
+          const wrapperId = process.env.PREDICT_V2_WRAPPER_ID;
+          if (
+            wrapperId &&
+            (!state.v2Wrapper || Date.now() - state.v2Wrapper.updatedAtMs > 60_000)
+          ) {
+            const bal = await readV2WrapperDusdc(ADDRESSES.rpcUrl, wrapperId).catch(() => null);
+            if (bal != null) {
+              state.v2Wrapper = { id: wrapperId, balanceUsdc: bal, updatedAtMs: Date.now() };
+            }
+          }
+        })
+        .then(() => runHarvestV2Step({ predict, ledger, cfg, state, live }))
         .catch((e) => log.warn('svx.calib_v2.step_error', { err: errMsg(e) }))
         .finally(() => {
           calibInFlight = false;
@@ -2864,6 +2892,119 @@ async function getV2Objects(
   return { objects: v2ExecCache.objects, tickSizeRaw };
 }
 
+/**
+ * Harvest-V2 step: surface-only favored entries on V2's short markets — the
+ * trigger validated by /calibration-v2 (favorites 60–90¢ near expiry realize
+ * above quote). Paper unless predictV2LiveEnabled + wrapper are set; every
+ * entry passes the same band/dedupe/max-open/daily-loss gates either way.
+ */
+async function runHarvestV2Step(deps: {
+  predict: PredictReader;
+  ledger: LedgerStore;
+  cfg: ReturnType<typeof loadConfig>;
+  state: BotState;
+  live?: LiveContext;
+}): Promise<void> {
+  const { predict, ledger, cfg, state, live } = deps;
+  if (!cfg.predictV2 || !cfg.harvestV2Enabled) return;
+  const nowMs = Date.now();
+  const active = await predict.listActiveOracles();
+  for (const o of active) {
+    const ttm = o.expiryMs - nowMs;
+    if (ttm < cfg.harvestV2MinTtmSec * 1000 || ttm > cfg.harvestV2MaxTtmSec * 1000) continue;
+    const snap = await predict.snapshotOracle(o.oracleId).catch(() => null);
+    if (!snap || snap.isSettled) continue;
+    const decision = decideHarvestV2(
+      {
+        snap,
+        nowMs,
+        hasOpenForMarket:
+          ledger
+            .openTrades()
+            .some((t) => t.oracleId === o.oracleId && t.strategy === 'calibration_harvest'),
+        openStrategyCount: ledger.countOpenStrategyTrades('calibration_harvest'),
+        dailyStrategyPnlUsdc: ledger.realizedStrategyPnlSince(
+          'calibration_harvest',
+          nowMs - 24 * 3600_000,
+        ),
+      },
+      {
+        minTtmMs: cfg.harvestV2MinTtmSec * 1000,
+        maxTtmMs: cfg.harvestV2MaxTtmSec * 1000,
+        minCostPrice: cfg.favoredMintMinCostPrice,
+        maxCostPrice: cfg.calibrationHarvestMaxCostPrice,
+        targetProb: cfg.harvestV2TargetProb,
+        maxSnapshotAgeMs: 30_000,
+        maxOpen: cfg.calibrationHarvestMaxOpen,
+        dailyLossLimitDusdc: cfg.calibrationHarvestDailyLossLimitDusdc,
+      },
+    );
+    if (!decision.enter) continue;
+
+    const quantityDusdc = cfg.calibrationHarvestNotionalDusdc;
+    const costUsdc = quantityDusdc * decision.costPrice;
+    let mode: 'paper' | 'live' = 'paper';
+    let txDigest: string | undefined;
+    const wrapperId = process.env.PREDICT_V2_WRAPPER_ID;
+    if (!cfg.paperTrading && cfg.predictV2LiveEnabled && wrapperId && live) {
+      try {
+        const v2o = await getV2Objects(o.oracleId);
+        const tx = buildV2MintTx(v2o.objects, {
+          marketId: o.oracleId,
+          wrapperId,
+          strike: decision.strike,
+          direction: decision.direction,
+          tickSizeRaw: v2o.tickSizeRaw,
+          quantityDusdc,
+          maxCostDusdc: costUsdc * 1.08 + 0.05,
+          maxProbability: Math.min(decision.costPrice + 0.03, 0.97),
+        });
+        const result = await submitTx(live.sui, tx, live.keypair);
+        if (!result.ok) {
+          log.warn('svx.harvest_v2.live_failed', {
+            oracleId: o.oracleId,
+            digest: result.digest,
+            error: result.error,
+          });
+          continue;
+        }
+        txDigest = result.digest;
+        mode = 'live';
+      } catch (e) {
+        log.warn('svx.harvest_v2.live_error', { err: errMsg(e) });
+        continue;
+      }
+    }
+    const tradeId = ledger.insertTrade({
+      signalId: 'harvest_v2',
+      timestampMs: nowMs,
+      mode,
+      oracleId: o.oracleId,
+      underlyingAsset: o.underlyingAsset,
+      expiryMs: o.expiryMs,
+      strike: decision.strike,
+      direction: decision.direction,
+      quantityDusdc,
+      costPrice: decision.costPrice,
+      costUsdc,
+      settled: false,
+      msToExpiryAtExec: ttm,
+      predictProbAtExec: decision.costPrice,
+      strategy: 'calibration_harvest',
+      ...(txDigest && { txDigest }),
+    });
+    log.info('svx.harvest_v2.entered', {
+      tradeId,
+      mode,
+      oracleId: o.oracleId,
+      strike: Math.round(decision.strike),
+      direction: decision.direction,
+      costPrice: decision.costPrice,
+      reason: decision.reason,
+    });
+  }
+}
+
 async function maybeFavoredMint(args: {
   ledger: LedgerStore;
   cfg: SvxConfig;
@@ -3081,6 +3222,28 @@ async function reconcileSettlements(
 ): Promise<void> {
   const all = await predict.listOracles(true);
   const settled = all.filter((o) => o.status === 'settled' && o.settlementPrice != null);
+  // V2: the market LIST never carries settlement (it lives in per-market
+  // state), so also sweep the oracles our own open trades reference.
+  const openOracleIds = new Set(
+    ledger
+      .openTrades()
+      .map((t) => t.oracleId)
+      .filter((oid) => !settled.some((o) => o.oracleId === oid)),
+  );
+  for (const oid of openOracleIds) {
+    const snap = await predict.snapshotOracle(oid).catch(() => null);
+    if (snap?.isSettled && snap.settlementPrice != null) {
+      settled.push({
+        oracleId: snap.oracleId,
+        underlyingAsset: snap.underlyingAsset,
+        expiryMs: snap.expiryMs,
+        minStrike: 0,
+        tickSize: 0,
+        status: 'settled',
+        settlementPrice: snap.settlementPrice,
+      });
+    }
+  }
   for (const o of settled) {
     if (o.settlementPrice == null) continue;
     ledger.recordSettlement(o.oracleId, o.underlyingAsset, o.expiryMs, o.settlementPrice, Date.now());

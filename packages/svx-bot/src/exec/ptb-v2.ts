@@ -282,3 +282,49 @@ export function buildV2RedeemSettledTx(
 
 // referenced above so a future module rename is a one-env fix, not a code fix
 void configModule;
+
+/**
+ * Read the wrapper's stored dUSDC balance (the V2 trading bankroll).
+ * Walks wrapper → account balance tables → CoinKey<DUSDC> dynamic field.
+ * Returns null when unreadable (caller keeps the previous reading).
+ */
+export async function readV2WrapperDusdc(
+  rpcUrl: string,
+  wrapperId: string,
+): Promise<number | null> {
+  const rpc = async <T>(method: string, params: unknown[]): Promise<T | undefined> => {
+    const res = await axios.post<{ result?: T }>(
+      rpcUrl,
+      { jsonrpc: '2.0', id: 1, method, params },
+      { timeout: 12_000 },
+    );
+    return res.data.result;
+  };
+  const obj = await rpc<{ data?: { content?: unknown } }>('sui_getObject', [
+    wrapperId,
+    { showContent: true },
+  ]);
+  if (!obj?.data?.content) return null;
+  // Collect every table/UID id inside the wrapper content and look for the
+  // CoinKey<DUSDC> balance field among their dynamic fields.
+  const ids = [...JSON.stringify(obj.data.content).matchAll(/"id":\s*\{"id":\s*"(0x[0-9a-f]+)"\}/g)]
+    .map((m) => m[1]!)
+    .filter((id) => id !== wrapperId);
+  for (const tableId of [...new Set(ids)]) {
+    const dfs = await rpc<{ data?: Array<{ objectId: string; objectType?: string }> }>(
+      'suix_getDynamicFields',
+      [tableId, null, 10],
+    );
+    const hit = dfs?.data?.find(
+      (f) => f.objectType?.includes('CoinKey<') && f.objectType?.includes(ADDRESSES.dusdcType),
+    );
+    if (!hit) continue;
+    const bal = await rpc<{ data?: { content?: { fields?: { value?: string | number } } } }>(
+      'sui_getObject',
+      [hit.objectId, { showContent: true }],
+    );
+    const v = Number(bal?.data?.content?.fields?.value);
+    if (Number.isFinite(v)) return v / Number(QUOTE_UNIT);
+  }
+  return null;
+}

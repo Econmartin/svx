@@ -105,7 +105,7 @@ function SuiCard({ sui }: { sui: WalletsSnapshot['sui'] }) {
       </Card>
     );
   }
-  const total = sui.navUsdc + sui.managerBalanceUsdc;
+  const total = sui.navUsdc + sui.managerBalanceUsdc + (sui.v2WrapperBalanceUsdc ?? 0);
   return (
     <Card>
       <CardHeader>
@@ -129,7 +129,12 @@ function SuiCard({ sui }: { sui: WalletsSnapshot['sui'] }) {
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KeyValue label="Wallet dUSDC" value={formatUsdc(sui.navUsdc)} />
-          <KeyValue label="In manager" value={formatUsdc(sui.managerBalanceUsdc)} />
+          <KeyValue
+            label="V2 account (trading)"
+            value={sui.v2WrapperBalanceUsdc != null ? formatUsdc(sui.v2WrapperBalanceUsdc) : '—'}
+            tone={(sui.v2WrapperBalanceUsdc ?? 0) > 0 ? 'win' : 'default'}
+          />
+          <KeyValue label="In manager (V1, legacy)" value={formatUsdc(sui.managerBalanceUsdc)} />
           <KeyValue label="Total" value={formatUsdc(total)} tone={total > 0 ? 'win' : 'default'} />
           <KeyValue
             label="Synced"
@@ -137,6 +142,21 @@ function SuiCard({ sui }: { sui: WalletsSnapshot['sui'] }) {
             small
           />
         </div>
+        {sui.v2WrapperId && (
+          <KeyValue
+            label="V2 AccountWrapper"
+            value={
+              <a
+                href={`https://suiscan.xyz/testnet/object/${sui.v2WrapperId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent hover:underline inline-flex items-center gap-1 font-mono text-xs"
+              >
+                {sui.v2WrapperId.slice(0, 18)}… <ArrowSquareOut className="h-3 w-3" />
+              </a>
+            }
+          />
+        )}
         {sui.managerId && (
           <KeyValue
             label="PredictManager"

@@ -971,6 +971,29 @@ export class LedgerStore {
   }
 
   /** Read a persisted operational-state value; undefined if unset. */
+  /**
+   * One-shot: mark pre-V2-cutover open Predict positions as settled with no
+   * PnL. The 2026-07-26 V2 cutover retired the V1 package; its settlement
+   * crank never ran for the July-17 weekly, so these rows would sit in
+   * openTrades() (and the dashboards open count) forever. ~74 dUSDC of
+   * collateral stays locked in the V1 manager; if Mysten ever settles the
+   * old deployment the funds surface there, not in these rows.
+   */
+  markLegacyV1OpenTrades(cutoverMs = 1_785_110_400_000): number {
+    const MARKER = 'legacy_v1_stranded_marked';
+    if (this.getMeta(MARKER) !== undefined) return 0;
+    const res = this.db
+      .prepare(
+        `UPDATE trades
+           SET settled = 1, settled_at_ms = ?
+         WHERE settled = 0 AND ts_ms < ?
+           AND (poly_token_id IS NULL OR poly_status IS NULL OR poly_settled = 1)`,
+      )
+      .run(Date.now(), cutoverMs);
+    this.setMeta(MARKER, String(Date.now()));
+    return res.changes;
+  }
+
   getMeta(key: string): string | undefined {
     const row = this.db
       .prepare<[string], { value: string }>(`SELECT value FROM meta WHERE key = ?`)

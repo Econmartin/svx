@@ -316,7 +316,7 @@ export async function readV2WrapperDusdc(
       [tableId, null, 10],
     );
     const hit = dfs?.data?.find(
-      (f) => f.objectType?.includes('CoinKey<') && f.objectType?.includes(ADDRESSES.dusdcType),
+      (f) => f.objectType?.includes('Balance<') && f.objectType?.includes(ADDRESSES.dusdcType),
     );
     if (!hit) continue;
     const bal = await rpc<{ data?: { content?: { fields?: { value?: string | number } } } }>(

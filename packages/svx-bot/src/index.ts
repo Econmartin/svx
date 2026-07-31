@@ -548,6 +548,24 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
             }
           }
         })
+        .then(async () => {
+          // The V1-manager + wallet readings also need an unconditional home:
+          // their in-loop refresh sits below early-return paths the V2 world
+          // takes every tick (same placement bug spotBtc had).
+          if (live && Date.now() - state.lastManagerBalanceAtMs > 300_000) {
+            try {
+              state.managerBalanceUsdc = await readManagerDusdcBalance(
+                live.sui,
+                live.managerId,
+                live.operatorAddress,
+              );
+              state.lastManagerBalanceAtMs = Date.now();
+              state.navUsdc = await readManagerBalance(live);
+            } catch (e) {
+              log.warn('svx.manager_balance.ambient_read_failed', { err: errMsg(e) });
+            }
+          }
+        })
         .then(() => runHarvestV2Step({ predict, ledger, cfg, state, live }))
         .catch((e) => log.warn('svx.calib_v2.step_error', { err: errMsg(e) }))
         .finally(() => {

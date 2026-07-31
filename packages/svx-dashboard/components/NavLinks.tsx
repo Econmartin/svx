@@ -4,22 +4,39 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/cn';
 
-// Ordered as the demo flow: the brain → live signals/positions → real-money
-// strategy → post-mortems → the Predict-native finale. Matches the numbered
-// journey on the landing page and docs/demo-script.md.
-const NAV = [
+/**
+ * Nav order = status board, not build history: live strategies first, then
+ * the read-only infrastructure pages, then research, then closed
+ * experiments. Strategy tabs carry a status dot:
+ *
+ *   green  — actively trading right now
+ *   orange — research / paused (not currently traded, still maintained)
+ *   red    — closed experiment (measured, post-mortemed, switched off)
+ *
+ * Info pages (Overview, Surface, …) carry no dot on purpose — status
+ * applies to strategies, not windows.
+ */
+type NavStatus = 'active' | 'stale' | 'closed' | undefined;
+
+const NAV: ReadonlyArray<readonly [label: string, href: string, status?: NavStatus]> = [
   ['Overview', '/overview'],
+  ['Divergence', '/divergence-mint', 'active'],
+  ['Poly-arb', '/poly-arb', 'active'],
+  ['Positions', '/positions'],
   ['Surface', '/surface'],
   ['Signals', '/signals'],
-  ['Positions', '/positions'],
-  ['Poly-arb', '/poly-arb'],
-  ['IV-RV', '/vol-arb'],
-  ['Margin-Lever', '/margin-lever'],
-  ['Divergence', '/divergence-mint'],
-  ['Vaults', '/vaults'],
   ['Wallets', '/wallets'],
+  ['Vaults', '/vaults', 'stale'],
+  ['IV-RV', '/vol-arb', 'closed'],
+  ['Margin-Lever', '/margin-lever', 'closed'],
   ['About', '/about'],
 ] as const;
+
+const DOT: Record<Exclude<NavStatus, undefined>, { cls: string; title: string }> = {
+  active: { cls: 'bg-accent', title: 'actively trading' },
+  stale: { cls: 'bg-amber-400', title: 'research / not currently traded' },
+  closed: { cls: 'bg-loss', title: 'closed experiment (post-mortem on page)' },
+};
 
 /**
  * Top-nav links with an active-route highlight rendered as a vibrant green
@@ -30,20 +47,33 @@ export function NavLinks() {
   const pathname = usePathname();
   return (
     <nav aria-label="Primary" className="flex items-center gap-0.5 text-[13px]">
-      {NAV.map(([label, href]) => {
+      {NAV.map(([label, href, status]) => {
         const isActive = pathname === href || pathname?.startsWith(`${href}/`);
+        const dot = status ? DOT[status] : null;
         return (
           <Link
             key={href}
             href={href}
             aria-current={isActive ? 'page' : undefined}
+            title={dot?.title}
             className={cn(
-              'inline-flex items-center h-8 px-3 rounded-md transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/70',
+              'inline-flex items-center gap-1.5 h-8 px-3 rounded-md transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/70',
               isActive
                 ? 'bg-accent text-bg font-semibold shadow-[0_0_22px_-4px_rgba(30,255,138,0.55)]'
                 : 'text-muted hover:text-fg hover:bg-surface-elevated/80',
             )}
           >
+            {dot && (
+              <span
+                aria-hidden
+                className={cn(
+                  'inline-block w-1.5 h-1.5 rounded-full shrink-0',
+                  // On the active pill the background is accent-green; keep
+                  // the dot legible by dimming it to the pill's text color.
+                  isActive ? 'bg-bg/70' : dot.cls,
+                )}
+              />
+            )}
             {label}
           </Link>
         );

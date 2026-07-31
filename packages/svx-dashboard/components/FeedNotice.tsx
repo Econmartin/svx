@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from 'react';
 
-const KEY = 'svx-feed-notice-dismissed-v3';
+const KEY = 'svx-feed-notice-dismissed-v4';
 
 export function FeedNotice() {
   const [visible, setVisible] = useState(false);
@@ -47,10 +47,11 @@ export function FeedNotice() {
         </button>
       </div>
       <p className="text-muted leading-snug">
-        SVX has migrated to Predict&apos;s new V2 deployment (the July 26 cutover). The bot
-        now reads the new markets and surface live, and is re-measuring Predict&apos;s price
-        calibration around the clock — see the V2 calibration card on the Overview page.
-        Trading stays paper-only until that fresh data re-validates the edge.{' '}
+        SVX is live on Predict&apos;s V2 deployment: after the July 26 cutover we migrated,
+        re-measured Predict&apos;s calibration from scratch (Overview page), and the data
+        pointed at a surviving 60–90¢ favorites edge — which the bot now trades on-chain in
+        small clips. Nav dots: green = trading now, orange = research, red = closed
+        experiment.{' '}
         <a
           className="text-accent hover:underline"
           href="https://github.com/blockscholes/sui-signed-oracle"

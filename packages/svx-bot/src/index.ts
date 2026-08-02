@@ -510,15 +510,46 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     calibV2Timer = setInterval(() => {
       if (calibInFlight) return;
       calibInFlight = true;
-      recordV2CalibrationProbes({
-        predict,
-        ledger,
-        onSnapshot: (snap) => {
-          if (!state.lastBtcSpot || snap.timestampMs > state.lastBtcSpot.updatedAtMs) {
-            state.lastBtcSpot = { value: snap.spot, updatedAtMs: snap.timestampMs };
+      // Fault-isolated steps: the CHAIN-ONLY balance reads run first and
+      // never depend on the predict-server API — an upstream outage (the
+      // 2026-08-02 DNS teardown) must not blank our own balances.
+      (async () => {
+        const wrapperId = process.env.PREDICT_V2_WRAPPER_ID;
+        if (
+          wrapperId &&
+          (!state.v2Wrapper || Date.now() - state.v2Wrapper.updatedAtMs > 60_000)
+        ) {
+          const bal = await readV2WrapperDusdc(ADDRESSES.rpcUrl, wrapperId).catch(() => null);
+          if (bal != null) {
+            state.v2Wrapper = { id: wrapperId, balanceUsdc: bal, updatedAtMs: Date.now() };
           }
-        },
-      })
+        }
+        if (live && Date.now() - state.lastManagerBalanceAtMs > 300_000) {
+          try {
+            state.managerBalanceUsdc = await readManagerDusdcBalance(
+              live.sui,
+              live.managerId,
+              live.operatorAddress,
+            );
+            state.lastManagerBalanceAtMs = Date.now();
+            state.navUsdc = await readManagerBalance(live);
+          } catch (e) {
+            log.warn('svx.manager_balance.ambient_read_failed', { err: errMsg(e) });
+          }
+        }
+      })()
+        .catch((e) => log.warn('svx.calib_v2.balance_step_error', { err: errMsg(e) }))
+        .then(() =>
+          recordV2CalibrationProbes({
+            predict,
+            ledger,
+            onSnapshot: (snap) => {
+              if (!state.lastBtcSpot || snap.timestampMs > state.lastBtcSpot.updatedAtMs) {
+                state.lastBtcSpot = { value: snap.spot, updatedAtMs: snap.timestampMs };
+              }
+            },
+          }),
+        )
         .then(async () => {
           // Ambient freshness: when no market is inside the probe window for
           // a while, refresh spot from the soonest active market so /status
@@ -535,37 +566,6 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
           }
         })
         .then(() => resolveV2CalibrationProbes({ predict, ledger }))
-        .then(async () => {
-          // V2 bankroll: keep the wrapper balance fresh for /status.
-          const wrapperId = process.env.PREDICT_V2_WRAPPER_ID;
-          if (
-            wrapperId &&
-            (!state.v2Wrapper || Date.now() - state.v2Wrapper.updatedAtMs > 60_000)
-          ) {
-            const bal = await readV2WrapperDusdc(ADDRESSES.rpcUrl, wrapperId).catch(() => null);
-            if (bal != null) {
-              state.v2Wrapper = { id: wrapperId, balanceUsdc: bal, updatedAtMs: Date.now() };
-            }
-          }
-        })
-        .then(async () => {
-          // The V1-manager + wallet readings also need an unconditional home:
-          // their in-loop refresh sits below early-return paths the V2 world
-          // takes every tick (same placement bug spotBtc had).
-          if (live && Date.now() - state.lastManagerBalanceAtMs > 300_000) {
-            try {
-              state.managerBalanceUsdc = await readManagerDusdcBalance(
-                live.sui,
-                live.managerId,
-                live.operatorAddress,
-              );
-              state.lastManagerBalanceAtMs = Date.now();
-              state.navUsdc = await readManagerBalance(live);
-            } catch (e) {
-              log.warn('svx.manager_balance.ambient_read_failed', { err: errMsg(e) });
-            }
-          }
-        })
         .then(() => runHarvestV2Step({ predict, ledger, cfg, state, live }))
         .catch((e) => log.warn('svx.calib_v2.step_error', { err: errMsg(e) }))
         .finally(() => {

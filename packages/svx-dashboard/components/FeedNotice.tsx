@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from 'react';
 
-const KEY = 'svx-feed-notice-dismissed-v5';
+const KEY = 'svx-feed-notice-dismissed-v6';
 
 export function FeedNotice() {
   const [visible, setVisible] = useState(false);
@@ -49,9 +49,9 @@ export function FeedNotice() {
       <p className="text-muted leading-snug">
         Predict&apos;s testnet API was taken offline around July 31 (the hostname no longer
         resolves) — likely for the protocol team&apos;s next migration. SVX&apos;s funds are
-        safe on-chain (verified) and the bot stands by; before the outage it ran 31 live V2
-        trades at an 80% win rate, up $8.88 on-chain. Trading resumes when their new
-        deployment appears.{' '}
+        safe on-chain (verified) and the bot stands by. Before the outage our SVX V2 stack —
+        rebuilt for Predict&apos;s July 26 redeployment — ran 31 live trades at an 80% win
+        rate, up $8.88 on-chain. Trading resumes when their new deployment appears.{' '}
         <a
           className="text-accent hover:underline"
           href="https://github.com/blockscholes/sui-signed-oracle"

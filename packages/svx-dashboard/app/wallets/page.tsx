@@ -130,7 +130,7 @@ function SuiCard({ sui }: { sui: WalletsSnapshot['sui'] }) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KeyValue label="Wallet dUSDC" value={formatUsdc(sui.navUsdc)} />
           <KeyValue
-            label="V2 account (trading)"
+            label="SVX V2 account (trading)"
             value={sui.v2WrapperBalanceUsdc != null ? formatUsdc(sui.v2WrapperBalanceUsdc) : '—'}
             tone={(sui.v2WrapperBalanceUsdc ?? 0) > 0 ? 'win' : 'default'}
           />
@@ -144,7 +144,7 @@ function SuiCard({ sui }: { sui: WalletsSnapshot['sui'] }) {
         </div>
         {sui.v2WrapperId && (
           <KeyValue
-            label="V2 AccountWrapper"
+            label="SVX V2 AccountWrapper"
             value={
               <a
                 href={`https://suiscan.xyz/testnet/object/${sui.v2WrapperId}`}

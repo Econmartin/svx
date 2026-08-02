@@ -36,13 +36,13 @@ export function V2CalibrationCard() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          Predict V2 calibration
+          SVX V2 · Predict calibration
           <Badge variant="live" className="text-[10px]">
             accruing live
           </Badge>
         </CardTitle>
         <p className="text-xs text-muted mt-0.5">
-          Predict&apos;s own quoted probability, sampled 15–120s before each market&apos;s
+          Our second-generation stack (SVX V2) measures Predict&apos;s own quoted probability, sampled 15–120s before each market&apos;s
           expiry at 9 strikes, resolved against on-chain settlement. No Polymarket, no model
           of ours in the loop. Markets settle every ~3 minutes; the sample grows all day.{' '}
           <code className="font-mono text-[10px]">GET /calibration-v2</code>

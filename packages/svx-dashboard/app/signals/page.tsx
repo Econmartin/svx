@@ -84,10 +84,10 @@ export default function SignalsPage() {
             disagreement here. <strong>Each row is a decision the bot made</strong>: filtered (didn't qualify),
             sub-threshold (spread too small), executed (placed a trade), or failed (tried to execute but the
             venue rejected). It's the strategy's audit trail.{' '}
-            <em>Since the V2 cutover, Predict's markets mostly cycle in ~3 minutes and have no
-            Polymarket counterpart, so cross-venue rows here are sparse by design — the
-            surface-only harvest strategy and the V2 calibration card on Overview are where the
-            V2 action shows.</em>
+            <em>Since Predict's July 26 redeployment its markets mostly cycle in ~3 minutes and have
+            no Polymarket counterpart, so cross-venue rows here are sparse by design — the
+            surface-only harvest strategy and the SVX V2 calibration card on Overview are where
+            the action shows.</em>
           </>
         }
         hints={[

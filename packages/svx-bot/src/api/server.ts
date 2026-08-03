@@ -19,7 +19,7 @@ import {
 } from '../pricing/svi-arb.js';
 import type { MarginLeverState } from '../strategy/margin-lever.js';
 import { computeBacktest, computeCalibration, type BacktestSide } from '../ops/backtest.js';
-import { computeV2Calibration } from '../ops/calibration-v2.js';
+import { computeBoardComparison, computeV2Calibration } from '../ops/calibration-v2.js';
 import { computeRangeSim } from '../ops/range-sim.js';
 import { computePlpSim } from '../ops/plp-sim.js';
 import { computeMarginLoopSim } from '../ops/margin-loop-sim.js';
@@ -432,6 +432,18 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
    *
    *   GET /calibration-v2?sinceMs=<epoch-ms>
    */
+  /**
+   * Board vs model vs realized across the full tenor ladder — the protocol's
+   * own quote next to our surface-derived fair value, both resolved against
+   * the same settlements.
+   *
+   *   GET /board-comparison?sinceMs=<epoch-ms>
+   */
+  app.get('/board-comparison', (req, res) => {
+    const sinceMs = clampFloat(req.query.sinceMs, 0, Number.MAX_SAFE_INTEGER, 0);
+    res.json(computeBoardComparison(deps.ledger, sinceMs));
+  });
+
   app.get('/calibration-v2', (req, res) => {
     const sinceMs = clampFloat(req.query.sinceMs, 0, Number.MAX_SAFE_INTEGER, 0);
     res.json(computeV2Calibration(deps.ledger, sinceMs));

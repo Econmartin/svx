@@ -14,6 +14,7 @@
  */
 
 import type { LedgerStore } from '../ledger/store.js';
+import { boardPrice, listSdkMarkets } from '../pricing/predict-sdk.js';
 import type { PredictReader } from '../pricing/predict-v2.js';
 import { binaryUpFromTotalVariance } from '../pricing/bs.js';
 import { evalTotalVariance } from '../pricing/svi.js';
@@ -145,4 +146,146 @@ export function computeV2Calibration(
   const wins = folded.filter((f) => f.win).length;
   const avg = n ? folded.reduce((s, f) => s + f.quoted, 0) / n : 0;
   return { n, wins, avg_quoted: avg, realized: n ? wins / n : 0, buckets };
+}
+
+// ── full-board tenor capture ────────────────────────────────────────────────
+
+/** Life-stage buckets: one probe per market per slot builds a term structure
+ *  for every market, from 31-day listings down to the final minutes. */
+const SLOTS: Array<{ name: string; maxTtmMs: number }> = [
+  { name: 't2m', maxTtmMs: 2 * 60_000 },
+  { name: 't5m', maxTtmMs: 5 * 60_000 },
+  { name: 't15m', maxTtmMs: 15 * 60_000 },
+  { name: 't1h', maxTtmMs: 60 * 60_000 },
+  { name: 't4h', maxTtmMs: 4 * 3600_000 },
+  { name: 't1d', maxTtmMs: 24 * 3600_000 },
+  { name: 't7d', maxTtmMs: 7 * 24 * 3600_000 },
+  { name: 't7d_plus', maxTtmMs: Number.POSITIVE_INFINITY },
+];
+
+export function slotForTtm(ttmMs: number): string | null {
+  if (ttmMs <= 0) return null;
+  return SLOTS.find((s) => ttmMs <= s.maxTtmMs)?.name ?? null;
+}
+
+/** Strikes to sample per market, in z-units of ATM total variance. */
+const BOARD_Z_GRID = [-2, -1, -0.5, 0, 0.5, 1, 2];
+
+/**
+ * Full-board capture across EVERY listed market and tenor.
+ *
+ * For each market, once per life-stage slot, records at each grid strike:
+ *   - our model probability (from the on-chain SVI surface), and
+ *   - the protocol's BOARD quote (what a trade would actually pay).
+ *
+ * Both resolve against the same settlement, so the ledger accumulates a
+ * three-way comparison — board vs model vs realized — across the whole
+ * tenor ladder rather than only the minute-cycles.
+ */
+export async function recordBoardTenorProbes(deps: {
+  predict: PredictReader;
+  ledger: LedgerStore;
+  nowMs?: number;
+  onSnapshot?: (snap: import('svx-shared/types').OracleSnapshot) => void;
+}): Promise<number> {
+  const { predict, ledger } = deps;
+  const now = deps.nowMs ?? Date.now();
+  let recorded = 0;
+  const markets = await listSdkMarkets();
+  for (const m of markets) {
+    const ttm = m.expiryMs - now;
+    const slot = slotForTtm(ttm);
+    if (!slot) continue;
+    if (ledger.hasV2ProbeSlot(m.id, slot)) continue;
+    const snap = await predict.snapshotOracle(m.id).catch(() => null);
+    if (!snap || snap.isSettled) continue;
+    deps.onSnapshot?.(snap);
+    if (now - snap.timestampMs > MAX_SNAPSHOT_AGE_MS) continue;
+    const wAtm = evalTotalVariance(0, snap.svi);
+    if (!(wAtm > 0)) continue;
+    const sd = Math.sqrt(wAtm);
+    for (const z of BOARD_Z_GRID) {
+      const strike = snap.forward * Math.exp(z * sd);
+      const w = evalTotalVariance(Math.log(strike / snap.forward), snap.svi);
+      const modelUp = binaryUpFromTotalVariance(strike, snap.forward, w);
+      if (!Number.isFinite(modelUp) || modelUp <= 0 || modelUp >= 1) continue;
+      // Board quote at the SAME strike — null when the protocol has no
+      // reference yet or the read fails; the row still carries our model.
+      const board = await boardPrice(snap.underlyingAsset, m.expiryMs, Math.round(strike));
+      ledger.insertV2CalibrationProbe({
+        marketId: m.id,
+        underlying: snap.underlyingAsset,
+        expiryMs: m.expiryMs,
+        strike,
+        probUp: modelUp,
+        spot: snap.spot,
+        ttmMs: ttm,
+        recordedAtMs: now,
+        boardProbUp: board?.up ?? null,
+        slot,
+      });
+      recorded++;
+    }
+  }
+  if (recorded > 0) {
+    log.info('svx.calib_v2.board_recorded', { probes: recorded, markets: markets.length });
+  }
+  return recorded;
+}
+
+/** Board vs model vs realized, bucketed by quoted probability. */
+export function computeBoardComparison(
+  ledger: LedgerStore,
+  sinceMs = 0,
+): {
+  n: number;
+  withBoard: number;
+  model: { avg_quoted: number; realized: number; gap_pp: number };
+  board: { avg_quoted: number; realized: number; gap_pp: number };
+  bySlot: Array<{
+    slot: string;
+    n: number;
+    model_gap_pp: number;
+    board_gap_pp: number | null;
+    board_minus_model_pp: number | null;
+  }>;
+} {
+  const rows = ledger.settledV2Probes(sinceMs);
+  const fold = (quoted: number, outcomeUp: boolean) => {
+    const favoredUp = quoted >= 0.5;
+    return { q: favoredUp ? quoted : 1 - quoted, win: favoredUp ? outcomeUp : !outcomeUp };
+  };
+  const modelRows = rows.map((r) => fold(r.probUp, r.outcomeUp));
+  const boardRows = rows
+    .filter((r) => r.boardProbUp != null)
+    .map((r) => fold(r.boardProbUp!, r.outcomeUp));
+  const stat = (xs: Array<{ q: number; win: boolean }>) => {
+    if (xs.length === 0) return { avg_quoted: 0, realized: 0, gap_pp: 0 };
+    const avg = xs.reduce((s, x) => s + x.q, 0) / xs.length;
+    const real = xs.filter((x) => x.win).length / xs.length;
+    return { avg_quoted: avg, realized: real, gap_pp: real - avg };
+  };
+  const slots = [...new Set(rows.map((r) => r.slot).filter((s): s is string => !!s))];
+  const bySlot = slots
+    .map((slot) => {
+      const inSlot = rows.filter((r) => r.slot === slot);
+      const m = stat(inSlot.map((r) => fold(r.probUp, r.outcomeUp)));
+      const withB = inSlot.filter((r) => r.boardProbUp != null);
+      const b = withB.length ? stat(withB.map((r) => fold(r.boardProbUp!, r.outcomeUp))) : null;
+      return {
+        slot,
+        n: inSlot.length,
+        model_gap_pp: m.gap_pp,
+        board_gap_pp: b ? b.gap_pp : null,
+        board_minus_model_pp: b ? b.avg_quoted - m.avg_quoted : null,
+      };
+    })
+    .sort((a, b) => a.slot.localeCompare(b.slot));
+  return {
+    n: rows.length,
+    withBoard: boardRows.length,
+    model: stat(modelRows),
+    board: stat(boardRows),
+    bySlot,
+  };
 }

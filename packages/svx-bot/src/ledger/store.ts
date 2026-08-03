@@ -202,9 +202,17 @@ CREATE TABLE IF NOT EXISTS v2_calibration_probes (
   recorded_at_ms INTEGER NOT NULL,
   settlement_price REAL,
   outcome_up INTEGER,
-  settled_at_ms INTEGER
+  settled_at_ms INTEGER,
+  /* The protocol's OWN board quote for this strike (what a trade would pay,
+     skew included) — recorded alongside our surface-derived model price so
+     board vs model vs realized can be compared per tenor. */
+  board_prob REAL,
+  /* Life-stage bucket the probe was taken in (t2m, t5m, ... t7d+): one probe
+     per market per slot, giving a term structure per market. */
+  slot TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_v2probe_market ON v2_calibration_probes(market_id);
+CREATE INDEX IF NOT EXISTS ix_v2probe_slot ON v2_calibration_probes(market_id, slot);
 CREATE INDEX IF NOT EXISTS ix_v2probe_unsettled
   ON v2_calibration_probes(expiry_ms) WHERE settlement_price IS NULL;
 
@@ -235,6 +243,7 @@ export class LedgerStore {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
     this.db.exec(SCHEMA);
+    this.ensureV2ProbeColumns();
     // Backwards-compat migrations: add columns to existing DBs in-place.
     const cols = this.db
       .prepare<[], { name: string }>(`PRAGMA table_info(trades)`)
@@ -1171,6 +1180,17 @@ export class LedgerStore {
 
   // ── V2 calibration probes ─────────────────────────────────────────────────
 
+  /** Additive migration for DBs created before board/slot columns existed. */
+  private ensureV2ProbeColumns(): void {
+    for (const col of ['board_prob REAL', 'slot TEXT']) {
+      try {
+        this.db.exec(`ALTER TABLE v2_calibration_probes ADD COLUMN ${col}`);
+      } catch {
+        /* already present */
+      }
+    }
+  }
+
   insertV2CalibrationProbe(p: {
     marketId: string;
     underlying: string;
@@ -1180,13 +1200,17 @@ export class LedgerStore {
     spot: number;
     ttmMs: number;
     recordedAtMs: number;
+    /** Protocol board quote for the UP side at this strike, when available. */
+    boardProbUp?: number | null;
+    /** Life-stage bucket (t2m … t7d+). */
+    slot?: string | null;
   }): string {
     const id = randomUUID();
     this.db
       .prepare(
         `INSERT INTO v2_calibration_probes (id, market_id, underlying, expiry_ms,
-           strike, prob_up, spot, ttm_ms, recorded_at_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           strike, prob_up, spot, ttm_ms, recorded_at_ms, board_prob, slot)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -1198,8 +1222,20 @@ export class LedgerStore {
         p.spot,
         p.ttmMs,
         p.recordedAtMs,
+        p.boardProbUp ?? null,
+        p.slot ?? null,
       );
     return id;
+  }
+
+  /** Has this market already been probed in this life-stage slot? */
+  hasV2ProbeSlot(marketId: string, slot: string): boolean {
+    const row = this.db
+      .prepare<[string, string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM v2_calibration_probes WHERE market_id = ? AND slot = ?`,
+      )
+      .get(marketId, slot);
+    return (row?.c ?? 0) > 0;
   }
 
   hasV2ProbesForMarket(marketId: string): boolean {
@@ -1242,13 +1278,23 @@ export class LedgerStore {
     outcomeUp: boolean;
     ttmMs: number;
     expiryMs: number;
+    boardProbUp: number | null;
+    slot: string | null;
   }> {
     return this.db
       .prepare<
         [number],
-        { prob_up: number; outcome_up: number; ttm_ms: number; expiry_ms: number }
+        {
+          prob_up: number;
+          outcome_up: number;
+          ttm_ms: number;
+          expiry_ms: number;
+          board_prob: number | null;
+          slot: string | null;
+        }
       >(
-        `SELECT prob_up, outcome_up, ttm_ms, expiry_ms FROM v2_calibration_probes
+        `SELECT prob_up, outcome_up, ttm_ms, expiry_ms, board_prob, slot
+         FROM v2_calibration_probes
          WHERE settlement_price IS NOT NULL AND recorded_at_ms >= ?`,
       )
       .all(sinceMs)
@@ -1257,6 +1303,8 @@ export class LedgerStore {
         outcomeUp: r.outcome_up === 1,
         ttmMs: r.ttm_ms,
         expiryMs: r.expiry_ms,
+        boardProbUp: r.board_prob,
+        slot: r.slot,
       }));
   }
 

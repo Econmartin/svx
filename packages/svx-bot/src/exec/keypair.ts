@@ -30,10 +30,16 @@ export function loadOperatorKey(): LoadedKey {
 
   const fromEnv = process.env.SUI_PRIVATE_KEY_BECH32;
   if (fromEnv && fromEnv.startsWith('suiprivkey')) {
-    const { schema, secretKey } = decodeSuiPrivateKey(fromEnv);
-    if (schema !== 'ED25519') {
-      throw new Error(`only ed25519 keys supported (got ${schema})`);
+    const parsed = decodeSuiPrivateKey(fromEnv) as {
+      secretKey: Uint8Array;
+      schema?: string;
+      scheme?: string;
+    };
+    const scheme = parsed.schema ?? parsed.scheme;
+    if (scheme && scheme !== 'ED25519') {
+      throw new Error(`only ed25519 keys supported (got ${scheme})`);
     }
+    const secretKey = parsed.secretKey;
     const kp = Ed25519Keypair.fromSecretKey(secretKey);
     cached = { keypair: kp, address: kp.toSuiAddress() };
     return cached;

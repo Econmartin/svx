@@ -6,14 +6,15 @@
  * stat. Pure read, no tx submitted.
  */
 
-import { SuiClient } from '@mysten/sui/client';
+import type { SuiChainClient } from './sui-client.js';
+import { readCoinBalance } from './sui-client.js';
 import { Transaction } from '@mysten/sui/transactions';
 import { ADDRESSES } from 'svx-shared/addresses';
 import { QUOTE_UNIT } from 'svx-shared/constants';
 
 /** Returns the manager's dUSDC balance in human-readable units (e.g. 12.34). */
 export async function readManagerDusdcBalance(
-  sui: SuiClient,
+  sui: SuiChainClient,
   managerId: string,
   sender: string,
 ): Promise<number> {
@@ -23,14 +24,20 @@ export async function readManagerDusdcBalance(
     typeArguments: [ADDRESSES.dusdcType],
     arguments: [tx.object(managerId)],
   });
-  const inspect = await sui.devInspectTransactionBlock({
-    sender,
-    transactionBlock: tx,
-  });
-  const ret = inspect.results?.[0]?.returnValues?.[0];
-  if (!ret) return 0;
-  // returnValues[0] is [bytes[], type]. bytes is u64 little-endian.
-  const bytes = ret[0] as number[];
+  tx.setSender(sender);
+  const sim = (await sui.simulateTransaction({ transaction: tx })) as unknown as {
+    commandResults?: Array<{ returnValues?: Array<{ value?: unknown; bcs?: unknown }> }>;
+    results?: Array<{ returnValues?: Array<[number[], string]> }>;
+  };
+  const grpcRet = sim.commandResults?.[0]?.returnValues?.[0];
+  const legacyRet = sim.results?.[0]?.returnValues?.[0];
+  const rawBytes = (grpcRet?.value ?? grpcRet?.bcs ?? legacyRet?.[0]) as
+    | number[]
+    | Uint8Array
+    | undefined;
+  if (!rawBytes) return 0;
+  // u64, little-endian.
+  const bytes = Array.from(rawBytes as ArrayLike<number>);
   let v = 0n;
   for (let i = bytes.length - 1; i >= 0; i--) {
     v = (v << 8n) | BigInt(bytes[i]!);
@@ -39,7 +46,9 @@ export async function readManagerDusdcBalance(
 }
 
 /** Returns the operator's wallet dUSDC balance (sum of all owned coin objects). */
-export async function readWalletDusdcBalance(sui: SuiClient, owner: string): Promise<number> {
-  const { totalBalance } = await sui.getBalance({ owner, coinType: ADDRESSES.dusdcType });
+export async function readWalletDusdcBalance(sui: SuiChainClient, owner: string): Promise<number> {
+  const totalBalance = String(
+    (await sui.getBalance({ owner, coinType: ADDRESSES.dusdcType })).balance?.balance ?? '0',
+  );
   return Number(totalBalance) / Number(QUOTE_UNIT);
 }

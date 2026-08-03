@@ -15,7 +15,12 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
-import { SuiClient } from '@mysten/sui/client';
+import {
+  listCoinObjectIds,
+  makeSuiClient,
+  readCoinBalance,
+  type SuiChainClient,
+} from './exec/sui-client.js';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { ADDRESSES, isAddressPinned } from 'svx-shared/addresses';
 import { QUOTE_UNIT } from 'svx-shared/constants';
@@ -30,7 +35,7 @@ import { LedgerStore } from './ledger/store.js';
 import { PredictClient } from './pricing/predict.js';
 import { PredictV2Client, type PredictReader } from './pricing/predict-v2.js';
 import {
-  recordV2CalibrationProbes,
+  recordBoardTenorProbes,
   resolveV2CalibrationProbes,
 } from './ops/calibration-v2.js';
 import {
@@ -231,7 +236,7 @@ const RETENTION = {
 };
 
 interface LiveContext {
-  sui: SuiClient;
+  sui: SuiChainClient;
   keypair: Ed25519Keypair;
   managerId: string;
   operatorAddress: string;
@@ -390,7 +395,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       );
     }
     live = {
-      sui: new SuiClient({ url: ADDRESSES.rpcUrl }),
+      sui: makeSuiClient(),
       keypair,
       managerId: op.managerId,
       operatorAddress: op.operatorAddress,
@@ -420,11 +425,9 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       const { loadOperatorKey: tryLoad } = await import('./exec/keypair.js');
       const { keypair, address } = tryLoad();
       state.suiAddress = address;
-      const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
-      realWalletReader = async () => {
-        const { totalBalance } = await sui.getBalance({ owner: address, coinType: ADDRESSES.dusdcType });
-        return Number(totalBalance) / Number(QUOTE_UNIT);
-      };
+      const sui = makeSuiClient();
+      realWalletReader = () =>
+        readCoinBalance(sui, address, ADDRESSES.dusdcType, Number(QUOTE_UNIT));
       const real = await realWalletReader();
       state.navUsdc = real;
       log.info('svx.paper.real_wallet_loaded', { address, navDusdc: real, virtualBudget: PAPER_INITIAL_NAV });
@@ -539,8 +542,11 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
         }
       })()
         .catch((e) => log.warn('svx.calib_v2.balance_step_error', { err: errMsg(e) }))
+        // Full-board capture supersedes the near-expiry-only recorder: every
+        // listed market and tenor, with the protocol's own board quote beside
+        // our model price. Slot-deduped, so most ticks are one cheap read.
         .then(() =>
-          recordV2CalibrationProbes({
+          recordBoardTenorProbes({
             predict,
             ledger,
             onSnapshot: (snap) => {
@@ -551,9 +557,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
           }),
         )
         .then(async () => {
-          // Ambient freshness: when no market is inside the probe window for
-          // a while, refresh spot from the soonest active market so /status
-          // (and the dashboard health row) reflect the live V2 feed.
+          // Ambient freshness when no market is inside a probe slot.
           if (!state.lastBtcSpot || Date.now() - state.lastBtcSpot.updatedAtMs > 60_000) {
             const active = await predict.listActiveOracles().catch(() => []);
             const soonest = active.sort((a, b) => a.expiryMs - b.expiryMs)[0];
@@ -665,11 +669,7 @@ function roundTo2(x: number): number {
 }
 
 async function getOperatorDusdcCoinIds(live: LiveContext): Promise<string[]> {
-  const coins = await live.sui.getCoins({
-    owner: live.operatorAddress,
-    coinType: ADDRESSES.dusdcType,
-  });
-  return coins.data.map((c) => c.coinObjectId);
+  return listCoinObjectIds(live.sui, live.operatorAddress, ADDRESSES.dusdcType);
 }
 
 async function readManagerBalance(live: LiveContext): Promise<number> {
@@ -679,11 +679,12 @@ async function readManagerBalance(live: LiveContext): Promise<number> {
   // directly and read the inner balance_manager balance field.
   // For now we approximate by summing dUSDC coins owned by the operator,
   // since the bot tops up the manager from the wallet on each mint.
-  const { totalBalance } = await live.sui.getBalance({
-    owner: live.operatorAddress,
-    coinType: ADDRESSES.dusdcType,
-  });
-  return Number(totalBalance) / Number(QUOTE_UNIT);
+  return readCoinBalance(
+    live.sui,
+    live.operatorAddress,
+    ADDRESSES.dusdcType,
+    Number(QUOTE_UNIT),
+  );
 }
 
 interface LoopDeps {
@@ -1540,14 +1541,12 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
         const walletCoinIds = await getOperatorDusdcCoinIds(live);
         const walletDusdc =
           walletCoinIds.length > 0
-            ? Number(
-                (
-                  await live.sui.getBalance({
-                    owner: live.operatorAddress,
-                    coinType: ADDRESSES.dusdcType,
-                  })
-                ).totalBalance,
-              ) / Number(QUOTE_UNIT)
+            ? await readCoinBalance(
+                live.sui,
+                live.operatorAddress,
+                ADDRESSES.dusdcType,
+                Number(QUOTE_UNIT),
+              )
             : 0;
         const shouldTopUp = walletDusdc >= wantedTopUpDusdc;
         const tx = buildMintTx({
@@ -3175,14 +3174,12 @@ async function maybeFavoredMint(args: {
     const walletCoinIds = await getOperatorDusdcCoinIds(live);
     const walletDusdc =
       walletCoinIds.length > 0
-        ? Number(
-            (
-              await live.sui.getBalance({
-                owner: live.operatorAddress,
-                coinType: ADDRESSES.dusdcType,
-              })
-            ).totalBalance,
-          ) / Number(QUOTE_UNIT)
+        ? await readCoinBalance(
+            live.sui,
+            live.operatorAddress,
+            ADDRESSES.dusdcType,
+            Number(QUOTE_UNIT),
+          )
         : 0;
     const shouldTopUp = walletDusdc >= wantedTopUpDusdc;
     const tx = buildMintTx({

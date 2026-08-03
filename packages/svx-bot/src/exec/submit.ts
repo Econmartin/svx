@@ -13,7 +13,7 @@
  * misconfigured.
  */
 
-import { SuiClient } from '@mysten/sui/client';
+import type { SuiChainClient } from './sui-client.js';
 import { Transaction } from '@mysten/sui/transactions';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { log } from '../util/log.js';
@@ -26,25 +26,37 @@ export interface TxResult {
 }
 
 export async function submitTx(
-  sui: SuiClient,
+  sui: SuiChainClient,
   tx: Transaction,
   signer: Ed25519Keypair,
 ): Promise<TxResult> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const result = await sui.signAndExecuteTransaction({
+      const raw = (await sui.signAndExecuteTransaction({
         transaction: tx,
         signer,
-        options: { showEffects: true },
-      });
-      const status = result.effects?.status?.status ?? 'unknown';
-      const error = result.effects?.status?.error;
-      if (status === 'success') {
-        return { ok: true, digest: result.digest, status };
+      })) as unknown as {
+        Transaction?: { digest?: string; effects?: unknown };
+        transaction?: { digest?: string; effects?: unknown };
+        digest?: string;
+        effects?: unknown;
+      };
+      // gRPC wraps the executed tx ($kind: 'Transaction'); tolerate the plain
+      // shape too so a client change can't silently break status parsing.
+      const txn = raw.Transaction ?? raw.transaction ?? raw;
+      const effects = txn.effects as
+        | { status?: { success?: boolean; error?: unknown } }
+        | undefined;
+      const digest = txn.digest ?? '';
+      const ok = effects?.status?.success !== false;
+      const status = ok ? 'success' : 'failure';
+      const error = effects?.status?.error ? JSON.stringify(effects.status.error) : undefined;
+      if (ok) {
+        return { ok: true, digest, status };
       }
-      log.warn('svx.tx.failed', { digest: result.digest, status, error, attempt });
-      return { ok: false, digest: result.digest, status, error };
+      log.warn('svx.tx.failed', { digest, status, error, attempt });
+      return { ok: false, digest, status, error };
     } catch (e) {
       lastErr = e;
       log.warn('svx.tx.network_error', { err: errMsg(e), attempt });

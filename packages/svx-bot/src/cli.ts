@@ -13,7 +13,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
-import { SuiClient } from '@mysten/sui/client';
+import { listCoinObjectIds, makeSuiClient, readCoinBalance } from './exec/sui-client.js';
 import { ADDRESSES } from 'svx-shared/addresses';
 import { loadConfig } from './config.js';
 import { LedgerStore } from './ledger/store.js';
@@ -138,7 +138,7 @@ async function mintLadder(rest: string[]): Promise<void> {
     ? JSON.parse(process.env.OPERATOR_JSON)
     : JSON.parse(fs.readFileSync(operatorFile, 'utf8'));
   const { keypair } = loadOperatorKey();
-  const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
+  const sui = makeSuiClient();
 
   for (const rung of ladder) {
     const tx = buildMintRangeTx({
@@ -255,7 +255,7 @@ async function withdrawV1(rest: string[]): Promise<void> {
     : JSON.parse(
         fs.readFileSync(path.join(path.resolve('data'), 'operator.json'), 'utf8'),
       );
-  const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
+  const sui = makeSuiClient();
   console.log(
     JSON.stringify({
       msg: 'svx.withdraw_v1.plan',
@@ -294,20 +294,22 @@ async function setupAccountV2(rest: string[]): Promise<void> {
   loadConfig();
   const dry = rest.includes('--dry');
   const { keypair, address } = loadOperatorKey();
-  const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
+  const sui = makeSuiClient();
   const o = await v2Objects();
   console.log(JSON.stringify({ msg: 'svx.setup_v2.plan', operator: address, objects: o }));
   if (dry) return;
   const result = await submitTx(sui, buildCreateV2AccountTx(o), keypair);
   let sharedCreated: Array<{ id: string; owner: unknown }> = [];
   if (result.ok) {
-    const txd = await sui.getTransactionBlock({
-      digest: result.digest,
-      options: { showEffects: true },
-    });
-    sharedCreated = (txd.effects?.created ?? [])
-      .map((c) => ({ id: c.reference.objectId, owner: c.owner }))
-      .filter((c) => typeof c.owner === 'object' && c.owner !== null && 'Shared' in c.owner);
+    const txd = (await sui.getTransaction({ digest: result.digest })) as unknown as {
+      Transaction?: { effects?: { changedObjects?: unknown[] } };
+      transaction?: { effects?: { changedObjects?: unknown[] } };
+    };
+    const changed =
+      (txd.Transaction ?? txd.transaction)?.effects?.changedObjects ?? ([] as unknown[]);
+    sharedCreated = (changed as Array<Record<string, unknown>>)
+      .filter((c) => JSON.stringify(c.outputOwner ?? c.owner ?? '').includes('Shared'))
+      .map((c) => ({ id: String(c.objectId ?? c.id ?? ''), owner: c.outputOwner ?? c.owner }));
   }
   console.log(
     JSON.stringify({
@@ -334,9 +336,9 @@ async function depositV2(rest: string[]): Promise<void> {
   if (!wrapperId) throw new Error('pass --wrapper 0x… or set PREDICT_V2_WRAPPER_ID');
   const dry = rest.includes('--dry');
   const { keypair, address } = loadOperatorKey();
-  const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
-  const coins = await sui.getCoins({ owner: address, coinType: ADDRESSES.dusdcType });
-  const balance = coins.data.reduce((a, c) => a + Number(c.balance), 0) / 1e6;
+  const sui = makeSuiClient();
+  const coinIds = await listCoinObjectIds(sui, address, ADDRESSES.dusdcType);
+  const balance = await readCoinBalance(sui, address, ADDRESSES.dusdcType, 1e6);
   const o = await v2Objects();
   console.log(
     JSON.stringify({
@@ -351,7 +353,7 @@ async function depositV2(rest: string[]): Promise<void> {
   if (dry) return;
   const tx = buildV2DepositTx(o, {
     wrapperId,
-    dusdcCoinObjectIds: coins.data.map((c) => c.coinObjectId),
+    dusdcCoinObjectIds: coinIds,
     amountDusdc: amount,
   });
   const result = await submitTx(sui, tx, keypair);
@@ -371,16 +373,16 @@ async function supplyPlp(rest: string[]): Promise<void> {
   const dry = rest.includes('--dry');
 
   const { keypair, address } = loadOperatorKey();
-  const sui = new SuiClient({ url: ADDRESSES.rpcUrl });
-  const coins = await sui.getCoins({ owner: address, coinType: ADDRESSES.dusdcType });
-  const balance = coins.data.reduce((a, c) => a + Number(c.balance), 0) / 1e6;
+  const sui = makeSuiClient();
+  const coinIds = await listCoinObjectIds(sui, address, ADDRESSES.dusdcType);
+  const balance = await readCoinBalance(sui, address, ADDRESSES.dusdcType, 1e6);
   console.log(
     JSON.stringify({
       msg: 'svx.supply_plp.plan',
       operator: address,
       walletDusdc: balance,
       supplyDusdc: amount,
-      coinObjects: coins.data.length,
+      coinObjects: coinIds.length,
     }),
   );
   if (balance < amount) throw new Error(`wallet has ${balance} dUSDC < ${amount} requested`);
@@ -388,7 +390,7 @@ async function supplyPlp(rest: string[]): Promise<void> {
 
   const tx = buildSupplyPlpTx({
     amountDusdc: amount,
-    dusdcCoinObjectIds: coins.data.map((c) => c.coinObjectId),
+    dusdcCoinObjectIds: coinIds,
     recipient: address,
   });
   const result = await submitTx(sui, tx, keypair);

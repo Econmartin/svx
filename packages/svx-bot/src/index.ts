@@ -46,6 +46,7 @@ import {
 } from './exec/ptb-v2.js';
 import { decideHarvestV2 } from './strategy/harvest-v2.js';
 import { admissibleStrike } from './exec/ptb-v2.js';
+import { boardPrice } from './pricing/predict-sdk.js';
 import axios from 'axios';
 import {
   PolymarketClient,
@@ -716,7 +717,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
 
   // 2. Reconcile settlements first — pull a fresh oracle list and settle any
   // newly-settled oracles in the local ledger.
-  await reconcileSettlements(predict, ledger, live);
+  await reconcileSettlements(predict, ledger, live, cfg.predictV2);
 
   // 2b. Reconcile Polymarket settlements — UMA resolves markets hours after
   // expiry, so we only poll every POLY_SETTLEMENT_CHECK_INTERVAL_MS.
@@ -3009,6 +3010,28 @@ async function runHarvestV2Step(deps: {
     if (!cfg.paperTrading && cfg.predictV2LiveEnabled && wrapperId && live) {
       try {
         const v2o = await getV2Objects(o.oracleId, predict);
+        // Cap against the BOARD price, not our model price: the protocol
+        // fills at its own quote (skew included), and a cap derived from our
+        // surface aborted with EMintProbabilityAboveMax whenever the two
+        // disagreed by more than the buffer.
+        const board = await boardPrice(
+          o.underlyingAsset,
+          o.expiryMs,
+          Math.round(decision.strike),
+        );
+        const boardSide =
+          board && (decision.direction === 'up' ? board.up : board.down);
+        const basis =
+          typeof boardSide === 'number' && boardSide > 0 ? boardSide : decision.costPrice;
+        const capProbability = Math.min(basis + 0.05, 0.97);
+        if (typeof boardSide === 'number' && boardSide > cfg.calibrationHarvestMaxCostPrice) {
+          log.info('svx.harvest_v2.board_above_band', {
+            oracleId: o.oracleId,
+            modelProb: Number(decision.costPrice.toFixed(4)),
+            boardProb: Number(boardSide.toFixed(4)),
+          });
+          continue; // the tradeable price is outside the validated band
+        }
         const tx = buildV2MintTx(v2o.objects, {
           marketId: o.oracleId,
           wrapperId,
@@ -3017,8 +3040,9 @@ async function runHarvestV2Step(deps: {
           tickSizeRaw: v2o.tickSizeRaw,
           admissionTickSizeRaw: v2o.admissionTickSizeRaw,
           quantityDusdc,
-          maxCostDusdc: costUsdc * 1.08 + 0.05,
-          maxProbability: Math.min(decision.costPrice + 0.03, 0.97),
+          // All-in ceiling from the same basis, plus fee/ramp headroom.
+          maxCostDusdc: quantityDusdc * capProbability * 1.15 + 0.10,
+          maxProbability: capProbability,
         });
         const result = await submitTx(live.sui, tx, live.keypair);
         if (!result.ok) {
@@ -3282,6 +3306,7 @@ async function reconcileSettlements(
   predict: PredictReader,
   ledger: LedgerStore,
   live?: LiveContext,
+  predictV2 = false,
 ): Promise<void> {
   const all = await predict.listOracles(true);
   const settled = all.filter((o) => o.status === 'settled' && o.settlementPrice != null);
@@ -3325,6 +3350,21 @@ async function reconcileSettlements(
   if (live) {
     const toRedeem = ledger.unredeemedWinningTrades();
     for (const t of toRedeem) {
+      // V2 settles straight into the AccountWrapper via the accumulator — the
+      // payout is already ours by the time the market settles (verified on
+      // 2026-07-30: wrapper balance rose with no redeem call). Calling the
+      // retired V1 redeem builder for these rows produced a TypeMismatch on
+      // every loop, so book them as redeemed instead of submitting anything.
+      if (predictV2) {
+        ledger.markRedeemed(t.id, 'auto_delivered_v2');
+        log.info('svx.redeem.auto_delivered', {
+          tradeId: t.id,
+          oracleId: t.oracleId,
+          payoutUsdc: t.payoutUsdc,
+          note: 'V2 settlement credits the account directly; no redeem tx needed',
+        });
+        continue;
+      }
       try {
         const tx = buildRedeemTx({
           oracleId: t.oracleId,

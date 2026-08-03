@@ -63,9 +63,11 @@ export async function submitTx(
       // A MoveAbort is deterministic: the same payload will fail identically.
       // Retrying wastes gas budget and floods the logs (2026-08-03: an
       // off-grid mint tick produced a retry storm on every 10s tick).
-      if (/MoveAbort|abort code/i.test(msg)) {
-        log.warn('svx.tx.move_abort', { err: msg });
-        return { ok: false, digest: '', status: 'move_abort', error: msg };
+      // CommandArgumentError/TypeMismatch means the PTB itself is malformed
+      // for this package — as deterministic as an abort.
+      if (/MoveAbort|abort code|CommandArgumentError|TypeMismatch/i.test(msg)) {
+        log.warn('svx.tx.deterministic_failure', { err: msg });
+        return { ok: false, digest: '', status: 'deterministic_failure', error: msg };
       }
       log.warn('svx.tx.network_error', { err: msg, attempt });
       if (attempt === 0) await sleep(500);

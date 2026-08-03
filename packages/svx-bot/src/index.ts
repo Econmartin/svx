@@ -2891,12 +2891,26 @@ async function runVolArbStep(args: {
 let v2ExecCache: { objects: V2Objects; fetchedAtMs: number } | null = null;
 async function getV2Objects(
   marketId: string,
+  predictClient?: PredictReader | PredictV2Client,
 ): Promise<{ objects: V2Objects; tickSizeRaw: number }> {
-  const { data: st } = await axios.get<{
-    market?: { tick_size?: number | string; package?: string };
-  }>(`${ADDRESSES.predictServerUrl}/markets/${marketId}/state`, { timeout: 10_000 });
-  const tickSizeRaw = Number(st?.market?.tick_size);
-  const pkg = st?.market?.package;
+  let tickSizeRaw = NaN;
+  let pkg: string | undefined;
+  // Chain-native metadata first when available (the indexer host has been
+  // torn down twice while the protocol kept running).
+  const meta =
+    predictClient && 'marketMetaFor' in predictClient
+      ? predictClient.marketMetaFor(marketId)
+      : undefined;
+  if (meta && Number.isFinite(meta.tickSizeRaw) && meta.tickSizeRaw > 0) {
+    tickSizeRaw = meta.tickSizeRaw;
+    pkg = meta.packageId;
+  } else {
+    const { data: st } = await axios.get<{
+      market?: { tick_size?: number | string; package?: string };
+    }>(`${ADDRESSES.predictServerUrl}/markets/${marketId}/state`, { timeout: 10_000 });
+    tickSizeRaw = Number(st?.market?.tick_size);
+    pkg = st?.market?.package;
+  }
   if (!Number.isFinite(tickSizeRaw) || tickSizeRaw <= 0 || !pkg) {
     throw new Error('v2 market state missing tick_size/package');
   }
@@ -2966,7 +2980,7 @@ async function runHarvestV2Step(deps: {
     const wrapperId = process.env.PREDICT_V2_WRAPPER_ID;
     if (!cfg.paperTrading && cfg.predictV2LiveEnabled && wrapperId && live) {
       try {
-        const v2o = await getV2Objects(o.oracleId);
+        const v2o = await getV2Objects(o.oracleId, predict);
         const tx = buildV2MintTx(v2o.objects, {
           marketId: o.oracleId,
           wrapperId,

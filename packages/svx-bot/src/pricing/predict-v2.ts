@@ -117,12 +117,26 @@ interface SviLaneEntry {
   sourceTimestampMs: number;
 }
 
+/** Last known predict package; only used to bootstrap chain discovery when
+ *  the indexer is unavailable and nothing is cached yet. */
+const DEFAULT_PREDICT_PACKAGE_ID =
+  '0xdb3ef5a5129920e59c9b2ae25a77eddb48acd0e1c6307b97073f0e076016446e';
+/** Skip the indexer entirely (chain-native reads only). */
+const CHAIN_ONLY = process.env.PREDICT_V2_CHAIN_ONLY === 'true';
+/** How many recent MarketCreated events to scan when discovering on-chain. */
+const CHAIN_DISCOVERY_LIMIT = 50;
+
 export class PredictV2Client {
   private readonly http: AxiosInstance;
   private readonly rpcUrl: string;
   private readonly sviFeedId: string;
   private readonly spotFeedId: string;
   private sviTableIdCache: string | null = null;
+  private chainPackageCache: string | null = null;
+  private readonly marketMeta = new Map<
+    string,
+    { expiryMs: number; tickSizeRaw: number; packageId: string }
+  >();
   private spotCache: { fetchedAtMs: number; spot: number; sourceTimestampMs: number } | null =
     null;
   private marketListCache: { fetchedAtMs: number; data: PredictOracleSummary[] } | null = null;
@@ -161,19 +175,100 @@ export class PredictV2Client {
     return [];
   }
 
+  /**
+   * Market discovery. Prefers the indexer API (one call for the whole list),
+   * falls back to CHAIN-NATIVE discovery when it is unavailable — Mysten's
+   * predict-server hostname was torn down twice during this integration while
+   * the protocol itself kept running, so the API is treated as an accelerator,
+   * never a dependency.
+   */
   async listOracles(): Promise<PredictOracleSummary[]> {
     const now = Date.now();
     if (this.marketListCache && now - this.marketListCache.fetchedAtMs < this.listCacheTtlMs) {
       return this.marketListCache.data;
     }
-    const { data } = await this.http.get<RawMarketRow[]>('/markets');
     const map = underlyingMap();
-    const summaries = data.map((m) => marketToSummary(m, map));
-    // /markets alone can't distinguish settled from active — resolve statuses
-    // cheaply: anything past expiry is at least pending_settlement; the
-    // per-market state call (snapshotOracle) refines to settled.
+    let summaries: PredictOracleSummary[] | null = null;
+    if (!CHAIN_ONLY) {
+      try {
+        const { data } = await this.http.get<RawMarketRow[]>('/markets');
+        summaries = data.map((m) => {
+          this.marketMeta.set(m.expiry_market_id, {
+            expiryMs: Number(m.expiry),
+            tickSizeRaw: Number(m.tick_size),
+            packageId: m.package,
+          });
+          return marketToSummary(m, map);
+        });
+      } catch {
+        summaries = null; // fall through to chain
+      }
+    }
+    if (!summaries) summaries = await this.discoverMarketsFromChain(map);
     this.marketListCache = { fetchedAtMs: now, data: summaries };
     return summaries;
+  }
+
+  /** Newest markets straight from `config_events::MarketCreated`. */
+  private async discoverMarketsFromChain(
+    map: Record<string, string>,
+  ): Promise<PredictOracleSummary[]> {
+    const pkg = await this.chainPackageId();
+    if (!pkg) return [];
+    const res = await this.rpc<{
+      data?: Array<{ parsedJson?: Record<string, unknown> }>;
+    }>('suix_queryEvents', [
+      { MoveEventType: `${pkg}::config_events::MarketCreated` },
+      null,
+      CHAIN_DISCOVERY_LIMIT,
+      true, // descending — newest first
+    ]);
+    const out: PredictOracleSummary[] = [];
+    const now = Date.now();
+    for (const e of res?.data ?? []) {
+      const j = e.parsedJson ?? {};
+      const id = String(j.expiry_market_id ?? '');
+      const expiryMs = Number(j.expiry);
+      if (!id || !Number.isFinite(expiryMs)) continue;
+      this.marketMeta.set(id, {
+        expiryMs,
+        tickSizeRaw: Number(j.tick_size),
+        packageId: pkg,
+      });
+      out.push({
+        oracleId: id,
+        underlyingAsset: map[String(j.propbook_underlying_id ?? 1)] ?? 'BTC',
+        expiryMs,
+        minStrike: 0,
+        tickSize: RAW_TO_NUMBER(j.tick_size),
+        status: expiryMs <= now ? 'pending_settlement' : 'active',
+      });
+    }
+    return out;
+  }
+
+  /** Predict package id, learned from any known market object's type. */
+  private async chainPackageId(): Promise<string | null> {
+    if (this.chainPackageCache) return this.chainPackageCache;
+    const pinned = process.env.PREDICT_V2_PACKAGE_ID;
+    if (pinned) {
+      this.chainPackageCache = pinned;
+      return pinned;
+    }
+    const known = [...this.marketMeta.values()].find((m) => m.packageId)?.packageId;
+    if (known) {
+      this.chainPackageCache = known;
+      return known;
+    }
+    // Cold start with the indexer down: fall back to the last known
+    // deployment. Republishes change this — pin PREDICT_V2_PACKAGE_ID.
+    this.chainPackageCache = DEFAULT_PREDICT_PACKAGE_ID;
+    return this.chainPackageCache;
+  }
+
+  /** Market metadata (tick size, package) for the exec layer. */
+  marketMetaFor(marketId: string): { expiryMs: number; tickSizeRaw: number; packageId: string } | undefined {
+    return this.marketMeta.get(marketId);
   }
 
   async listActiveOracles(): Promise<PredictOracleSummary[]> {
@@ -183,14 +278,19 @@ export class PredictV2Client {
   }
 
   async snapshotOracle(marketId: string): Promise<OracleSnapshot | null> {
-    let state: RawMarketState;
-    try {
-      ({ data: state } = await this.http.get<RawMarketState>(`/markets/${marketId}/state`));
-    } catch (err) {
-      // Very young (not yet indexed) or just-pruned markets 404 — no data.
-      if (axios.isAxiosError(err) && err.response?.status === 404) return null;
-      throw err;
+    let state: RawMarketState | null = null;
+    if (!CHAIN_ONLY) {
+      try {
+        ({ data: state } = await this.http.get<RawMarketState>(`/markets/${marketId}/state`));
+      } catch (err) {
+        // 404 = young/pruned market via the indexer; anything else (host gone)
+        // falls through to the chain read below.
+        if (axios.isAxiosError(err) && err.response?.status !== 404) state = null;
+        else if (axios.isAxiosError(err)) return this.snapshotFromChain(marketId);
+        else throw err;
+      }
     }
+    if (!state) return this.snapshotFromChain(marketId);
     const m = state.market;
     if (!m) return null;
     const expiryMs = Number(m.expiry);
@@ -236,6 +336,52 @@ export class PredictV2Client {
   // Table<expiry_ms, OracleLane<RawSVI>> and the feeder maintains one lane
   // per market expiry, already rolled down upstream (DBU-655). A lane lookup
   // is one dynamic-field read; `latest` carries the current OracleRead.
+
+  /**
+   * Snapshot built entirely from chain state: the ExpiryMarket object carries
+   * expiry / settlement / pause, spot comes from the Block Scholes spot feed
+   * and the surface from the per-expiry SVI lane. No indexer involved.
+   */
+  private async snapshotFromChain(marketId: string): Promise<OracleSnapshot | null> {
+    const obj = await this.rpc<{
+      data?: { type?: string; content?: { fields?: Record<string, unknown> } };
+    }>('sui_getObject', [marketId, { showContent: true, showType: true }]);
+    const f = obj?.data?.content?.fields;
+    if (!f) return null;
+    const expiryMs = Number(f.expiry);
+    if (!Number.isFinite(expiryMs)) return null;
+    // Learn the package + expiry from the object itself so discovery and the
+    // exec layer keep working even if we never saw the creation event.
+    const pkg = obj?.data?.type?.split('::')[0];
+    if (pkg && !this.chainPackageCache) this.chainPackageCache = pkg;
+    const prev = this.marketMeta.get(marketId);
+    if (pkg) {
+      this.marketMeta.set(marketId, {
+        expiryMs,
+        tickSizeRaw: prev?.tickSizeRaw ?? NaN,
+        packageId: pkg,
+      });
+    }
+    const [sviLane, spotRead] = await Promise.all([
+      this.sviLane(expiryMs),
+      this.spotFromFeed(),
+    ]);
+    if (!sviLane || !spotRead || !Number.isFinite(spotRead.spot)) return null;
+    const settlementRaw = f.settlement_price;
+    const settled = settlementRaw !== null && settlementRaw !== undefined;
+    return {
+      oracleId: marketId,
+      underlyingAsset:
+        underlyingMap()[String(f.propbook_underlying_id ?? 1)] ?? 'BTC',
+      expiryMs,
+      spot: spotRead.spot,
+      forward: spotRead.spot,
+      svi: sviLane.svi,
+      timestampMs: Math.min(spotRead.sourceTimestampMs, sviLane.sourceTimestampMs),
+      isSettled: settled,
+      settlementPrice: settled ? RAW_TO_NUMBER(settlementRaw) : undefined,
+    };
+  }
 
   private async rpc<T>(method: string, params: unknown[]): Promise<T | undefined> {
     const res = await axios.post<{ result?: T; error?: { message?: string } }>(

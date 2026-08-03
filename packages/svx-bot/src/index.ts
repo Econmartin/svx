@@ -235,6 +235,10 @@ const RETENTION = {
   sviSnapshotsKeep: 20_000, // surface viewer history
   polySnapshotsKeep: 50_000,
   navSnapshotsKeep: 10_000,
+  // Full-board capture writes ~10k settled probes/day; ~200k ≈ 3 weeks of
+  // calibration history. Unsettled probes are never pruned.
+  v2ProbesKeep: 200_000,
+  butterflyKeep: 50_000,
 };
 
 interface LiveContext {
@@ -1794,7 +1798,11 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
   // Periodic ledger prune + vacuum. Cheap (single tx) and bounds disk usage.
   if (Date.now() - state.lastPruneAtMs > PRUNE_INTERVAL_MS) {
     const r = ledger.prune(RETENTION);
-    if (r.deletedSignals + r.deletedSvi + r.deletedPoly + r.deletedNav > 0) {
+    if (
+      r.deletedSignals + r.deletedSvi + r.deletedPoly + r.deletedNav +
+        r.deletedProbes + r.deletedButterfly >
+      0
+    ) {
       log.info('svx.ledger.pruned', r);
       ledger.vacuum();
     }

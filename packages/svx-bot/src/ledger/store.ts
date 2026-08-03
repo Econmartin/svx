@@ -556,7 +556,18 @@ export class LedgerStore {
     sviSnapshotsKeep: number;
     polySnapshotsKeep: number;
     navSnapshotsKeep: number;
-  }): { deletedSignals: number; deletedSvi: number; deletedPoly: number; deletedNav: number } {
+    /** Settled calibration probes to keep (unsettled rows never pruned —
+     *  they are pending measurements). ~10k rows/day at full-board cadence. */
+    v2ProbesKeep?: number;
+    butterflyKeep?: number;
+  }): {
+    deletedSignals: number;
+    deletedSvi: number;
+    deletedPoly: number;
+    deletedNav: number;
+    deletedProbes: number;
+    deletedButterfly: number;
+  } {
     const tx = this.db.transaction(() => {
       const dSig = this.db
         .prepare(
@@ -586,7 +597,29 @@ export class LedgerStore {
           )`,
         )
         .run(retention.navSnapshotsKeep).changes;
-      return { dSig, dSvi, dPoly, dNav };
+      const dProbes =
+        retention.v2ProbesKeep != null
+          ? this.db
+              .prepare(
+                `DELETE FROM v2_calibration_probes WHERE settled_at_ms IS NOT NULL
+                 AND id IN (
+                   SELECT id FROM v2_calibration_probes WHERE settled_at_ms IS NOT NULL
+                   ORDER BY recorded_at_ms DESC LIMIT -1 OFFSET ?
+                 )`,
+              )
+              .run(retention.v2ProbesKeep).changes
+          : 0;
+      const dButterfly =
+        retention.butterflyKeep != null
+          ? this.db
+              .prepare(
+                `DELETE FROM butterfly_events WHERE rowid IN (
+                  SELECT rowid FROM butterfly_events ORDER BY ts_ms DESC LIMIT -1 OFFSET ?
+                )`,
+              )
+              .run(retention.butterflyKeep).changes
+          : 0;
+      return { dSig, dSvi, dPoly, dNav, dProbes, dButterfly };
     });
     const r = tx();
     return {
@@ -594,6 +627,8 @@ export class LedgerStore {
       deletedSvi: r.dSvi,
       deletedPoly: r.dPoly,
       deletedNav: r.dNav,
+      deletedProbes: r.dProbes,
+      deletedButterfly: r.dButterfly,
     };
   }
 

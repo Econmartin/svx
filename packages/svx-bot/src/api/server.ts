@@ -149,7 +149,10 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       // realizedPnlUsdc above blends the July V1 poly-arb era with whatever
       // trades today; consumers should sum the rows they mean.
       strategyPnl: deps.ledger.strategyPnlBreakdown(since24h),
-      unrealizedPnlUsdc: 0,
+      // Cost sitting in open (unsettled) positions. NOT a mark-to-market —
+      // the old field here was a hardcoded `unrealizedPnlUsdc: 0`, which
+      // claimed a flat book while money was at risk.
+      openCostUsdc: open.reduce((s, t) => s + (t.costUsdc ?? 0), 0),
       openPositionCount: open.length,
       signalsLast24h: deps.ledger.countSignalsSince(since24h),
       tradesLast24h: deps.ledger.countTradesSince(since24h),
@@ -390,6 +393,11 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
    * side=predict|flip|favored (favored = the regime-stable divergence-mint
    * formulation; flip=true is accepted as a legacy alias for side=flip).
    */
+  // The replay scans the full signal table (~250k rows) per call, and the
+  // divergence page polls two variants every 20s per open tab — memoize.
+  // Signals arrive at most once per loop tick, so short staleness is free.
+  const backtestCache = new Map<string, { atMs: number; summary: unknown }>();
+  const BACKTEST_CACHE_TTL_MS = 5 * 60_000;
   app.get('/backtest', (req, res) => {
     const threshold = clampFloat(req.query.threshold, 0, 1, 0.08);
     // Band bounds — maxThreshold/maxCost let a strategy's exact band be
@@ -406,11 +414,18 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
           ? 'flip'
           : 'predict';
     const dedupe = req.query.dedupe === 'true' || req.query.dedupe === '1';
+    const key = JSON.stringify([threshold, maxThreshold, maxCostPrice, side, dedupe, fee]);
+    const hit = backtestCache.get(key);
+    if (hit && Date.now() - hit.atMs < BACKTEST_CACHE_TTL_MS) {
+      res.json(hit.summary);
+      return;
+    }
     const { summary } = computeBacktest(
       deps.ledger.backtestSignals(),
       deps.ledger.allSettlements(),
       { threshold, maxThreshold, maxCostPrice, side, dedupe, fee, notional: 1 },
     );
+    backtestCache.set(key, { atMs: Date.now(), summary });
     res.json(summary);
   });
 

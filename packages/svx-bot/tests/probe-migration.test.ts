@@ -70,4 +70,39 @@ describe('v2 probe column migration', () => {
     // Reopening the same file must not throw (index + columns already present).
     expect(() => new LedgerStore(file)).not.toThrow();
   });
+
+  it('prunes settled probes past the cap but never unsettled ones', () => {
+    const store = new LedgerStore(':memory:');
+    for (let i = 0; i < 5; i++) {
+      store.insertV2CalibrationProbe({
+        marketId: `m-${i}`,
+        underlying: 'BTC',
+        expiryMs: i,
+        strike: 64000,
+        probUp: 0.7,
+        spot: 63000,
+        ttmMs: 60_000,
+        recordedAtMs: i,
+        slot: 't2m',
+      });
+      // Settle all but the last two.
+      if (i < 3) store.resolveV2ProbesForMarket(`m-${i}`, 63_500, i + 1);
+    }
+    const r = store.prune({
+      signalsKeep: 10,
+      sviSnapshotsKeep: 10,
+      polySnapshotsKeep: 10,
+      navSnapshotsKeep: 10,
+      v2ProbesKeep: 1,
+      butterflyKeep: 10,
+    });
+    expect(r.deletedProbes).toBe(2); // 3 settled, keep newest 1
+    const db = (store as unknown as { db: import('better-sqlite3').Database }).db;
+    const { unsettled } = db
+      .prepare(
+        'SELECT COUNT(*) unsettled FROM v2_calibration_probes WHERE settled_at_ms IS NULL',
+      )
+      .get() as { unsettled: number };
+    expect(unsettled).toBe(2); // pending measurements untouched
+  });
 });

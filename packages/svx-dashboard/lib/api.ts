@@ -79,7 +79,9 @@ export interface BotStatus {
   realizedPnl24hUsdc?: number;
   /** Predict-side PnL per (strategy, mode) — the honest headline source. */
   strategyPnl?: StrategyPnlRow[];
-  unrealizedPnlUsdc: number;
+  /** Cost sitting in open positions (money at risk; not a mark-to-market).
+   *  Replaced the old hardcoded `unrealizedPnlUsdc: 0`. */
+  openCostUsdc?: number;
   openPositionCount: number;
   signalsLast24h: number;
   tradesLast24h: number;

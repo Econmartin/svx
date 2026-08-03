@@ -8,6 +8,7 @@ import { StatRow } from '@/components/StatRow';
 import { StatusBadge } from '@/components/StatusBadge';
 import { HealthPanel } from '@/components/HealthPanel';
 import { V2CalibrationCard } from '@/components/V2CalibrationCard';
+import { BoardComparisonCard } from '@/components/BoardComparisonCard';
 import { PageIntro } from '@/components/PageIntro';
 import { PnlChart } from '@/components/PnlChart';
 import { StrategyStats } from '@/components/StrategyStats';
@@ -106,6 +107,8 @@ export default function OverviewPage() {
       />
 
       <HealthPanel status={status} showAllLegs={isMainnet} />
+
+      <BoardComparisonCard />
 
       <V2CalibrationCard />
 

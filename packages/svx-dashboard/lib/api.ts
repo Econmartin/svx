@@ -358,6 +358,23 @@ export interface CalibrationV2Report {
   }>;
 }
 
+/** Response of `GET /board-comparison` — the protocol's own board quote vs
+ *  our surface-derived model price, both resolved against the same
+ *  settlements, overall and per tenor slot. */
+export interface BoardComparison {
+  n: number;
+  withBoard: number;
+  model: { avg_quoted: number; realized: number; gap_pp: number };
+  board: { avg_quoted: number; realized: number; gap_pp: number };
+  bySlot: Array<{
+    slot: string;
+    n: number;
+    model_gap_pp: number;
+    board_gap_pp: number | null;
+    board_minus_model_pp: number | null;
+  }>;
+}
+
 export interface OracleSummary {
   oracleId: string;
   underlyingAsset: string;
@@ -636,6 +653,7 @@ export function createApi(base: string) {
     calibration: (threshold = 0.08) =>
       get<CalibrationReport>(`/calibration?threshold=${threshold}`),
     calibrationV2: () => get<CalibrationV2Report>(`/calibration-v2`),
+    boardComparison: () => get<BoardComparison>(`/board-comparison`),
     butterfly: (limit = 50) => get<ButterflyReport>(`/butterfly?limit=${limit}`),
     rangeSim: (q: { policy?: 'sigma' | 'fixed_bps'; rungs?: number; width?: number } = {}) =>
       get<RangeSimSummary>(

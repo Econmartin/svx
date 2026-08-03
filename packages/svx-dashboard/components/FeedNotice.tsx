@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from 'react';
 
-const KEY = 'svx-feed-notice-dismissed-v7';
+const KEY = 'svx-feed-notice-dismissed-v8';
 
 export function FeedNotice() {
   const [visible, setVisible] = useState(false);
@@ -47,11 +47,11 @@ export function FeedNotice() {
         </button>
       </div>
       <p className="text-muted leading-snug">
-        Predict&apos;s indexer API went offline around July 31, but the protocol itself never
-        stopped — so SVX now reads Predict entirely from the Sui chain: markets from their
-        creation events, the surface from the on-chain feeds, settlement from the market
-        objects. Their API is an accelerator for us now, not a dependency. Live trading
-        continues through the outage.{' '}
+        SVX now reads Predict through DeepBook&apos;s own SDK over gRPC — no server in
+        between, the supported path since their indexer went offline. That opened the full
+        market board: every tenor from one minute to 31 days, with the protocol&apos;s own
+        board quote recorded beside our model price and both settled against the same
+        outcome. See the board-vs-model card on Overview.{' '}
         <a
           className="text-accent hover:underline"
           href="https://github.com/blockscholes/sui-signed-oracle"

@@ -45,6 +45,7 @@ import {
   type V2Objects,
 } from './exec/ptb-v2.js';
 import { decideHarvestV2 } from './strategy/harvest-v2.js';
+import { admissibleStrike } from './exec/ptb-v2.js';
 import axios from 'axios';
 import {
   PolymarketClient,
@@ -2891,8 +2892,9 @@ let v2ExecCache: { objects: V2Objects; fetchedAtMs: number } | null = null;
 async function getV2Objects(
   marketId: string,
   predictClient?: PredictReader | PredictV2Client,
-): Promise<{ objects: V2Objects; tickSizeRaw: number }> {
+): Promise<{ objects: V2Objects; tickSizeRaw: number; admissionTickSizeRaw: number }> {
   let tickSizeRaw = NaN;
+  let admissionTickSizeRaw = NaN;
   let pkg: string | undefined;
   // Chain-native metadata first when available (the indexer host has been
   // torn down twice while the protocol kept running).
@@ -2902,13 +2904,22 @@ async function getV2Objects(
       : undefined;
   if (meta && Number.isFinite(meta.tickSizeRaw) && meta.tickSizeRaw > 0) {
     tickSizeRaw = meta.tickSizeRaw;
+    admissionTickSizeRaw = meta.admissionTickSizeRaw;
     pkg = meta.packageId;
   } else {
     const { data: st } = await axios.get<{
-      market?: { tick_size?: number | string; package?: string };
+      market?: {
+        tick_size?: number | string;
+        admission_tick_size?: number | string;
+        package?: string;
+      };
     }>(`${ADDRESSES.predictServerUrl}/markets/${marketId}/state`, { timeout: 10_000 });
     tickSizeRaw = Number(st?.market?.tick_size);
+    admissionTickSizeRaw = Number(st?.market?.admission_tick_size ?? st?.market?.tick_size);
     pkg = st?.market?.package;
+  }
+  if (!Number.isFinite(admissionTickSizeRaw) || admissionTickSizeRaw <= 0) {
+    admissionTickSizeRaw = tickSizeRaw;
   }
   if (!Number.isFinite(tickSizeRaw) || tickSizeRaw <= 0 || !pkg) {
     throw new Error('v2 market state missing tick_size/package');
@@ -2920,7 +2931,7 @@ async function getV2Objects(
   ) {
     v2ExecCache = { objects: await resolveV2Objects(pkg), fetchedAtMs: Date.now() };
   }
-  return { objects: v2ExecCache.objects, tickSizeRaw };
+  return { objects: v2ExecCache.objects, tickSizeRaw, admissionTickSizeRaw };
 }
 
 /**
@@ -2929,6 +2940,10 @@ async function getV2Objects(
  * above quote). Paper unless predictV2LiveEnabled + wrapper are set; every
  * entry passes the same band/dedupe/max-open/daily-loss gates either way.
  */
+/** Per-market back-off after a rejected mint (deterministic aborts repeat). */
+const HARVEST_FAIL_COOLDOWN_MS = 5 * 60_000;
+const harvestFailCooldown = new Map<string, number>();
+
 async function runHarvestV2Step(deps: {
   predict: PredictReader;
   ledger: LedgerStore;
@@ -2943,6 +2958,18 @@ async function runHarvestV2Step(deps: {
   for (const o of active) {
     const ttm = o.expiryMs - nowMs;
     if (ttm < cfg.harvestV2MinTtmSec * 1000 || ttm > cfg.harvestV2MaxTtmSec * 1000) continue;
+    // A market that just rejected a mint will reject the next one for the
+    // same reason; back off instead of retrying every tick.
+    const cooldownUntil = harvestFailCooldown.get(o.oracleId);
+    if (cooldownUntil && nowMs < cooldownUntil) continue;
+    // Price only strikes the protocol will admit for minting.
+    const meta =
+      predict instanceof PredictV2Client ? predict.marketMetaFor(o.oracleId) : undefined;
+    const snapStrike =
+      meta && Number.isFinite(meta.tickSizeRaw) && Number.isFinite(meta.admissionTickSizeRaw)
+        ? (strike: number) =>
+            admissibleStrike(strike, meta.tickSizeRaw, meta.admissionTickSizeRaw)
+        : undefined;
     const snap = await predict.snapshotOracle(o.oracleId).catch(() => null);
     if (!snap || snap.isSettled) continue;
     const decision = decideHarvestV2(
@@ -2968,6 +2995,8 @@ async function runHarvestV2Step(deps: {
         maxSnapshotAgeMs: 30_000,
         maxOpen: cfg.calibrationHarvestMaxOpen,
         dailyLossLimitDusdc: cfg.calibrationHarvestDailyLossLimitDusdc,
+        snapStrike,
+        quantityDusdc: cfg.calibrationHarvestNotionalDusdc,
       },
     );
     if (!decision.enter) continue;
@@ -2986,22 +3015,26 @@ async function runHarvestV2Step(deps: {
           strike: decision.strike,
           direction: decision.direction,
           tickSizeRaw: v2o.tickSizeRaw,
+          admissionTickSizeRaw: v2o.admissionTickSizeRaw,
           quantityDusdc,
           maxCostDusdc: costUsdc * 1.08 + 0.05,
           maxProbability: Math.min(decision.costPrice + 0.03, 0.97),
         });
         const result = await submitTx(live.sui, tx, live.keypair);
         if (!result.ok) {
+          harvestFailCooldown.set(o.oracleId, Date.now() + HARVEST_FAIL_COOLDOWN_MS);
           log.warn('svx.harvest_v2.live_failed', {
             oracleId: o.oracleId,
             digest: result.digest,
             error: result.error,
+            cooldownSec: HARVEST_FAIL_COOLDOWN_MS / 1000,
           });
           continue;
         }
         txDigest = result.digest;
         mode = 'live';
       } catch (e) {
+        harvestFailCooldown.set(o.oracleId, Date.now() + HARVEST_FAIL_COOLDOWN_MS);
         log.warn('svx.harvest_v2.live_error', { err: errMsg(e) });
         continue;
       }
@@ -3145,6 +3178,7 @@ async function maybeFavoredMint(args: {
         strike: polySnap.strike,
         direction: decision.direction,
         tickSizeRaw: v2o.tickSizeRaw,
+        admissionTickSizeRaw: v2o.admissionTickSizeRaw,
         quantityDusdc,
         // All-in cap: modeled cost + fee headroom (protocol base fee 2% +
         // near-expiry ramp) + small slippage margin.

@@ -50,6 +50,7 @@ interface RawMarketRow {
   propbook_underlying_id: number;
   expiry: number;
   tick_size: number | string;
+  admission_tick_size?: number | string;
   min_entry_probability?: number | string;
   max_entry_probability?: number | string;
   checkpoint_timestamp_ms: number;
@@ -135,7 +136,13 @@ export class PredictV2Client {
   private chainPackageCache: string | null = null;
   private readonly marketMeta = new Map<
     string,
-    { expiryMs: number; tickSizeRaw: number; packageId: string }
+    {
+      expiryMs: number;
+      tickSizeRaw: number;
+      /** Mint bounds must sit on this coarser grid (assert_admitted_mint_ticks). */
+      admissionTickSizeRaw: number;
+      packageId: string;
+    }
   >();
   private spotCache: { fetchedAtMs: number; spot: number; sourceTimestampMs: number } | null =
     null;
@@ -196,6 +203,7 @@ export class PredictV2Client {
           this.marketMeta.set(m.expiry_market_id, {
             expiryMs: Number(m.expiry),
             tickSizeRaw: Number(m.tick_size),
+            admissionTickSizeRaw: Number(m.admission_tick_size ?? m.tick_size),
             packageId: m.package,
           });
           return marketToSummary(m, map);
@@ -233,6 +241,7 @@ export class PredictV2Client {
       this.marketMeta.set(id, {
         expiryMs,
         tickSizeRaw: Number(j.tick_size),
+        admissionTickSizeRaw: Number(j.admission_tick_size ?? j.tick_size),
         packageId: pkg,
       });
       out.push({
@@ -267,7 +276,9 @@ export class PredictV2Client {
   }
 
   /** Market metadata (tick size, package) for the exec layer. */
-  marketMetaFor(marketId: string): { expiryMs: number; tickSizeRaw: number; packageId: string } | undefined {
+  marketMetaFor(marketId: string):
+    | { expiryMs: number; tickSizeRaw: number; admissionTickSizeRaw: number; packageId: string }
+    | undefined {
     return this.marketMeta.get(marketId);
   }
 
@@ -359,6 +370,7 @@ export class PredictV2Client {
       this.marketMeta.set(marketId, {
         expiryMs,
         tickSizeRaw: prev?.tickSizeRaw ?? NaN,
+        admissionTickSizeRaw: prev?.admissionTickSizeRaw ?? NaN,
         packageId: pkg,
       });
     }

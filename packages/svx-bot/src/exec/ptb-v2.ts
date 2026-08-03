@@ -136,6 +136,49 @@ export function strikeToTick(strike: number, tickSizeRaw: number): bigint {
   return scaled / BigInt(tickSizeRaw);
 }
 
+/**
+ * Snap a tick onto the market's ADMISSION grid.
+ *
+ * `strike_exposure::assert_admitted_mint_ticks` accepts a bound only if it is
+ * a sentinel (0 / pos-inf), the market's current reference tick, or a multiple
+ * of `admission_tick_size / tick_size`. Our strikes come off a continuous SVI
+ * grid, so an unsnapped tick aborts the mint (code 1).
+ */
+export function admissionMultiple(tickSizeRaw: number, admissionTickSizeRaw: number): bigint {
+  const m = BigInt(Math.max(1, Math.round(admissionTickSizeRaw))) /
+    BigInt(Math.max(1, Math.round(tickSizeRaw)));
+  return m > 0n ? m : 1n;
+}
+
+export function snapTickToAdmission(
+  tick: bigint,
+  tickSizeRaw: number,
+  admissionTickSizeRaw: number,
+): bigint {
+  const mult = admissionMultiple(tickSizeRaw, admissionTickSizeRaw);
+  if (mult <= 1n) return tick;
+  const rem = tick % mult;
+  // Round to the NEAREST admitted tick so the traded strike stays as close as
+  // possible to the one the strategy priced.
+  const down = tick - rem;
+  const up = down + mult;
+  return rem * 2n >= mult ? up : down;
+}
+
+/** The strike actually tradeable for a requested strike (admission-snapped). */
+export function admissibleStrike(
+  strike: number,
+  tickSizeRaw: number,
+  admissionTickSizeRaw: number,
+): number {
+  const snapped = snapTickToAdmission(
+    strikeToTick(strike, tickSizeRaw),
+    tickSizeRaw,
+    admissionTickSizeRaw,
+  );
+  return (Number(snapped) * tickSizeRaw) / 1e9;
+}
+
 export function lotAlignedQuantity(quantityDusdc: number): bigint {
   const raw = BigInt(Math.round(quantityDusdc * Number(QUOTE_UNIT)));
   return (raw / POSITION_LOT) * POSITION_LOT;
@@ -197,6 +240,8 @@ export interface V2MintArgs {
   direction: 'up' | 'down';
   /** Raw tick_size from the market row (1e9-scaled price units per tick). */
   tickSizeRaw: number;
+  /** Raw admission_tick_size — mint bounds must sit on this coarser grid. */
+  admissionTickSizeRaw: number;
   /** Max payout in dUSDC; lot-rounded down internally. */
   quantityDusdc: number;
   /** All-in spend cap in dUSDC (premium + fees). Required. */
@@ -208,7 +253,11 @@ export interface V2MintArgs {
 /** Live mint: auth → PTB-local pricer snapshot → mint_exact_quantity. */
 export function buildV2MintTx(o: V2Objects, args: V2MintArgs): Transaction {
   const tx = new Transaction();
-  const tick = strikeToTick(args.strike, args.tickSizeRaw);
+  const tick = snapTickToAdmission(
+    strikeToTick(args.strike, args.tickSizeRaw),
+    args.tickSizeRaw,
+    args.admissionTickSizeRaw,
+  );
   const lower = args.direction === 'up' ? tick : 0n;
   const higher = args.direction === 'up' ? POS_INF_TICK : tick;
   const quantity = lotAlignedQuantity(args.quantityDusdc);

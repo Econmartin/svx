@@ -171,6 +171,11 @@ export function slotForTtm(ttmMs: number): string | null {
 /** Strikes to sample per market, in z-units of ATM total variance. */
 const BOARD_Z_GRID = [-2, -1, -0.5, 0, 0.5, 1, 2];
 
+/** The protocol refuses live pricing very close to expiry (pricing abort 9),
+ *  so don't ask for a board quote inside this window — the model price is
+ *  still recorded, the board column is simply null. */
+const MIN_BOARD_QUOTE_TTM_MS = 90_000;
+
 /**
  * Full-board capture across EVERY listed market and tenor.
  *
@@ -211,7 +216,10 @@ export async function recordBoardTenorProbes(deps: {
       if (!Number.isFinite(modelUp) || modelUp <= 0 || modelUp >= 1) continue;
       // Board quote at the SAME strike — null when the protocol has no
       // reference yet or the read fails; the row still carries our model.
-      const board = await boardPrice(snap.underlyingAsset, m.expiryMs, Math.round(strike));
+      const board =
+        ttm >= MIN_BOARD_QUOTE_TTM_MS
+          ? await boardPrice(snap.underlyingAsset, m.expiryMs, Math.round(strike))
+          : null;
       ledger.insertV2CalibrationProbe({
         marketId: m.id,
         underlying: snap.underlyingAsset,

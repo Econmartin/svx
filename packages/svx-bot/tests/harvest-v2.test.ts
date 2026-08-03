@@ -66,3 +66,18 @@ describe('harvest-v2 surface-only decision', () => {
     ).toBe(false);
   });
 });
+
+describe('protocol minimum net premium', () => {
+  it('refuses candidates whose premium would abort on-chain', () => {
+    // min_net_premium = $1.00; a $1 clip at 0.6-0.9 gives $0.60-$0.90 net.
+    const d = decideHarvestV2({ ...base, snap: snap() }, { ...gates, quantityDusdc: 1 });
+    expect(d.enter).toBe(false);
+    expect(d.reason).toBe('no_strike_in_band');
+  });
+
+  it('accepts the standard $5 clip, which clears the floor', () => {
+    const d = decideHarvestV2({ ...base, snap: snap() }, { ...gates, quantityDusdc: 5 });
+    expect(d.enter).toBe(true);
+    expect(d.costPrice * 5).toBeGreaterThanOrEqual(1.1);
+  });
+});

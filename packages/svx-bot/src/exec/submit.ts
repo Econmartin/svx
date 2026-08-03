@@ -59,7 +59,15 @@ export async function submitTx(
       return { ok: false, digest, status, error };
     } catch (e) {
       lastErr = e;
-      log.warn('svx.tx.network_error', { err: errMsg(e), attempt });
+      const msg = errMsg(e);
+      // A MoveAbort is deterministic: the same payload will fail identically.
+      // Retrying wastes gas budget and floods the logs (2026-08-03: an
+      // off-grid mint tick produced a retry storm on every 10s tick).
+      if (/MoveAbort|abort code/i.test(msg)) {
+        log.warn('svx.tx.move_abort', { err: msg });
+        return { ok: false, digest: '', status: 'move_abort', error: msg };
+      }
+      log.warn('svx.tx.network_error', { err: msg, attempt });
       if (attempt === 0) await sleep(500);
     }
   }

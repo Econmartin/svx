@@ -59,7 +59,7 @@ export async function readObjectJson<T = Record<string, unknown>>(
   objectId: string,
 ): Promise<T | null> {
   try {
-    const res = await sui.getObject({ objectId });
+    const res = await sui.getObject({ objectId, include: { json: true } });
     return (res.object?.json as T) ?? null;
   } catch {
     return null;

@@ -524,7 +524,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
           wrapperId &&
           (!state.v2Wrapper || Date.now() - state.v2Wrapper.updatedAtMs > 60_000)
         ) {
-          const bal = await readV2WrapperDusdc(ADDRESSES.rpcUrl, wrapperId).catch(() => null);
+          const bal = await readV2WrapperDusdc(makeSuiClient(), wrapperId).catch(() => null);
           if (bal != null) {
             state.v2Wrapper = { id: wrapperId, balanceUsdc: bal, updatedAtMs: Date.now() };
           }
@@ -2963,7 +2963,11 @@ async function runHarvestV2Step(deps: {
     // same reason; back off instead of retrying every tick.
     const cooldownUntil = harvestFailCooldown.get(o.oracleId);
     if (cooldownUntil && nowMs < cooldownUntil) continue;
-    // Price only strikes the protocol will admit for minting.
+    const snap = await predict.snapshotOracle(o.oracleId).catch(() => null);
+    if (!snap || snap.isSettled) continue;
+    // Price only strikes the protocol will admit for minting. Meta is read
+    // AFTER the snapshot on purpose: SDK discovery rows carry no admission
+    // tick size — the snapshot's market-object read is what fills it in.
     const meta =
       predict instanceof PredictV2Client ? predict.marketMetaFor(o.oracleId) : undefined;
     const snapStrike =
@@ -2971,8 +2975,6 @@ async function runHarvestV2Step(deps: {
         ? (strike: number) =>
             admissibleStrike(strike, meta.tickSizeRaw, meta.admissionTickSizeRaw)
         : undefined;
-    const snap = await predict.snapshotOracle(o.oracleId).catch(() => null);
-    if (!snap || snap.isSettled) continue;
     const decision = decideHarvestV2(
       {
         snap,

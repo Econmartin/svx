@@ -10,8 +10,10 @@
  *     reference tick (spot) and settlement.
  *   - the SVI surface no longer has a server route; it lives in the propbook
  *     BlockScholesSVIFeed shared object as one lane PER MARKET EXPIRY,
- *     already rolled down upstream (DBU-655). We read lanes directly via
- *     JSON-RPC dynamic-field lookups (GraphQL event queries proved flaky).
+ *     already rolled down upstream (DBU-655). We read lanes directly from
+ *     chain objects over gRPC — Sui retired JSON-RPC on its own fullnodes,
+ *     and GraphQL event queries proved flaky, so gRPC is the one transport
+ *     every read in this file uses.
  *   - freshness is anchored to `source_timestamp_ms` (market-data time), NOT
  *     the chain write time: since DBU-655 the feeder retransmits unchanged
  *     tuples every second, so envelope recency proves the feed is alive but
@@ -28,10 +30,13 @@
 
 import axios, { AxiosInstance } from 'axios';
 import axiosRetry from 'axios-retry';
+import { bcs } from '@mysten/sui/bcs';
 import { ADDRESSES } from 'svx-shared/addresses';
 import { FLOAT_SCALING_NUM } from 'svx-shared/constants';
 import type { OracleSnapshot, SVIParams } from 'svx-shared/types';
+import { makeSuiClient, readObjectJson } from '../exec/sui-client.js';
 import { log } from '../util/log.js';
+import { listSdkMarkets, sdkConfig } from './predict-sdk.js';
 import type { PredictClient, PredictOracleSummary } from './predict.js';
 
 /** The read surface the bot actually consumes — satisfied by both the V1 and
@@ -118,18 +123,11 @@ interface SviLaneEntry {
   sourceTimestampMs: number;
 }
 
-/** Last known predict package; only used to bootstrap chain discovery when
- *  the indexer is unavailable and nothing is cached yet. */
-const DEFAULT_PREDICT_PACKAGE_ID =
-  '0xdb3ef5a5129920e59c9b2ae25a77eddb48acd0e1c6307b97073f0e076016446e';
 /** Skip the indexer entirely (chain-native reads only). */
 const CHAIN_ONLY = process.env.PREDICT_V2_CHAIN_ONLY === 'true';
-/** How many recent MarketCreated events to scan when discovering on-chain. */
-const CHAIN_DISCOVERY_LIMIT = 50;
 
 export class PredictV2Client {
   private readonly http: AxiosInstance;
-  private readonly rpcUrl: string;
   private readonly sviFeedId: string;
   private readonly spotFeedId: string;
   private sviTableIdCache: string | null = null;
@@ -162,13 +160,16 @@ export class PredictV2Client {
       retryCondition: (err) =>
         axiosRetry.isNetworkOrIdempotentRequestError(err) || err.code === 'ECONNABORTED',
     });
-    this.rpcUrl = ADDRESSES.rpcUrl;
-    // Propbook feed shared objects (redeploys change them — env-overridable).
+    // Propbook feed shared objects — default to the SDK's deployment record
+    // for the active network (env-overridable for pinning across redeploys).
+    const btcFeeds = sdkConfig().underlyings.BTC;
     this.sviFeedId =
       process.env.PREDICT_SVI_FEED_ID ??
+      btcFeeds?.bsSviFeedId ??
       '0xdc2f8270676bd05fb28491e8d4a41a495722fda7a454926dd66dbba256a21c69';
     this.spotFeedId =
       process.env.PREDICT_SPOT_FEED_ID ??
+      btcFeeds?.bsSpotFeedId ??
       '0xcdc5fa7364e60fd2504aa96f65b707dc0734e507a919b1a7d7d63164fd67b745';
   }
 
@@ -212,52 +213,48 @@ export class PredictV2Client {
         summaries = null; // fall through to chain
       }
     }
-    if (!summaries) summaries = await this.discoverMarketsFromChain(map);
+    if (!summaries) summaries = await this.discoverMarketsFromSdk(map);
     this.marketListCache = { fetchedAtMs: now, data: summaries };
     return summaries;
   }
 
-  /** Newest markets straight from `config_events::MarketCreated`. */
-  private async discoverMarketsFromChain(
+  /**
+   * The full market board via the Predict SDK (`read.markets()` over gRPC) —
+   * the DeepBook-supported discovery path, and one that works on hosts whose
+   * JSON-RPC has been retired. Admission tick sizes are NOT on the SDK row;
+   * they are learned from the ExpiryMarket object on first snapshot (and from
+   * the indexer row when that path is up), before any mint needs them.
+   */
+  private async discoverMarketsFromSdk(
     map: Record<string, string>,
   ): Promise<PredictOracleSummary[]> {
-    const pkg = await this.chainPackageId();
-    if (!pkg) return [];
-    const res = await this.rpc<{
-      data?: Array<{ parsedJson?: Record<string, unknown> }>;
-    }>('suix_queryEvents', [
-      { MoveEventType: `${pkg}::config_events::MarketCreated` },
-      null,
-      CHAIN_DISCOVERY_LIMIT,
-      true, // descending — newest first
-    ]);
-    const out: PredictOracleSummary[] = [];
+    const pkg = this.chainPackageId();
+    const markets = await listSdkMarkets();
     const now = Date.now();
-    for (const e of res?.data ?? []) {
-      const j = e.parsedJson ?? {};
-      const id = String(j.expiry_market_id ?? '');
-      const expiryMs = Number(j.expiry);
-      if (!id || !Number.isFinite(expiryMs)) continue;
-      this.marketMeta.set(id, {
-        expiryMs,
-        tickSizeRaw: Number(j.tick_size),
-        admissionTickSizeRaw: Number(j.admission_tick_size ?? j.tick_size),
-        packageId: pkg,
+    const out: PredictOracleSummary[] = [];
+    for (const m of markets) {
+      const prev = this.marketMeta.get(m.id);
+      this.marketMeta.set(m.id, {
+        expiryMs: m.expiryMs,
+        // SDK tick size is in USD; raw grid units are 1e9-scaled.
+        tickSizeRaw: Math.round(m.tickSize * FLOAT_SCALING_NUM),
+        admissionTickSizeRaw: prev?.admissionTickSizeRaw ?? NaN,
+        packageId: prev?.packageId ?? pkg,
       });
       out.push({
-        oracleId: id,
-        underlyingAsset: map[String(j.propbook_underlying_id ?? 1)] ?? 'BTC',
-        expiryMs,
+        oracleId: m.id,
+        underlyingAsset: map['1'] ?? 'BTC',
+        expiryMs: m.expiryMs,
         minStrike: 0,
-        tickSize: RAW_TO_NUMBER(j.tick_size),
-        status: expiryMs <= now ? 'pending_settlement' : 'active',
+        tickSize: m.tickSize,
+        status: m.expiryMs <= now ? 'pending_settlement' : 'active',
       });
     }
     return out;
   }
 
-  /** Predict package id, learned from any known market object's type. */
-  private async chainPackageId(): Promise<string | null> {
+  /** Predict package id: env pin → learned from a market → SDK's record. */
+  private chainPackageId(): string {
     if (this.chainPackageCache) return this.chainPackageCache;
     const pinned = process.env.PREDICT_V2_PACKAGE_ID;
     if (pinned) {
@@ -265,13 +262,7 @@ export class PredictV2Client {
       return pinned;
     }
     const known = [...this.marketMeta.values()].find((m) => m.packageId)?.packageId;
-    if (known) {
-      this.chainPackageCache = known;
-      return known;
-    }
-    // Cold start with the indexer down: fall back to the last known
-    // deployment. Republishes change this — pin PREDICT_V2_PACKAGE_ID.
-    this.chainPackageCache = DEFAULT_PREDICT_PACKAGE_ID;
+    this.chainPackageCache = known ?? sdkConfig().packages.predict;
     return this.chainPackageCache;
   }
 
@@ -304,6 +295,14 @@ export class PredictV2Client {
     if (!state) return this.snapshotFromChain(marketId);
     const m = state.market;
     if (!m) return null;
+    // The indexer row carries full metadata — keep the meta cache warm so the
+    // exec layer has admission ticks even when discovery ran through the SDK.
+    this.marketMeta.set(m.expiry_market_id, {
+      expiryMs: Number(m.expiry),
+      tickSizeRaw: Number(m.tick_size),
+      admissionTickSizeRaw: Number(m.admission_tick_size ?? m.tick_size),
+      packageId: m.package,
+    });
     const expiryMs = Number(m.expiry);
     // The feeder maintains an SVI lane PER MARKET EXPIRY (already rolled down
     // upstream per DBU-655) — read it straight off the feed object's table.
@@ -340,7 +339,7 @@ export class PredictV2Client {
     };
   }
 
-  // ── propbook SVI lane reader (direct object reads over JSON-RPC) ─────────
+  // ── propbook SVI lane reader (direct object reads over gRPC) ─────────────
   //
   // GraphQL event queries proved unreliable (module filters intermittently
   // return nothing), so we read the feed OBJECT: BlockScholesSVIFeed holds a
@@ -350,30 +349,38 @@ export class PredictV2Client {
 
   /**
    * Snapshot built entirely from chain state: the ExpiryMarket object carries
-   * expiry / settlement / pause, spot comes from the Block Scholes spot feed
-   * and the surface from the per-expiry SVI lane. No indexer involved.
+   * expiry / settlement / pause / tick sizes, spot comes from the Block
+   * Scholes spot feed and the surface from the per-expiry SVI lane. No
+   * indexer involved, and no JSON-RPC — the object reads ride gRPC.
    */
   private async snapshotFromChain(marketId: string): Promise<OracleSnapshot | null> {
-    const obj = await this.rpc<{
-      data?: { type?: string; content?: { fields?: Record<string, unknown> } };
-    }>('sui_getObject', [marketId, { showContent: true, showType: true }]);
-    const f = obj?.data?.content?.fields;
+    const sui = makeSuiClient();
+    const obj = await sui
+      .getObject({ objectId: marketId, include: { json: true } })
+      .catch(() => null);
+    const f = obj?.object?.json as Record<string, unknown> | undefined;
     if (!f) return null;
     const expiryMs = Number(f.expiry);
     if (!Number.isFinite(expiryMs)) return null;
-    // Learn the package + expiry from the object itself so discovery and the
-    // exec layer keep working even if we never saw the creation event.
-    const pkg = obj?.data?.type?.split('::')[0];
+    // Learn package + tick sizes from the object itself so the exec layer has
+    // everything it needs even when discovery ran through the SDK (whose rows
+    // carry no admission tick size).
+    const pkg = obj?.object?.type?.split('::')[0];
     if (pkg && !this.chainPackageCache) this.chainPackageCache = pkg;
+    const se = f.strike_exposure as
+      | { tick_size?: unknown; admission_tick_size?: unknown }
+      | undefined;
     const prev = this.marketMeta.get(marketId);
-    if (pkg) {
-      this.marketMeta.set(marketId, {
-        expiryMs,
-        tickSizeRaw: prev?.tickSizeRaw ?? NaN,
-        admissionTickSizeRaw: prev?.admissionTickSizeRaw ?? NaN,
-        packageId: pkg,
-      });
-    }
+    const tickSizeRaw = Number(se?.tick_size);
+    const admissionTickSizeRaw = Number(se?.admission_tick_size);
+    this.marketMeta.set(marketId, {
+      expiryMs,
+      tickSizeRaw: Number.isFinite(tickSizeRaw) ? tickSizeRaw : (prev?.tickSizeRaw ?? NaN),
+      admissionTickSizeRaw: Number.isFinite(admissionTickSizeRaw)
+        ? admissionTickSizeRaw
+        : (prev?.admissionTickSizeRaw ?? NaN),
+      packageId: pkg ?? prev?.packageId ?? this.chainPackageId(),
+    });
     const [sviLane, spotRead] = await Promise.all([
       this.sviLane(expiryMs),
       this.spotFromFeed(),
@@ -395,31 +402,14 @@ export class PredictV2Client {
     };
   }
 
-  private async rpc<T>(method: string, params: unknown[]): Promise<T | undefined> {
-    const res = await axios.post<{ result?: T; error?: { message?: string } }>(
-      this.rpcUrl,
-      { jsonrpc: '2.0', id: 1, method, params },
-      { timeout: 12_000 },
-    );
-    if (res.data.error) {
-      log.warn('svx.predict_v2.rpc_error', { method, err: res.data.error.message });
-      return undefined;
-    }
-    return res.data.result;
-  }
-
   /** Latest spot from the propbook BlockScholesSpotFeed's inline lane. */
   private async spotFromFeed(): Promise<{ spot: number; sourceTimestampMs: number } | null> {
     const now = Date.now();
     if (this.spotCache && now - this.spotCache.fetchedAtMs < this.laneCacheTtlMs) {
       return this.spotCache;
     }
-    const obj = await this.rpc<{
-      data?: { content?: { fields?: { lane?: unknown } } };
-    }>('sui_getObject', [this.spotFeedId, { showContent: true }]);
-    const lane = UNWRAP(obj?.data?.content?.fields?.lane) as
-      | { latest?: unknown }
-      | undefined;
+    const json = await readObjectJson<{ lane?: unknown }>(makeSuiClient(), this.spotFeedId);
+    const lane = UNWRAP(json?.lane) as { latest?: unknown } | undefined;
     const latest = UNWRAP(lane?.latest) as
       | { source_timestamp_ms?: unknown; value?: unknown }
       | undefined;
@@ -437,10 +427,14 @@ export class PredictV2Client {
   /** Resolve (and cache) the SVI feed's expiry→lane table id. */
   private async sviTableId(): Promise<string | null> {
     if (this.sviTableIdCache) return this.sviTableIdCache;
-    const obj = await this.rpc<{
-      data?: { content?: { fields?: { expiries?: { fields?: { id?: { id?: string } } } } } };
-    }>('sui_getObject', [this.sviFeedId, { showContent: true }]);
-    const id = obj?.data?.content?.fields?.expiries?.fields?.id?.id ?? null;
+    const json = await readObjectJson<{ expiries?: { id?: string | { id?: string } } }>(
+      makeSuiClient(),
+      this.sviFeedId,
+    );
+    // gRPC renders a Table as `{id: "0x…", size}`; JSON-RPC nested it one
+    // level deeper — accept both so an env-pinned transport swap stays safe.
+    const rawId = json?.expiries?.id;
+    const id = (typeof rawId === 'string' ? rawId : rawId?.id) ?? null;
     if (id) this.sviTableIdCache = id;
     else log.warn('svx.predict_v2.svi_feed_unreadable', { feedId: this.sviFeedId });
     return id;
@@ -451,10 +445,23 @@ export class PredictV2Client {
     if (cached && Date.now() - cached.fetchedAtMs < this.laneCacheTtlMs) return cached.entry;
     const tableId = await this.sviTableId();
     if (!tableId) return null;
-    const df = await this.rpc<{
-      data?: { content?: { fields?: { value?: { fields?: Record<string, unknown> } } } };
-    }>('suix_getDynamicFieldObject', [tableId, { type: 'u64', value: String(expiryMs) }]);
-    const lane = df?.data?.content?.fields?.value?.fields;
+    const sui = makeSuiClient();
+    // Table entry = dynamic field keyed by BCS-encoded u64 expiry; the field
+    // object's json carries the lane struct as `value`.
+    const lane = await (async () => {
+      try {
+        const df = await sui.getDynamicField({
+          parentId: tableId,
+          name: { type: 'u64', bcs: bcs.u64().serialize(BigInt(expiryMs)).toBytes() },
+        });
+        const fieldId = df.dynamicField?.fieldId;
+        if (!fieldId) return undefined;
+        const json = await readObjectJson<{ value?: unknown }>(sui, fieldId);
+        return UNWRAP(json?.value) as Record<string, unknown> | undefined;
+      } catch {
+        return undefined; // no lane for this expiry (yet)
+      }
+    })();
     const latest = UNWRAP(lane?.latest) as
       | {
           source_timestamp_ms?: unknown;

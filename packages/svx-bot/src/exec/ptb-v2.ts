@@ -38,6 +38,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import { SUI_CLOCK_OBJECT_ID } from '@mysten/sui/utils';
 import { ADDRESSES } from 'svx-shared/addresses';
 import { QUOTE_UNIT } from 'svx-shared/constants';
+import { sdkConfig } from '../pricing/predict-sdk.js';
 
 export const ACCUMULATOR_ROOT_ID = '0xacc';
 export const POS_INF_TICK = (1n << 30n) - 1n;
@@ -73,11 +74,34 @@ async function objectByType(graphqlUrl: string, type: string): Promise<string | 
 }
 
 /**
- * Resolve the current V2 singleton objects by type. `predictPackageId` should
- * come from a live `/markets` row (the deployment's source of truth). Every
- * id is env-overridable (PREDICT_V2_<NAME>) for pinning or emergencies.
+ * Resolve the current V2 singleton objects. When the live package matches the
+ * SDK's deployment record, the record IS the address book — no network round
+ * trips. A mismatch means the protocol republished after the SDK release, so
+ * fall back to finding the singletons by TYPE via Sui GraphQL. Every id stays
+ * env-overridable (PREDICT_V2_<NAME>) for pinning or emergencies.
  */
 export async function resolveV2Objects(predictPackageId: string): Promise<V2Objects> {
+  const sdk = sdkConfig();
+  if (predictPackageId === sdk.packages.predict) {
+    const feeds = sdk.underlyings.BTC;
+    const env = (k: string, fallback: string | undefined) => process.env[k] ?? fallback;
+    const out: Partial<V2Objects> = {
+      predictPackageId,
+      accountPackageId: env('PREDICT_V2_ACCOUNT_PKG', sdk.packages.account),
+      propbookPackageId: env('PREDICT_V2_PROPBOOK_PKG', sdk.packages.propbook),
+      protocolConfigId: env('PREDICT_V2_CONFIG_ID', sdk.objects.protocolConfig),
+      accountRegistryId: env('PREDICT_V2_ACCOUNT_REGISTRY_ID', sdk.objects.accountRegistry),
+      oracleRegistryId: env('PREDICT_V2_ORACLE_REGISTRY_ID', sdk.objects.oracleRegistry),
+      pythFeedId: env('PREDICT_V2_PYTH_FEED_ID', feeds?.pythFeedId),
+      bsSpotFeedId: env('PREDICT_SPOT_FEED_ID', feeds?.bsSpotFeedId),
+      bsForwardFeedId: env('PREDICT_V2_FORWARD_FEED_ID', feeds?.bsForwardFeedId),
+      bsSviFeedId: env('PREDICT_SVI_FEED_ID', feeds?.bsSviFeedId),
+    };
+    if (Object.values(out).every((v) => typeof v === 'string' && v.length > 0)) {
+      return out as V2Objects;
+    }
+    // Incomplete record (unexpected) — fall through to type discovery.
+  }
   const graphqlUrl = process.env.SUI_GRAPHQL_URL ?? 'https://graphql.testnet.sui.io/graphql';
   const accountPackageId = process.env.PREDICT_V2_ACCOUNT_PKG ?? DEFAULTS.accountPackageId;
   const propbookPackageId = process.env.PREDICT_V2_PROPBOOK_PKG ?? DEFAULTS.propbookPackageId;
@@ -333,47 +357,40 @@ export function buildV2RedeemSettledTx(
 void configModule;
 
 /**
- * Read the wrapper's stored dUSDC balance (the V2 trading bankroll).
- * Walks wrapper → account balance tables → CoinKey<DUSDC> dynamic field.
- * Returns null when unreadable (caller keeps the previous reading).
+ * Read the wrapper's stored dUSDC balance (the V2 trading bankroll) over
+ * gRPC. Walks wrapper → account balance table → `Balance<DUSDC>` dynamic
+ * field. Returns null when unreadable (caller keeps the previous reading).
  */
 export async function readV2WrapperDusdc(
-  rpcUrl: string,
+  sui: import('./sui-client.js').SuiChainClient,
   wrapperId: string,
 ): Promise<number | null> {
-  const rpc = async <T>(method: string, params: unknown[]): Promise<T | undefined> => {
-    const res = await axios.post<{ result?: T }>(
-      rpcUrl,
-      { jsonrpc: '2.0', id: 1, method, params },
-      { timeout: 12_000 },
-    );
-    return res.data.result;
-  };
-  const obj = await rpc<{ data?: { content?: unknown } }>('sui_getObject', [
-    wrapperId,
-    { showContent: true },
-  ]);
-  if (!obj?.data?.content) return null;
-  // Collect every table/UID id inside the wrapper content and look for the
-  // CoinKey<DUSDC> balance field among their dynamic fields.
-  const ids = [...JSON.stringify(obj.data.content).matchAll(/"id":\s*\{"id":\s*"(0x[0-9a-f]+)"\}/g)]
+  const obj = await sui
+    .getObject({ objectId: wrapperId, include: { json: true } })
+    .catch(() => null);
+  const json = obj?.object?.json;
+  if (!json) return null;
+  // Collect every object id inside the wrapper json (gRPC renders Table UIDs
+  // as plain strings) and look for the Balance<DUSDC> dynamic field.
+  const ids = [...JSON.stringify(json).matchAll(/"(0x[0-9a-f]{40,})"/g)]
     .map((m) => m[1]!)
     .filter((id) => id !== wrapperId);
   for (const tableId of [...new Set(ids)]) {
-    const dfs = await rpc<{ data?: Array<{ objectId: string; objectType?: string }> }>(
-      'suix_getDynamicFields',
-      [tableId, null, 10],
-    );
-    const hit = dfs?.data?.find(
-      (f) => f.objectType?.includes('Balance<') && f.objectType?.includes(ADDRESSES.dusdcType),
-    );
-    if (!hit) continue;
-    const bal = await rpc<{ data?: { content?: { fields?: { value?: string | number } } } }>(
-      'sui_getObject',
-      [hit.objectId, { showContent: true }],
-    );
-    const v = Number(bal?.data?.content?.fields?.value);
-    if (Number.isFinite(v)) return v / Number(QUOTE_UNIT);
+    try {
+      const dfs = await sui.listDynamicFields({ parentId: tableId });
+      const hit = (dfs.dynamicFields ?? []).find(
+        (f) => f.valueType?.includes('Balance<') && f.valueType?.includes(ADDRESSES.dusdcType),
+      );
+      if (!hit) continue;
+      const bal = await sui.getObject({
+        objectId: hit.fieldId,
+        include: { json: true },
+      });
+      const v = Number((bal.object?.json as { value?: string | number } | undefined)?.value);
+      if (Number.isFinite(v)) return v / Number(QUOTE_UNIT);
+    } catch {
+      continue; // not a table / unreadable — try the next candidate
+    }
   }
   return null;
 }

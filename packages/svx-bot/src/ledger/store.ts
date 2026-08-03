@@ -212,7 +212,9 @@ CREATE TABLE IF NOT EXISTS v2_calibration_probes (
   slot TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_v2probe_market ON v2_calibration_probes(market_id);
-CREATE INDEX IF NOT EXISTS ix_v2probe_slot ON v2_calibration_probes(market_id, slot);
+/* NOTE: the (market_id, slot) index is created in ensureV2ProbeColumns(),
+   AFTER the additive column migration — an index in this schema block would
+   reference the slot column before ALTER TABLE adds it on older databases. */
 CREATE INDEX IF NOT EXISTS ix_v2probe_unsettled
   ON v2_calibration_probes(expiry_ms) WHERE settlement_price IS NULL;
 
@@ -1182,13 +1184,20 @@ export class LedgerStore {
 
   /** Additive migration for DBs created before board/slot columns existed. */
   private ensureV2ProbeColumns(): void {
-    for (const col of ['board_prob REAL', 'slot TEXT']) {
-      try {
-        this.db.exec(`ALTER TABLE v2_calibration_probes ADD COLUMN ${col}`);
-      } catch {
-        /* already present */
-      }
+    const cols = this.db
+      .prepare<[], { name: string }>(`PRAGMA table_info(v2_calibration_probes)`)
+      .all()
+      .map((r) => r.name);
+    if (!cols.includes('board_prob')) {
+      this.db.exec(`ALTER TABLE v2_calibration_probes ADD COLUMN board_prob REAL`);
     }
+    if (!cols.includes('slot')) {
+      this.db.exec(`ALTER TABLE v2_calibration_probes ADD COLUMN slot TEXT`);
+    }
+    // Safe now that both columns exist on fresh AND migrated databases.
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS ix_v2probe_slot ON v2_calibration_probes(market_id, slot)`,
+    );
   }
 
   insertV2CalibrationProbe(p: {

@@ -23,6 +23,9 @@ export interface TxResult {
   digest: string;
   status?: string;
   error?: string;
+  /** Move events from the executed tx — lets callers decode exact fills
+   *  (entry probability, quantity, fees) instead of booking modeled costs. */
+  events?: Array<{ eventType?: string; type?: string; bcs?: Uint8Array | string }>;
 }
 
 export async function submitTx(
@@ -36,24 +39,32 @@ export async function submitTx(
       const raw = (await sui.signAndExecuteTransaction({
         transaction: tx,
         signer,
+        include: { events: true },
       })) as unknown as {
-        Transaction?: { digest?: string; effects?: unknown };
-        transaction?: { digest?: string; effects?: unknown };
-        digest?: string;
-        effects?: unknown;
+        $kind?: string;
+        Transaction?: {
+          digest?: string;
+          status?: { success?: boolean; error?: unknown };
+          events?: TxResult['events'];
+        };
+        // gRPC failures come back as a discriminated FailedTransaction — the
+        // earlier parse missed this arm entirely and read a failure as
+        // success with an empty digest.
+        FailedTransaction?: {
+          digest?: string;
+          status?: { success?: boolean; error?: unknown };
+        };
       };
-      // gRPC wraps the executed tx ($kind: 'Transaction'); tolerate the plain
-      // shape too so a client change can't silently break status parsing.
-      const txn = raw.Transaction ?? raw.transaction ?? raw;
-      const effects = txn.effects as
-        | { status?: { success?: boolean; error?: unknown } }
-        | undefined;
-      const digest = txn.digest ?? '';
-      const ok = effects?.status?.success !== false;
+      const txn = raw.Transaction ?? raw.FailedTransaction;
+      const digest = txn?.digest ?? '';
+      const ok =
+        raw.$kind !== 'FailedTransaction' &&
+        raw.FailedTransaction == null &&
+        txn?.status?.success !== false;
       const status = ok ? 'success' : 'failure';
-      const error = effects?.status?.error ? JSON.stringify(effects.status.error) : undefined;
+      const error = txn?.status?.error ? JSON.stringify(txn.status.error) : undefined;
       if (ok) {
-        return { ok: true, digest, status };
+        return { ok: true, digest, status, events: raw.Transaction?.events };
       }
       log.warn('svx.tx.failed', { digest, status, error, attempt });
       return { ok: false, digest, status, error };

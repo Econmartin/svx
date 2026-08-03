@@ -46,7 +46,7 @@ import {
 } from './exec/ptb-v2.js';
 import { decideHarvestV2 } from './strategy/harvest-v2.js';
 import { admissibleStrike } from './exec/ptb-v2.js';
-import { boardPrice } from './pricing/predict-sdk.js';
+import { boardPrice, decodeMintFill } from './pricing/predict-sdk.js';
 import axios from 'axios';
 import {
   PolymarketClient,
@@ -3004,8 +3004,9 @@ async function runHarvestV2Step(deps: {
     );
     if (!decision.enter) continue;
 
-    const quantityDusdc = cfg.calibrationHarvestNotionalDusdc;
-    const costUsdc = quantityDusdc * decision.costPrice;
+    let quantityDusdc = cfg.calibrationHarvestNotionalDusdc;
+    let costUsdc = quantityDusdc * decision.costPrice;
+    let costPrice = decision.costPrice;
     let mode: 'paper' | 'live' = 'paper';
     let txDigest: string | undefined;
     const wrapperId = process.env.PREDICT_V2_WRAPPER_ID;
@@ -3059,6 +3060,32 @@ async function runHarvestV2Step(deps: {
         }
         txDigest = result.digest;
         mode = 'live';
+        // Book the EXACT fill from the tx's mint event — entry probability,
+        // chain-floored quantity, and the all-in debit including fees. The
+        // modeled cost stays in predictProbAtExec; this closes the
+        // ledger-vs-wallet gap that made PnL under-report fees.
+        const fill = decodeMintFill(result.events);
+        if (fill) {
+          quantityDusdc = fill.quantityDusdc;
+          costUsdc = fill.costUsdc;
+          costPrice = fill.entryProbability;
+          log.info('svx.harvest_v2.fill', {
+            digest: result.digest,
+            entryProbability: Number(fill.entryProbability.toFixed(4)),
+            quantityDusdc: fill.quantityDusdc,
+            netPremiumUsdc: Number(fill.netPremiumUsdc.toFixed(4)),
+            feesUsdc: Number(
+              (fill.costUsdc - fill.netPremiumUsdc).toFixed(4),
+            ),
+            allInCostUsdc: Number(fill.costUsdc.toFixed(4)),
+            modelProb: Number(decision.costPrice.toFixed(4)),
+          });
+        } else {
+          log.warn('svx.harvest_v2.fill_decode_failed', {
+            digest: result.digest,
+            note: 'booking modeled cost — ledger may drift from wallet on this trade',
+          });
+        }
       } catch (e) {
         harvestFailCooldown.set(o.oracleId, Date.now() + HARVEST_FAIL_COOLDOWN_MS);
         log.warn('svx.harvest_v2.live_error', { err: errMsg(e) });
@@ -3075,7 +3102,7 @@ async function runHarvestV2Step(deps: {
       strike: decision.strike,
       direction: decision.direction,
       quantityDusdc,
-      costPrice: decision.costPrice,
+      costPrice,
       costUsdc,
       settled: false,
       msToExpiryAtExec: ttm,
@@ -3178,8 +3205,9 @@ async function maybeFavoredMint(args: {
     return;
   }
 
-  const quantityDusdc = args.notionalDusdc;
-  const costUsdc = quantityDusdc * decision.costPrice;
+  let quantityDusdc = args.notionalDusdc;
+  let costUsdc = quantityDusdc * decision.costPrice;
+  let costPrice = decision.costPrice;
   let txDigest: string | undefined;
   let mode: 'paper' | 'live' = 'paper';
 
@@ -3222,6 +3250,22 @@ async function maybeFavoredMint(args: {
       }
       txDigest = result.digest;
       mode = 'live';
+      // Same exact-fill booking as the harvest path: the mint event carries
+      // the real entry probability, chain-floored quantity, and all-in cost.
+      const fill = decodeMintFill(result.events);
+      if (fill) {
+        quantityDusdc = fill.quantityDusdc;
+        costUsdc = fill.costUsdc;
+        costPrice = fill.entryProbability;
+        log.info('svx.favored.v2_fill', {
+          digest: result.digest,
+          entryProbability: Number(fill.entryProbability.toFixed(4)),
+          allInCostUsdc: Number(fill.costUsdc.toFixed(4)),
+          modelProb: Number(decision.costPrice.toFixed(4)),
+        });
+      } else {
+        log.warn('svx.favored.v2_fill_decode_failed', { digest: result.digest });
+      }
     } catch (e) {
       log.warn('svx.favored.v2_live_error', { err: errMsg(e) });
       return;
@@ -3276,7 +3320,7 @@ async function maybeFavoredMint(args: {
     strike: polySnap.strike,
     direction: decision.direction,
     quantityDusdc,
-    costPrice: decision.costPrice,
+    costPrice,
     costUsdc,
     txDigest,
     settled: false,

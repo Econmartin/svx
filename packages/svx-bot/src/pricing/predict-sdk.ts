@@ -61,6 +61,55 @@ const num = (v: unknown): number => {
   return NaN;
 };
 
+/** The exact fill of an executed mint, decoded from the tx's Move events. */
+export interface MintFill {
+  /** Entry probability actually paid, 0..1 per $1 payout. */
+  entryProbability: number;
+  /** Max payout actually minted (chain-floored to the position lot). */
+  quantityDusdc: number;
+  /** Net premium into LP backing. */
+  netPremiumUsdc: number;
+  fees: { trading: number; subsidy: number; builder: number; penalty: number };
+  /** All-in account debit: premium + (trading − subsidy) + builder + penalty
+   *  — exactly what the chain withdrew from the wrapper. */
+  costUsdc: number;
+  /** Persist to redeem/claim the position later. */
+  orderId: string;
+}
+
+/**
+ * Decode the mint receipt from an executed transaction's events. This is the
+ * fix for the ledger-vs-chain booking gap: the ledger used to record the
+ * MODELED cost (quantity × our probability), so fees and fill-vs-model drift
+ * accumulated as unexplained wallet movement. Returns null when the events
+ * are missing or carry no mint (caller falls back to the model and says so).
+ */
+export function decodeMintFill(
+  events:
+    | Array<{ eventType?: string; type?: string; bcs?: Uint8Array | string }>
+    | undefined,
+): MintFill | null {
+  if (!events?.length) return null;
+  try {
+    const r = predict().decode.mint({ events });
+    const costUsdc =
+      r.netPremium + (r.fees.trading - r.fees.subsidy) + r.fees.builder + r.fees.penalty;
+    return {
+      entryProbability: r.entryProbability,
+      quantityDusdc: r.quantity,
+      netPremiumUsdc: r.netPremium,
+      fees: r.fees,
+      costUsdc,
+      orderId: String(r.orderId),
+    };
+  } catch (e) {
+    log.warn('svx.sdk.mint_decode_failed', {
+      err: e instanceof Error ? e.message : String(e),
+    });
+    return null;
+  }
+}
+
 /** Every market the protocol currently lists, across all tenors. */
 export async function listSdkMarkets(): Promise<SdkMarket[]> {
   const raw = (await predict().read.markets()) as unknown as Array<Record<string, unknown>>;

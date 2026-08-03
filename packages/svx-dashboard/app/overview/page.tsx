@@ -2,7 +2,14 @@
 
 import { useCallback } from 'react';
 import { useApiClient, useNetwork } from '@/lib/network-context';
-import { formatPct, formatUsdc, formatRelative, type TradeRecord } from '@/lib/api';
+import {
+  formatPct,
+  formatUsdc,
+  formatRelative,
+  v2LivePnl,
+  V2_STRATEGIES,
+  type TradeRecord,
+} from '@/lib/api';
 import { usePolling } from '@/lib/usePolling';
 import { StatRow } from '@/components/StatRow';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -48,8 +55,12 @@ export default function OverviewPage() {
 
   // Pick the right "closed" stream depending on view:
   // - Mainnet: closed Poly trades (mainnet bot is paper-Predict, no Sui PnL)
-  // - Testnet: settled Sui trades
-  const closedForChart = isMainnet ? closedPoly ?? [] : closed ?? [];
+  // - Testnet: settled Sui trades from the CURRENT (SVX V2) strategies only —
+  //   the July V1 poly-arb rows are a different era and get their own stat.
+  const v2Set = new Set<string>(V2_STRATEGIES);
+  const closedForChart = isMainnet
+    ? closedPoly ?? []
+    : (closed ?? []).filter((t) => v2Set.has(t.strategy ?? ''));
 
   const wins = closedForChart.filter((t) => combinedPnl(t, isMainnet) > 0).length;
   const winRate = closedForChart.length > 0 ? wins / closedForChart.length : 0;
@@ -338,8 +349,15 @@ function OverviewStats({
       />
     );
   }
-  const realized = status?.realizedPnlUsdc ?? 0;
-  const realized24h = status?.realizedPnl24hUsdc ?? 0;
+  // Headline = current-generation live strategies. The all-time ledger blend
+  // includes the retired July V1 poly-arb era — shown as its own labeled stat
+  // instead of inflating the number the page leads with.
+  const v2 = v2LivePnl(status?.strategyPnl);
+  const realized = status?.strategyPnl ? v2.pnlUsdc : status?.realizedPnlUsdc ?? 0;
+  const realized24h = status?.strategyPnl ? v2.pnl24hUsdc : status?.realizedPnl24hUsdc ?? 0;
+  const legacyPnl = (status?.strategyPnl ?? [])
+    .filter((r) => !(V2_STRATEGIES as readonly string[]).includes(r.strategy))
+    .reduce((s, r) => s + r.pnlUsdc, 0);
   return (
     <StatRow
       cols={5}
@@ -350,7 +368,7 @@ function OverviewStats({
           hint: status?.spotBtcAtMs ? formatRelative(status.spotBtcAtMs) : 'awaiting oracle',
         },
         {
-          label: 'PnL (all)',
+          label: 'SVX V2 PnL',
           value: formatUsdc(realized),
           tone: realized >= 0 ? 'win' : 'loss',
           hint: `${closedCount} closed · win ${formatPct(winRate, 0)} (${wins}/${closedCount})`,
@@ -359,17 +377,18 @@ function OverviewStats({
           label: 'PnL 24h',
           value: formatUsdc(realized24h),
           tone: realized24h >= 0 ? 'win' : 'loss',
-          hint: `limit −${formatUsdc(0)}`,
+          hint: `${status?.tradesLast24h ?? 0} trades`,
         },
         {
           label: 'Bankroll',
           value: formatUsdc(status?.totalBalanceUsdc ?? status?.navUsdc),
-          hint: 'wallet + manager',
+          hint: 'wallet + wrapper',
         },
         {
-          label: 'Signals 24h',
-          value: status?.signalsLast24h ?? '—',
-          hint: `${status?.tradesLast24h ?? 0} executed`,
+          label: 'Legacy V1 PnL',
+          value: formatUsdc(legacyPnl),
+          tone: legacyPnl >= 0 ? 'win' : 'loss',
+          hint: 'July poly-arb era · excluded above',
         },
       ]}
     />

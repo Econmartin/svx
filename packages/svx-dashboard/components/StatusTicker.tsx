@@ -10,7 +10,7 @@
 import { useCallback } from 'react';
 import { useApiClient, useNetwork } from '@/lib/network-context';
 import { usePolling } from '@/lib/usePolling';
-import { formatUsdc } from '@/lib/api';
+import { formatUsdc, v2LivePnl } from '@/lib/api';
 
 export function StatusTicker() {
   const client = useApiClient();
@@ -55,13 +55,17 @@ export function StatusTicker() {
         items.push({ label: 'HL', value: `$${formatUsdc(status.hlAccountValueUsdc)}` });
       }
     } else {
-      const realized = status.realizedPnlUsdc ?? 0;
+      // Current-generation strategies only — the all-time blend counts the
+      // retired V1 poly-arb era, which is not what "PnL" should tick.
+      const realized = status.strategyPnl
+        ? v2LivePnl(status.strategyPnl).pnlUsdc
+        : status.realizedPnlUsdc ?? 0;
       items.push({
         label: 'NAV',
         value: `$${formatUsdc(status.navUsdc ?? 0)}`,
       });
       items.push({
-        label: 'PnL',
+        label: 'V2 PnL',
         value: `${realized >= 0 ? '+' : ''}$${realized.toFixed(2)}`,
         tone: realized >= 0 ? 'win' : 'loss',
       });

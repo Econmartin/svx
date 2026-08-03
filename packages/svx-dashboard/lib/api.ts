@@ -14,6 +14,46 @@
 const TESTNET_BASE = process.env.NEXT_PUBLIC_SVX_API ?? 'http://127.0.0.1:4321';
 const MAINNET_BASE = process.env.NEXT_PUBLIC_SVX_API_MAINNET ?? '';
 
+/** Per-(strategy, mode) Predict-side PnL row from GET /status. */
+export interface StrategyPnlRow {
+  strategy: string;
+  mode: string;
+  trades: number;
+  open: number;
+  settled: number;
+  wins: number;
+  pnlUsdc: number;
+  pnl24hUsdc: number;
+  trades24h: number;
+  lastTradeAtMs: number;
+}
+
+/** The strategies of the CURRENT stack generation (SVX V2). Everything else
+ *  in the ledger is a legacy era and is labeled as such, not blended in. */
+export const V2_STRATEGIES = ['calibration_harvest', 'divergence_mint'] as const;
+
+/** Sum live-mode rows for the current-generation strategies. */
+export function v2LivePnl(rows: StrategyPnlRow[] | undefined): {
+  pnlUsdc: number;
+  pnl24hUsdc: number;
+  settled: number;
+  wins: number;
+  open: number;
+  trades24h: number;
+} {
+  const v2 = (rows ?? []).filter(
+    (r) => r.mode === 'live' && (V2_STRATEGIES as readonly string[]).includes(r.strategy),
+  );
+  return {
+    pnlUsdc: v2.reduce((s, r) => s + r.pnlUsdc, 0),
+    pnl24hUsdc: v2.reduce((s, r) => s + r.pnl24hUsdc, 0),
+    settled: v2.reduce((s, r) => s + r.settled, 0),
+    wins: v2.reduce((s, r) => s + r.wins, 0),
+    open: v2.reduce((s, r) => s + r.open, 0),
+    trades24h: v2.reduce((s, r) => s + r.trades24h, 0),
+  };
+}
+
 export interface BotStatus {
   startedAtMs: number;
   paused: boolean;
@@ -32,10 +72,13 @@ export interface BotStatus {
   v2WrapperBalanceAtMs?: number | null;
   predictV2?: boolean;
   predictV2LiveEnabled?: boolean;
-  /** All-time realized PnL across every settled trade (survives restarts). */
+  /** All-time realized PnL across every settled trade (survives restarts).
+   *  Blends every strategy era — prefer `strategyPnl` for headlines. */
   realizedPnlUsdc: number;
   /** Realized PnL over the last rolling 24h — ties to the daily loss limit. */
   realizedPnl24hUsdc?: number;
+  /** Predict-side PnL per (strategy, mode) — the honest headline source. */
+  strategyPnl?: StrategyPnlRow[];
   unrealizedPnlUsdc: number;
   openPositionCount: number;
   signalsLast24h: number;

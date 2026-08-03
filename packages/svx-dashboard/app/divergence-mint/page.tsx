@@ -116,12 +116,14 @@ export default function DivergenceMintPage() {
           </Badge>
         </div>
         <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
-          Mint the side <strong>Predict prices above 50¢</strong> — its favorite is measurably
-          underconfident below ~90¢ (see the calibration exhibit on the landing page). Two
-          disjoint bands share the edge: <strong>divergence-mint</strong> takes signals where
-          Polymarket disagrees by ≥ 8pp (95¢ cap), <strong>calibration-harvest</strong> takes
-          everything below 8pp at a tighter 90¢ cap. One position per (oracle, strike) across
-          both. Hold to settlement, redeem permissionlessly.
+          Mint the side <strong>Predict prices above 50¢</strong>. On today&apos;s SVX V2
+          markets (minutes-long, no Polymarket counterpart) that is{' '}
+          <strong>calibration-harvest</strong>: surface-only entries in the 60–90¢ band shortly
+          before expiry — the setup the calibration exhibit measures continuously.{' '}
+          <strong>Divergence-mint</strong> (the original cross-venue trigger, ≥ 8pp vs the
+          Polymarket book) stays armed but is structurally idle until markets with a
+          Polymarket twin return. One position per (oracle, strike) across both. V2 settlement
+          credits the account automatically.
         </p>
       </header>
 

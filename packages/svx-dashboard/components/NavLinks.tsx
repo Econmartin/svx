@@ -2,7 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useCallback } from 'react';
 import { cn } from '@/lib/cn';
+import { api, apiMainnet, v2LivePnl } from '@/lib/api';
+import { usePolling } from '@/lib/usePolling';
 
 /**
  * Nav order = status board, not build history: live strategies first, then
@@ -13,6 +16,12 @@ import { cn } from '@/lib/cn';
  *   orange — research / paused (not currently traded, still maintained)
  *   red    — closed experiment (measured, post-mortemed, switched off)
  *
+ * Green/orange are DERIVED from the bots' /status (trades in the last 24h,
+ * open positions, execution gates) so the nav can't claim a strategy is
+ * live when its feed died — that exact lie sat here hardcoded while the
+ * mainnet signal stream had been down for a week. Red stays hardcoded:
+ * closing an experiment is an editorial decision, not a telemetry state.
+ *
  * Info pages (Overview, Surface, …) carry no dot on purpose — status
  * applies to strategies, not windows.
  */
@@ -20,8 +29,8 @@ type NavStatus = 'active' | 'stale' | 'closed' | undefined;
 
 const NAV: ReadonlyArray<readonly [label: string, href: string, status?: NavStatus]> = [
   ['Overview', '/overview'],
-  ['Divergence', '/divergence-mint', 'active'],
-  ['Poly-arb', '/poly-arb', 'active'],
+  ['Divergence', '/divergence-mint', 'stale'], // derived live below
+  ['Poly-arb', '/poly-arb', 'stale'], // derived live below
   ['Positions', '/positions'],
   ['Surface', '/surface'],
   ['Signals', '/signals'],
@@ -31,6 +40,34 @@ const NAV: ReadonlyArray<readonly [label: string, href: string, status?: NavStat
   ['Margin-Lever', '/margin-lever', 'closed'],
   ['About', '/about'],
 ] as const;
+
+const DAY_MS = 24 * 3600_000;
+
+/** Live status for the two derived tabs; falls back to 'stale' when a bot is
+ *  unreachable — an offline bot is by definition not actively trading. */
+function useDerivedStatus(): Partial<Record<string, NavStatus>> {
+  const { data: testnet } = usePolling(
+    useCallback(() => api.status(), []),
+    60_000,
+  );
+  const { data: mainnet } = usePolling(
+    useCallback(() => apiMainnet.status().catch(() => null), []),
+    60_000,
+  );
+  const v2 = v2LivePnl(testnet?.strategyPnl);
+  const divergenceActive =
+    !!testnet && !testnet.paused && (v2.trades24h > 0 || v2.open > 0);
+  const polyActive =
+    !!mainnet &&
+    !mainnet.paused &&
+    !!mainnet.polyExecutionEnabled &&
+    ((mainnet.lastPolyAttemptAtMs ?? 0) > Date.now() - DAY_MS ||
+      (mainnet.realizedPolyPnl24hUsdc ?? 0) !== 0);
+  return {
+    '/divergence-mint': divergenceActive ? 'active' : 'stale',
+    '/poly-arb': polyActive ? 'active' : 'stale',
+  };
+}
 
 const DOT: Record<Exclude<NavStatus, undefined>, { cls: string; title: string }> = {
   active: { cls: 'bg-accent', title: 'actively trading' },
@@ -45,11 +82,13 @@ const DOT: Record<Exclude<NavStatus, undefined>, { cls: string; title: string }>
  */
 export function NavLinks() {
   const pathname = usePathname();
+  const derived = useDerivedStatus();
   return (
     <nav aria-label="Primary" className="flex items-center gap-0.5 text-[13px]">
       {NAV.map(([label, href, status]) => {
         const isActive = pathname === href || pathname?.startsWith(`${href}/`);
-        const dot = status ? DOT[status] : null;
+        const effective = derived[href] ?? status;
+        const dot = effective ? DOT[effective] : null;
         return (
           <Link
             key={href}

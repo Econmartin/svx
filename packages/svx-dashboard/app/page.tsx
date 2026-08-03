@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback } from 'react';
 import { useApiClient, useNetwork } from '@/lib/network-context';
 import { usePolling } from '@/lib/usePolling';
-import { formatUsdc, formatPct, type CalibrationReport } from '@/lib/api';
+import { formatUsdc, formatPct, v2LivePnl, type CalibrationReport } from '@/lib/api';
 import { Hero } from '@/components/landing/Hero';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -32,13 +32,22 @@ export default function LandingPage() {
   const { data: calibration } = usePolling(fetchCalibration, 60_000);
 
   const isMainnet = network === 'mainnet';
+  // Testnet headline = the CURRENT stack's live strategies only. The ledger's
+  // all-time number blends July's V1 poly-arb era (+$150-ish) into it, which
+  // reads as today's edge when it isn't — fall back to it only on old bots
+  // that don't send the breakdown yet.
+  const v2 = v2LivePnl(status?.strategyPnl);
   const combinedPnl = isMainnet
     ? status?.realizedCombinedPnlUsdc ??
       ((status?.realizedPolyPnlUsdc ?? 0) + (status?.realizedHlPnlUsdc ?? 0))
-    : status?.realizedPnlUsdc ?? 0;
+    : status?.strategyPnl
+      ? v2.pnlUsdc
+      : status?.realizedPnlUsdc ?? 0;
   const pnl24h = isMainnet
     ? status?.realizedCombinedPnl24hUsdc ?? 0
-    : status?.realizedPnl24hUsdc ?? 0;
+    : status?.strategyPnl
+      ? v2.pnl24hUsdc
+      : status?.realizedPnl24hUsdc ?? 0;
   const tradesLast24h = status?.tradesLast24h;
   const signalsLast24h = status?.signalsLast24h;
 

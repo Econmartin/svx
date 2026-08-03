@@ -145,6 +145,10 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       predictV2LiveEnabled: deps.cfg.predictV2LiveEnabled,
       realizedPnlUsdc: realizedAllTime,
       realizedPnl24hUsdc: realized24h,
+      // Per-(strategy, mode) Predict-side PnL — the honest headline source.
+      // realizedPnlUsdc above blends the July V1 poly-arb era with whatever
+      // trades today; consumers should sum the rows they mean.
+      strategyPnl: deps.ledger.strategyPnlBreakdown(since24h),
       unrealizedPnlUsdc: 0,
       openPositionCount: open.length,
       signalsLast24h: deps.ledger.countSignalsSince(since24h),

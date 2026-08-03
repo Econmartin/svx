@@ -91,10 +91,10 @@ export function Hero({
 
             <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3 pt-2 max-w-3xl">
             <Stat
-              label={isMainnet ? 'Combined PnL' : 'Predict PnL'}
+              label={isMainnet ? 'Combined PnL' : 'SVX V2 PnL'}
               value={formatUsdc(combinedPnl)}
               tone={pnlTone}
-              hint="all time"
+              hint={isMainnet ? 'all time' : 'live strategies · all time'}
             />
             <Stat
               label="PnL 24h"

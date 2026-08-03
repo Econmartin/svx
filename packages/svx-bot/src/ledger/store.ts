@@ -685,6 +685,70 @@ export class LedgerStore {
   }
 
   /**
+   * Predict-side (dUSDC) PnL broken down by (strategy, mode) — the honest
+   * headline source. The all-time `realizedPnlSince(0)` blends July's V1
+   * poly-arb era into whatever trades today; this breakdown lets the
+   * dashboard show the CURRENT strategies' record and label the legacy tail
+   * instead of hiding it inside one number.
+   */
+  strategyPnlBreakdown(since24hMs: number): Array<{
+    strategy: string;
+    mode: string;
+    trades: number;
+    open: number;
+    settled: number;
+    wins: number;
+    pnlUsdc: number;
+    pnl24hUsdc: number;
+    trades24h: number;
+    lastTradeAtMs: number;
+  }> {
+    const rows = this.db
+      .prepare<
+        [number, number],
+        {
+          strategy: string;
+          mode: string;
+          trades: number;
+          open: number;
+          settled: number;
+          wins: number;
+          pnl: number;
+          pnl24h: number;
+          trades24h: number;
+          last_ts: number;
+        }
+      >(
+        `SELECT COALESCE(strategy, 'unknown') AS strategy, mode,
+           COUNT(*) AS trades,
+           SUM(CASE WHEN settled = 0 THEN 1 ELSE 0 END) AS open,
+           SUM(CASE WHEN settled = 1 THEN 1 ELSE 0 END) AS settled,
+           SUM(CASE WHEN settled = 1 AND COALESCE(pnl_usdc, 0) > 0 THEN 1 ELSE 0 END) AS wins,
+           COALESCE(SUM(CASE WHEN settled = 1 THEN pnl_usdc END), 0) AS pnl,
+           COALESCE(SUM(CASE WHEN settled = 1
+             AND COALESCE(settled_at_ms, ts_ms) >= ? THEN pnl_usdc END), 0) AS pnl24h,
+           SUM(CASE WHEN ts_ms >= ? THEN 1 ELSE 0 END) AS trades24h,
+           MAX(ts_ms) AS last_ts
+         FROM trades
+         GROUP BY COALESCE(strategy, 'unknown'), mode
+         ORDER BY last_ts DESC`,
+      )
+      .all(since24hMs, since24hMs);
+    return rows.map((r) => ({
+      strategy: r.strategy,
+      mode: r.mode,
+      trades: r.trades,
+      open: r.open,
+      settled: r.settled,
+      wins: r.wins,
+      pnlUsdc: r.pnl,
+      pnl24hUsdc: r.pnl24h,
+      trades24h: r.trades24h,
+      lastTradeAtMs: r.last_ts,
+    }));
+  }
+
+  /**
    * True if there's an open (unsettled) trade on the same (oracleId, strike)
    * but in the OPPOSITE direction. Used to refuse signals that would stack
    * UP + DOWN on the same strike — only one can win at settlement, so the

@@ -31,6 +31,14 @@ export function V2CalibrationCard() {
   const client = useApiClient();
   const fetchCalib = useCallback(() => client.calibrationV2(), [client]);
   const { data, error } = usePolling(fetchCalib, 15_000);
+  // The all-time average hides regime changes — the harvest strategy lost
+  // money on a day the lifetime gap still read +1.5pp. The trailing-24h gap
+  // is the number that describes the surface being traded TODAY.
+  const fetchCalib24h = useCallback(
+    () => client.calibrationV2(Date.now() - 24 * 3600_000),
+    [client],
+  );
+  const { data: day } = usePolling(fetchCalib24h, 60_000);
 
   return (
     <Card>
@@ -75,20 +83,32 @@ export function V2CalibrationCard() {
               </div>
               <div>
                 <div className="text-[10px] uppercase tracking-[0.16em] text-muted">
-                  Realized
+                  Gap (all time)
                 </div>
-                <div className="text-xl font-mono font-semibold tabular-nums">
-                  {pct(data.realized)}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-[0.16em] text-muted">Gap</div>
                 <div
                   className={`text-xl font-mono font-semibold tabular-nums ${
                     data.realized - data.avg_quoted >= 0 ? 'text-win' : 'text-loss'
                   }`}
                 >
                   {pp(data.realized - data.avg_quoted)}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.16em] text-muted">
+                  Gap (24h)
+                </div>
+                <div
+                  className={`text-xl font-mono font-semibold tabular-nums ${
+                    day == null
+                      ? ''
+                      : day.n === 0
+                        ? 'text-muted'
+                        : day.realized - day.avg_quoted >= 0
+                          ? 'text-win'
+                          : 'text-loss'
+                  }`}
+                >
+                  {day == null ? '…' : day.n === 0 ? '—' : pp(day.realized - day.avg_quoted)}
                 </div>
               </div>
             </div>
@@ -121,10 +141,12 @@ export function V2CalibrationCard() {
               </TableBody>
             </Table>
             <p className="text-xs text-muted mt-3">
-              Positive gap = the surface is still underconfident on favorites (the V1 edge
-              surviving); a gap near zero means the protocol&apos;s roll-down and
-              inventory-skew fixes closed it. This number decides whether live V2 minting
-              gets enabled.
+              Positive gap = the surface underprices favorites; negative = favorites are
+              OVERPRICED and buying them loses money. The all-time average smooths over
+              regime changes — <strong>Gap (24h)</strong> describes the surface being traded
+              today, and it is the number that gates live minting. (2026-08-03: the 24h gap
+              went negative in every band while all-time still read positive; the strategy
+              stood down.)
             </p>
           </>
         )}

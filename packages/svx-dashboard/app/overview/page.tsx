@@ -13,6 +13,7 @@ import {
 import { usePolling } from '@/lib/usePolling';
 import { StatRow } from '@/components/StatRow';
 import { StatusBadge } from '@/components/StatusBadge';
+import { SignalStreamNotice } from '@/components/SignalStreamNotice';
 import { HealthPanel } from '@/components/HealthPanel';
 import { V2CalibrationCard } from '@/components/V2CalibrationCard';
 import { BoardComparisonCard } from '@/components/BoardComparisonCard';
@@ -263,7 +264,8 @@ export default function OverviewPage() {
             <span className="text-xs text-muted normal-case">last 15</span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="pt-0">
+        <CardContent className="pt-0 space-y-3">
+          <SignalStreamNotice latestSignalMs={recentSignals?.[0]?.timestampMs} />
           <RecentSignals signals={recentSignals ?? []} />
         </CardContent>
       </Card>

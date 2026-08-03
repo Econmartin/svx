@@ -249,6 +249,10 @@ export function computeBoardComparison(
   n: number;
   withBoard: number;
   model: { avg_quoted: number; realized: number; gap_pp: number };
+  /** Model stats on the SAME rows as `board` — comparing the all-rows model
+   *  gap to the board-subset gap mixes populations and once made a −13pp
+   *  board look 15pp worse than the model when the true spread was ~1pp. */
+  modelMatched: { avg_quoted: number; realized: number; gap_pp: number };
   board: { avg_quoted: number; realized: number; gap_pp: number };
   bySlot: Array<{
     slot: string;
@@ -264,9 +268,9 @@ export function computeBoardComparison(
     return { q: favoredUp ? quoted : 1 - quoted, win: favoredUp ? outcomeUp : !outcomeUp };
   };
   const modelRows = rows.map((r) => fold(r.probUp, r.outcomeUp));
-  const boardRows = rows
-    .filter((r) => r.boardProbUp != null)
-    .map((r) => fold(r.boardProbUp!, r.outcomeUp));
+  const withBoardRows = rows.filter((r) => r.boardProbUp != null);
+  const boardRows = withBoardRows.map((r) => fold(r.boardProbUp!, r.outcomeUp));
+  const modelMatchedRows = withBoardRows.map((r) => fold(r.probUp, r.outcomeUp));
   const stat = (xs: Array<{ q: number; win: boolean }>) => {
     if (xs.length === 0) return { avg_quoted: 0, realized: 0, gap_pp: 0 };
     const avg = xs.reduce((s, x) => s + x.q, 0) / xs.length;
@@ -293,6 +297,7 @@ export function computeBoardComparison(
     n: rows.length,
     withBoard: boardRows.length,
     model: stat(modelRows),
+    modelMatched: stat(modelMatchedRows),
     board: stat(boardRows),
     bySlot,
   };

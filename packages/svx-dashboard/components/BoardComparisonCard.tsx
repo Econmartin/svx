@@ -84,10 +84,16 @@ export function BoardComparisonCard() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 mb-4">
               <Stat label="Settled probes" value={String(data.n)} />
               <Stat label="With board quote" value={String(data.withBoard)} />
+              {/* Model gap on the SAME rows as the board gap — the all-rows
+                  model figure spans older probes the board never quoted, and
+                  comparing across populations once made the board look 15pp
+                  worse than the model when the true spread was ~1pp. */}
               <Stat
-                label="Model gap"
-                value={pp(data.model.gap_pp)}
-                tone={data.model.gap_pp >= 0 ? 'win' : 'loss'}
+                label="Model gap (same rows)"
+                value={
+                  data.withBoard ? pp((data.modelMatched ?? data.model).gap_pp) : '—'
+                }
+                tone={(data.modelMatched ?? data.model).gap_pp >= 0 ? 'win' : 'loss'}
               />
               <Stat
                 label="Board gap"

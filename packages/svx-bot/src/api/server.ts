@@ -143,6 +143,9 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       v2WrapperBalanceAtMs: deps.state.v2Wrapper?.updatedAtMs ?? null,
       predictV2: deps.cfg.predictV2,
       predictV2LiveEnabled: deps.cfg.predictV2LiveEnabled,
+      // Strategy master switch (HARVEST_V2_ENABLED) — surfaced so the
+      // dashboard's status dots reflect the actual gate, not a guess.
+      harvestV2Enabled: deps.cfg.harvestV2Enabled,
       realizedPnlUsdc: realizedAllTime,
       realizedPnl24hUsdc: realized24h,
       // Per-(strategy, mode) Predict-side PnL — the honest headline source.

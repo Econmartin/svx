@@ -72,6 +72,8 @@ export interface BotStatus {
   v2WrapperBalanceAtMs?: number | null;
   predictV2?: boolean;
   predictV2LiveEnabled?: boolean;
+  /** HARVEST_V2_ENABLED master switch — drives the Divergence nav dot. */
+  harvestV2Enabled?: boolean;
   /** All-time realized PnL across every settled trade (survives restarts).
    *  Blends every strategy era — prefer `strategyPnl` for headlines. */
   realizedPnlUsdc: number;
@@ -410,6 +412,9 @@ export interface BoardComparison {
   n: number;
   withBoard: number;
   model: { avg_quoted: number; realized: number; gap_pp: number };
+  /** Model stats restricted to the rows that ALSO have a board quote — the
+   *  only model number comparable to `board` (same rows, same settlements). */
+  modelMatched?: { avg_quoted: number; realized: number; gap_pp: number };
   board: { avg_quoted: number; realized: number; gap_pp: number };
   bySlot: Array<{
     slot: string;
@@ -697,8 +702,14 @@ export function createApi(base: string) {
       ),
     calibration: (threshold = 0.08) =>
       get<CalibrationReport>(`/calibration?threshold=${threshold}`),
-    calibrationV2: () => get<CalibrationV2Report>(`/calibration-v2`),
-    boardComparison: () => get<BoardComparison>(`/board-comparison`),
+    calibrationV2: (sinceMs?: number) =>
+      get<CalibrationV2Report>(
+        sinceMs != null ? `/calibration-v2?sinceMs=${sinceMs}` : `/calibration-v2`,
+      ),
+    boardComparison: (sinceMs?: number) =>
+      get<BoardComparison>(
+        sinceMs != null ? `/board-comparison?sinceMs=${sinceMs}` : `/board-comparison`,
+      ),
     butterfly: (limit = 50) => get<ButterflyReport>(`/butterfly?limit=${limit}`),
     rangeSim: (q: { policy?: 'sigma' | 'fixed_bps'; rungs?: number; width?: number } = {}) =>
       get<RangeSimSummary>(

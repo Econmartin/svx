@@ -4,8 +4,14 @@
     {
       "name": "svx-dashboard",
       "cwd": "packages/svx-dashboard",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "NEXT_PUBLIC_SVX_API=https://svx-testnet.econmartin.xyz",
+        "NEXT_PUBLIC_SVX_API_MAINNET=https://svx-mainnet.econmartin.xyz",
+        "npm",
+        "run",
+        "dev"
+      ],
       "port": 3030
     }
   ]

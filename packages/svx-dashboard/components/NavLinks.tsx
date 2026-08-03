@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCallback } from 'react';
 import { cn } from '@/lib/cn';
-import { api, apiMainnet, v2LivePnl } from '@/lib/api';
+import { v2LivePnl } from '@/lib/api';
+import { useApiClient } from '@/lib/network-context';
 import { usePolling } from '@/lib/usePolling';
 
 /**
@@ -43,26 +44,32 @@ const NAV: ReadonlyArray<readonly [label: string, href: string, status?: NavStat
 
 const DAY_MS = 24 * 3600_000;
 
-/** Live status for the two derived tabs; falls back to 'stale' when a bot is
- *  unreachable — an offline bot is by definition not actively trading. */
+/**
+ * Live status for the two derived tabs, from the bot the CURRENT network
+ * toggle points at — the dot describes what the page will show when clicked,
+ * so the same tab can be green on one network and orange on the other
+ * (e.g. Poly-arb trades real money only on the mainnet instance). Falls back
+ * to 'stale' when the bot is unreachable — an offline bot is by definition
+ * not actively trading.
+ */
 function useDerivedStatus(): Partial<Record<string, NavStatus>> {
-  const { data: testnet } = usePolling(
-    useCallback(() => api.status(), []),
+  const client = useApiClient();
+  const { data: status } = usePolling(
+    useCallback(() => client.status().catch(() => null), [client]),
     60_000,
   );
-  const { data: mainnet } = usePolling(
-    useCallback(() => apiMainnet.status().catch(() => null), []),
-    60_000,
-  );
-  const v2 = v2LivePnl(testnet?.strategyPnl);
+  const v2 = v2LivePnl(status?.strategyPnl ?? undefined);
   const divergenceActive =
-    !!testnet && !testnet.paused && (v2.trades24h > 0 || v2.open > 0);
+    !!status &&
+    !status.paused &&
+    status.harvestV2Enabled !== false && // master switch off = not trading
+    (v2.trades24h > 0 || v2.open > 0);
   const polyActive =
-    !!mainnet &&
-    !mainnet.paused &&
-    !!mainnet.polyExecutionEnabled &&
-    ((mainnet.lastPolyAttemptAtMs ?? 0) > Date.now() - DAY_MS ||
-      (mainnet.realizedPolyPnl24hUsdc ?? 0) !== 0);
+    !!status &&
+    !status.paused &&
+    !!status.polyExecutionEnabled &&
+    ((status.lastPolyAttemptAtMs ?? 0) > Date.now() - DAY_MS ||
+      (status.realizedPolyPnl24hUsdc ?? 0) !== 0);
   return {
     '/divergence-mint': divergenceActive ? 'active' : 'stale',
     '/poly-arb': polyActive ? 'active' : 'stale',

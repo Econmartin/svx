@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { PageIntro } from '@/components/PageIntro';
+import { SignalStreamNotice } from '@/components/SignalStreamNotice';
 
 const ACTIONS = ['all', 'executed', 'sub_threshold', 'filtered'] as const;
 type Filter = (typeof ACTIONS)[number];
@@ -76,6 +77,8 @@ export default function SignalsPage() {
           {error}
         </div>
       )}
+
+      <SignalStreamNotice latestSignalMs={data?.[0]?.timestampMs} />
 
       <PageIntro
         summary={

@@ -396,8 +396,15 @@ export const TUNABLES = {
   calibrationHarvestNotionalDusdc: 5,
   /** Harvest-V2 (surface-only entries on V2's short markets — the trigger
    *  the calibration recorder validates). Window mirrors the measurement:
-   *  enter 45–150s before expiry, prefer ~75¢ favorites. */
-  harvestV2Enabled: true,
+   *  enter 45–150s before expiry, prefer ~75¢ favorites.
+   *
+   *  OFF by default since 2026-08-04: the trailing-24h calibration gap went
+   *  negative in every band (favorites overpriced ~13pp) and the live tape
+   *  confirmed it (−$22.54 all-time, 64% wins vs 77% required). Re-enable
+   *  with HARVEST_V2_ENABLED=true once the 24h board gap holds positive for
+   *  2–3 consecutive days — see /calibration-v2?sinceMs and the Gap (24h)
+   *  stat on Overview. */
+  harvestV2Enabled: false,
   harvestV2MinTtmSec: 45,
   harvestV2MaxTtmSec: 150,
   harvestV2TargetProb: 0.75,

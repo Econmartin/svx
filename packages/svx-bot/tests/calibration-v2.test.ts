@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LedgerStore } from '../src/ledger/store.js';
 import {
   computeV2Calibration,
@@ -93,5 +93,35 @@ describe('V2 calibration recorder', () => {
     expect(calib.wins).toBeLessThanOrEqual(calib.n);
     // quoted probabilities are folded to the favored side (>= 0.5)
     expect(calib.avg_quoted).toBeGreaterThanOrEqual(0.5);
+  });
+});
+
+describe('board tenor probes emit v2_board signals', () => {
+  it('writes a signal row per board-quoted probe with the model-vs-board spread', async () => {
+    vi.resetModules();
+    vi.doMock('../src/pricing/predict-sdk.js', () => ({
+      listSdkMarkets: async () => [
+        { id: 'mkt-1', expiryMs: NOW + 60 * 60_000, tickSize: 0.01, mintPaused: false, referencePrice: null },
+      ],
+      boardPrice: async () => ({ up: 0.7, down: 0.3 }),
+      sdkConfig: () => ({ packages: { predict: '0xpkg' }, underlyings: {} }),
+      decodeMintFill: () => null,
+    }));
+    const { recordBoardTenorProbes } = await import('../src/ops/calibration-v2.js');
+    const ledger = mem();
+    const n = await recordBoardTenorProbes({
+      predict: reader(snapshot({ expiryMs: NOW + 60 * 60_000 })),
+      ledger,
+      nowMs: NOW,
+    });
+    expect(n).toBeGreaterThan(0);
+    const sigs = ledger.recentSignals(50).filter((s) => s.filterReason === 'v2_board');
+    expect(sigs.length).toBe(n); // one signal per board-quoted probe
+    for (const s of sigs) {
+      expect(s.polyProb).toBe(0.7); // counterparty column carries the board quote
+      expect(s.spread).toBeCloseTo(Math.abs(s.predictProb - 0.7), 10);
+      expect(s.action).toBe('filtered');
+    }
+    vi.doUnmock('../src/pricing/predict-sdk.js');
   });
 });

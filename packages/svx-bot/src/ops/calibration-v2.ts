@@ -17,7 +17,7 @@ import type { LedgerStore } from '../ledger/store.js';
 import { boardPrice, listSdkMarkets } from '../pricing/predict-sdk.js';
 import type { PredictReader } from '../pricing/predict-v2.js';
 import { binaryUpFromTotalVariance } from '../pricing/bs.js';
-import { evalTotalVariance } from '../pricing/svi.js';
+import { evalTotalVariance, tYearsFromMs } from '../pricing/svi.js';
 import { log } from '../util/log.js';
 
 /** Probe when a market is within this window of its expiry. The lower bound
@@ -232,6 +232,29 @@ export async function recordBoardTenorProbes(deps: {
         boardProbUp: board?.up ?? null,
         slot,
       });
+      // Every board-quoted probe is also a live SIGNAL: our model price vs
+      // the venue's tradeable quote at the same strike — the exact input a
+      // V2 divergence strategy would trade. This is what revived the
+      // /signals stream after the V1 Polymarket matching went structurally
+      // idle (V2 expiries never align with Poly's).
+      if (board != null) {
+        ledger.insertSignal({
+          timestampMs: now,
+          oracleId: m.id,
+          underlyingAsset: snap.underlyingAsset,
+          expiryMs: m.expiryMs,
+          strike,
+          predictDirection: modelUp >= 0.5 ? 'up' : 'down',
+          predictProb: modelUp,
+          predictIv: Math.sqrt(w / Math.max(tYearsFromMs(ttm), 1e-12)),
+          // The counterparty column carries the protocol's own board quote
+          // in the V2 era (Polymarket's book in the V1 rows).
+          polyProb: board.up,
+          spread: Math.abs(modelUp - board.up),
+          action: 'filtered',
+          filterReason: 'v2_board',
+        });
+      }
       recorded++;
     }
   }

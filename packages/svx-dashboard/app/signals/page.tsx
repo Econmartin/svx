@@ -67,8 +67,9 @@ export default function SignalsPage() {
           Signals
         </h1>
         <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
-          Real-time spread evaluations: Predict's SVI probability vs.
-          Polymarket's order book.
+          Real-time spread evaluations: our SVI model probability vs the venue&apos;s
+          tradeable quote — Polymarket&apos;s book in the V1 era, Predict&apos;s own board
+          price on SVX V2 (rows tagged <code className="font-mono text-xs">v2_board</code>).
         </p>
       </header>
 
@@ -83,18 +84,19 @@ export default function SignalsPage() {
       <PageIntro
         summary={
           <>
-            Every 15s the bot prices each matched (oracle, strike) pair on both venues and records the
-            disagreement here. <strong>Each row is a decision the bot made</strong>: filtered (didn't qualify),
-            sub-threshold (spread too small), executed (placed a trade), or failed (tried to execute but the
-            venue rejected). It's the strategy's audit trail.{' '}
-            <em>Since Predict's July 26 redeployment its markets mostly cycle in ~3 minutes and have
-            no Polymarket counterpart, so cross-venue rows here are sparse by design — the
-            surface-only harvest strategy and the SVX V2 calibration card on Overview are where
-            the action shows.</em>
+            Each row compares our model price with the venue&apos;s tradeable quote at one
+            strike and records the disagreement. <strong>Each row is an evaluation the bot
+            made</strong>: filtered (didn&apos;t qualify), sub-threshold (spread too small),
+            executed (placed a trade), or failed (venue rejected).{' '}
+            <em>Two eras share this stream: V1 rows priced Predict against Polymarket&apos;s
+            book (idle since the July 26 redeployment — V2 expiries never align with
+            Poly&apos;s), and <code className="font-mono text-[11px]">v2_board</code> rows
+            price our surface against Predict&apos;s own board quote across every listed
+            tenor — the exact input a V2 divergence strategy trades on.</em>
           </>
         }
         hints={[
-          <>The <strong>scatter</strong> below plots Polymarket probability (x) vs Predict probability (y). Points on the y=x line are venues in agreement; points off the line are where the spread lives.</>,
+          <>The <strong>scatter</strong> below plots the venue quote (x) vs our model probability (y). Points on the y=x line are model and venue in agreement; points off the line are where the spread lives.</>,
           <>Use the <strong>tabs</strong> top-right to filter to executed-only when checking what actually fired.</>,
           <>Failed rows carry a <code className="font-mono text-[10px]">filter_reason</code> like <code className="font-mono text-[10px]">poly_thin_book</code> or <code className="font-mono text-[10px]">poly_maker_not_allowed</code> — useful for debugging mainnet config.</>,
         ]}
@@ -103,7 +105,7 @@ export default function SignalsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Calibration scatter — Predict vs Polymarket probability</CardTitle>
+            <CardTitle>Calibration scatter — model vs venue quote</CardTitle>
             <p className="text-xs text-muted mt-0.5">
               On the y=x line, both venues agree. Points off the line are where we trade.
               Color = action (green executed, gray filtered).
@@ -300,7 +302,7 @@ function CalibrationScatter({ data }: { data: ScatterPoint[] }) {
             tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
             tick={{ fontSize: 11, fill: '#8c93a3' }}
             label={{
-              value: 'Polymarket Yes ask',
+              value: 'Venue quote (Poly ask · V2 board)',
               position: 'insideBottom',
               offset: -2,
               fill: '#8c93a3',

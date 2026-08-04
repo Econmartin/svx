@@ -81,7 +81,10 @@ export type FilterReason =
   | 'expiry_mismatch'
   | 'risk_gate'
   | 'duplicate'
-  | 'paused';
+  | 'paused'
+  /** V2 observation row: our model price vs the protocol's own board quote
+   *  at the same strike (no Polymarket in the loop). */
+  | 'v2_board';
 
 export interface SignalRecord {
   id: string;
@@ -96,12 +99,14 @@ export interface SignalRecord {
   predictProb: number;
   /** Implied annualized vol per Predict at this strike. */
   predictIv: number;
-  /** Polymarket ask for the matching outcome (the price you'd actually pay). */
+  /** Counterparty quote for the matching outcome — Polymarket's ask on V1
+   *  rows, the protocol's own board price on `v2_board` rows. */
   polyProb: number;
-  polyIv: number;
+  /** Poly-implied vol; absent on v2_board rows (no second surface). */
+  polyIv?: number;
   /** predictProb - polyProb (positive => Predict thinks more likely than Poly) */
   spread: number;
-  ivSpread: number;
+  ivSpread?: number;
   /** Action taken given current filters/risk. */
   action: SignalAction;
   /** If filtered, why? */

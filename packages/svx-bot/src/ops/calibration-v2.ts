@@ -176,6 +176,32 @@ const BOARD_Z_GRID = [-2, -1, -0.5, 0, 0.5, 1, 2];
  *  still recorded, the board column is simply null. */
 const MIN_BOARD_QUOTE_TTM_MS = 90_000;
 
+/** Rolling spot history per underlying, fed by the recorder's own snapshots.
+ *  Powers the trailing-return (momentum) column on every probe — the live
+ *  tape suggested momentum-aligned favorites underperform (64% vs 82%
+ *  against, n=47, not yet significant); this is what settles it. */
+const MOMENTUM_WINDOW_MS = 10 * 60_000;
+const spotHistory = new Map<string, Array<{ ts: number; spot: number }>>();
+
+function recordSpot(underlying: string, ts: number, spot: number): void {
+  const hist = spotHistory.get(underlying) ?? [];
+  hist.push({ ts, spot });
+  const cutoff = ts - 3 * MOMENTUM_WINDOW_MS;
+  while (hist.length > 0 && hist[0]!.ts < cutoff) hist.shift();
+  spotHistory.set(underlying, hist);
+}
+
+/** Trailing return over the momentum window, or null with <2 points. */
+export function trailingReturn(underlying: string, nowMs: number): number | null {
+  const hist = spotHistory.get(underlying) ?? [];
+  const inWin = hist.filter((h) => h.ts >= nowMs - MOMENTUM_WINDOW_MS && h.ts <= nowMs);
+  if (inWin.length < 2) return null;
+  const first = inWin[0]!;
+  const last = inWin[inWin.length - 1]!;
+  if (!(first.spot > 0)) return null;
+  return (last.spot - first.spot) / first.spot;
+}
+
 /**
  * Full-board capture across EVERY listed market and tenor.
  *
@@ -192,6 +218,9 @@ export async function recordBoardTenorProbes(deps: {
   ledger: LedgerStore;
   nowMs?: number;
   onSnapshot?: (snap: import('svx-shared/types').OracleSnapshot) => void;
+  /** Market's cumulative order count (strike_exposure.next_order_sequence),
+   *  injected so tests don't need a chain client. Null = unavailable. */
+  readOrderSeq?: (marketId: string) => Promise<number | null>;
 }): Promise<number> {
   const { predict, ledger } = deps;
   const now = deps.nowMs ?? Date.now();
@@ -205,10 +234,13 @@ export async function recordBoardTenorProbes(deps: {
     const snap = await predict.snapshotOracle(m.id).catch(() => null);
     if (!snap || snap.isSettled) continue;
     deps.onSnapshot?.(snap);
+    recordSpot(snap.underlyingAsset, snap.timestampMs, snap.spot);
     if (now - snap.timestampMs > MAX_SNAPSHOT_AGE_MS) continue;
     const wAtm = evalTotalVariance(0, snap.svi);
     if (!(wAtm > 0)) continue;
     const sd = Math.sqrt(wAtm);
+    const mom10m = trailingReturn(snap.underlyingAsset, now);
+    const orderSeq = deps.readOrderSeq ? await deps.readOrderSeq(m.id).catch(() => null) : null;
     for (const z of BOARD_Z_GRID) {
       const strike = snap.forward * Math.exp(z * sd);
       const w = evalTotalVariance(Math.log(strike / snap.forward), snap.svi);
@@ -231,6 +263,8 @@ export async function recordBoardTenorProbes(deps: {
         recordedAtMs: now,
         boardProbUp: board?.up ?? null,
         slot,
+        mom10m,
+        orderSeq,
       });
       // Every board-quoted probe is also a live SIGNAL: our model price vs
       // the venue's tradeable quote at the same strike — the exact input a

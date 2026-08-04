@@ -19,6 +19,7 @@ import {
   listCoinObjectIds,
   makeSuiClient,
   readCoinBalance,
+  readObjectJson,
   type SuiChainClient,
 } from './exec/sui-client.js';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
@@ -559,6 +560,15 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
               if (!state.lastBtcSpot || snap.timestampMs > state.lastBtcSpot.updatedAtMs) {
                 state.lastBtcSpot = { value: snap.spot, updatedAtMs: snap.timestampMs };
               }
+            },
+            // Cumulative order count off the market object — the free
+            // volume/flow column for conditioning probe outcomes.
+            readOrderSeq: async (marketId) => {
+              const j = await readObjectJson<{
+                strike_exposure?: { next_order_sequence?: unknown };
+              }>(makeSuiClient(), marketId);
+              const n = Number(j?.strike_exposure?.next_order_sequence);
+              return Number.isFinite(n) ? n : null;
             },
           }),
         )

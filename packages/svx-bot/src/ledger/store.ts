@@ -1293,7 +1293,17 @@ export class LedgerStore {
     if (!cols.includes('slot')) {
       this.db.exec(`ALTER TABLE v2_calibration_probes ADD COLUMN slot TEXT`);
     }
-    // Safe now that both columns exist on fresh AND migrated databases.
+    // Entry-condition columns (2026-08-05): trailing 10-min spot return and
+    // the market's cumulative order count at record time — the live tape
+    // showed momentum-aligned favorites winning 64% vs 82% against, and
+    // these columns are what turns that hint into a testable dataset.
+    if (!cols.includes('mom_10m')) {
+      this.db.exec(`ALTER TABLE v2_calibration_probes ADD COLUMN mom_10m REAL`);
+    }
+    if (!cols.includes('order_seq')) {
+      this.db.exec(`ALTER TABLE v2_calibration_probes ADD COLUMN order_seq INTEGER`);
+    }
+    // Safe now that the columns exist on fresh AND migrated databases.
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS ix_v2probe_slot ON v2_calibration_probes(market_id, slot)`,
     );
@@ -1312,13 +1322,18 @@ export class LedgerStore {
     boardProbUp?: number | null;
     /** Life-stage bucket (t2m … t7d+). */
     slot?: string | null;
+    /** Trailing 10-min spot return at record time (momentum conditioning). */
+    mom10m?: number | null;
+    /** Market's cumulative order count at record time (flow conditioning). */
+    orderSeq?: number | null;
   }): string {
     const id = randomUUID();
     this.db
       .prepare(
         `INSERT INTO v2_calibration_probes (id, market_id, underlying, expiry_ms,
-           strike, prob_up, spot, ttm_ms, recorded_at_ms, board_prob, slot)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           strike, prob_up, spot, ttm_ms, recorded_at_ms, board_prob, slot,
+           mom_10m, order_seq)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -1332,6 +1347,8 @@ export class LedgerStore {
         p.recordedAtMs,
         p.boardProbUp ?? null,
         p.slot ?? null,
+        p.mom10m ?? null,
+        p.orderSeq ?? null,
       );
     return id;
   }

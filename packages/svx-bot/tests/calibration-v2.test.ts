@@ -113,8 +113,14 @@ describe('board tenor probes emit v2_board signals', () => {
       predict: reader(snapshot({ expiryMs: NOW + 60 * 60_000 })),
       ledger,
       nowMs: NOW,
+      readOrderSeq: async () => 42,
     });
     expect(n).toBeGreaterThan(0);
+    const db = (ledger as unknown as { db: import('better-sqlite3').Database }).db;
+    const probe = db
+      .prepare('SELECT mom_10m, order_seq FROM v2_calibration_probes LIMIT 1')
+      .get() as { mom_10m: number | null; order_seq: number | null };
+    expect(probe.order_seq).toBe(42); // injected reader value persisted
     const sigs = ledger.recentSignals(50).filter((s) => s.filterReason === 'v2_board');
     expect(sigs.length).toBe(n); // one signal per board-quoted probe
     for (const s of sigs) {

@@ -44,8 +44,10 @@ services:
       # Strategy master switches. NOTE: compose uses an explicit map, so a
       # Coolify panel var reaches the container ONLY if it is listed here —
       # HARVEST_V2_ENABLED=false silently did nothing until this mapping.
-      HARVEST_V2_ENABLED: "${HARVEST_V2_ENABLED:-true}"
-      CALIBRATION_HARVEST_ENABLED: "${CALIBRATION_HARVEST_ENABLED:-true}"
+      # Empty default = "unset": the bot falls back to the tunables default
+      # (a `:-true` here silently overrode the code default to ON).
+      HARVEST_V2_ENABLED: "${HARVEST_V2_ENABLED:-}"
+      CALIBRATION_HARVEST_ENABLED: "${CALIBRATION_HARVEST_ENABLED:-}"
       # Infra identity.
       SVX_LOG_LEVEL: "${SVX_LOG_LEVEL:-info}"
       SVX_INSTANCE_LABEL: "${SVX_INSTANCE_LABEL:-testnet}"
@@ -130,9 +132,10 @@ services:
       PREDICT_SERVER_URL: "${MAINNET_PREDICT_SERVER_URL:-https://predict-server.testnet.mystenlabs.com}"
       # Execution kill-switches.
       PAPER_TRADING: "${MAINNET_PAPER_TRADING:-true}"
-      # Same passthrough rule as the testnet bot: unlisted vars never arrive.
-      HARVEST_V2_ENABLED: "${MAINNET_HARVEST_V2_ENABLED:-true}"
-      CALIBRATION_HARVEST_ENABLED: "${MAINNET_CALIBRATION_HARVEST_ENABLED:-true}"
+      # Same passthrough rule as the testnet bot: unlisted vars never arrive,
+      # and empty means "use the tunables default".
+      HARVEST_V2_ENABLED: "${MAINNET_HARVEST_V2_ENABLED:-}"
+      CALIBRATION_HARVEST_ENABLED: "${MAINNET_CALIBRATION_HARVEST_ENABLED:-}"
       POLY_EXECUTION_ENABLED: "${MAINNET_POLY_EXECUTION_ENABLED:-false}"
       HL_EXECUTION_ENABLED: "${MAINNET_HL_EXECUTION_ENABLED:-false}"
       VOL_ARB_ENABLED: "${MAINNET_VOL_ARB_ENABLED:-false}"

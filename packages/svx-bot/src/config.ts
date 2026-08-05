@@ -325,7 +325,10 @@ const Schema = z.object({
 export type SvxConfig = z.infer<typeof Schema>;
 
 function parseBool(v: string | undefined, fallback: boolean): boolean {
-  if (v === undefined) return fallback;
+  // Empty string = unset (same contract as parseNum): compose maps env vars
+  // through with `${VAR:-}` defaults, so an unset Coolify var arrives as ''
+  // and must fall back to the tunables default, not silently become false.
+  if (v === undefined || v === '') return fallback;
   return v.toLowerCase() === 'true' || v === '1';
 }
 

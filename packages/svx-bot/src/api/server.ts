@@ -37,6 +37,7 @@ interface ApiDeps {
     lastManagerBalanceAtMs?: number;
     lastBtcSpot?: { value: number; updatedAtMs: number };
     v2Wrapper?: { id: string; balanceUsdc: number; updatedAtMs: number };
+    suiGas?: { value: number; updatedAtMs: number };
     /** Polymarket pUSD wallet balance — populated by main loop when polyExec
      *  is active. `address` is the FUNDER (Safe or EOA depending on
      *  signature mode); pUSD balance is read from this address. */
@@ -141,6 +142,9 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       v2WrapperId: deps.state.v2Wrapper?.id ?? process.env.PREDICT_V2_WRAPPER_ID ?? null,
       v2WrapperBalanceUsdc: deps.state.v2Wrapper?.balanceUsdc ?? null,
       v2WrapperBalanceAtMs: deps.state.v2Wrapper?.updatedAtMs ?? null,
+      // Operator SUI gas — the silent single point of failure for live mints.
+      operatorSuiGas: deps.state.suiGas?.value ?? null,
+      operatorSuiGasAtMs: deps.state.suiGas?.updatedAtMs ?? null,
       predictV2: deps.cfg.predictV2,
       predictV2LiveEnabled: deps.cfg.predictV2LiveEnabled,
       // Strategy master switch (HARVEST_V2_ENABLED) — surfaced so the
@@ -318,6 +322,7 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
             managerBalanceAtMs: deps.state.lastManagerBalanceAtMs ?? null,
             v2WrapperId: deps.state.v2Wrapper?.id ?? process.env.PREDICT_V2_WRAPPER_ID ?? null,
             v2WrapperBalanceUsdc: deps.state.v2Wrapper?.balanceUsdc ?? null,
+            gasSui: deps.state.suiGas?.value ?? null,
             predictPackageId: deps.addresses.packageId,
             // Open positions inside the PredictManager — inferred from the
             // local ledger (on-chain has the source of truth via dynamic-

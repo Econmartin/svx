@@ -125,6 +125,10 @@ interface BotState {
    *  ITM/OTM without making its own oracle calls. */
   lastBtcSpot?: { value: number; updatedAtMs: number };
   v2Wrapper?: { id: string; balanceUsdc: number; updatedAtMs: number };
+  /** Operator SUI gas. Every live mint needs it, and it ran silently dry on
+   *  2026-08-05 (0.0057 SUI) — every submission failed for ~18h with nothing
+   *  on the dashboard hinting why. Surfaced on /status + /wallets. */
+  suiGas?: { value: number; updatedAtMs: number };
   /** Polymarket pUSD + gas balance, refreshed periodically when polyExec is
    *  configured. Surfaced on /status so the dashboard can show poly bankroll.
    *  `address` = the FUNDER (Safe in POLY_GNOSIS_SAFE mode, EOA in EOA mode).
@@ -545,6 +549,26 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
             state.navUsdc = await readManagerBalance(live);
           } catch (e) {
             log.warn('svx.manager_balance.ambient_read_failed', { err: errMsg(e) });
+          }
+        }
+        // Gas runway. Live mints die silently without it — on 2026-08-05 the
+        // operator ran dry and every submission failed for ~18h while the
+        // dashboard showed nothing wrong.
+        if (live && (!state.suiGas || Date.now() - state.suiGas.updatedAtMs > 60_000)) {
+          const gas = await readCoinBalance(
+            live.sui,
+            live.operatorAddress,
+            '0x2::sui::SUI',
+            1e9,
+          ).catch(() => null);
+          if (gas != null) {
+            state.suiGas = { value: gas, updatedAtMs: Date.now() };
+            if (gas < 0.05) {
+              log.warn('svx.gas.low', {
+                suiGas: gas,
+                note: 'live mints will fail — top up the operator from the faucet',
+              });
+            }
           }
         }
       })()

@@ -136,6 +136,13 @@ function SuiCard({ sui }: { sui: WalletsSnapshot['sui'] }) {
           />
           <KeyValue label="In manager (V1, legacy)" value={formatUsdc(sui.managerBalanceUsdc)} />
           <KeyValue label="Total" value={formatUsdc(total)} tone={total > 0 ? 'win' : 'default'} />
+          {/* Gas ran silently dry on 2026-08-05 (0.0057 SUI) and every live
+              mint failed for ~18h with nothing on screen hinting why. */}
+          <KeyValue
+            label="Gas (SUI)"
+            value={sui.gasSui != null ? sui.gasSui.toFixed(3) : '—'}
+            tone={sui.gasSui != null && sui.gasSui < 0.05 ? 'loss' : 'default'}
+          />
           <KeyValue
             label="Synced"
             value={sui.managerBalanceAtMs ? formatRelative(sui.managerBalanceAtMs) : '—'}

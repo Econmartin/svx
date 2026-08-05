@@ -70,6 +70,9 @@ export interface BotStatus {
   v2WrapperId?: string | null;
   v2WrapperBalanceUsdc?: number | null;
   v2WrapperBalanceAtMs?: number | null;
+  /** Operator SUI gas (testnet) — live mints fail silently when it runs dry. */
+  operatorSuiGas?: number | null;
+  operatorSuiGasAtMs?: number | null;
   predictV2?: boolean;
   predictV2LiveEnabled?: boolean;
   /** HARVEST_V2_ENABLED master switch — drives the Divergence nav dot. */
@@ -592,6 +595,8 @@ export interface WalletsSnapshot {
     managerBalanceUsdc: number;
     v2WrapperId?: string | null;
     v2WrapperBalanceUsdc?: number | null;
+    /** Operator SUI gas — live mints fail silently without it. */
+    gasSui?: number | null;
     managerBalanceAtMs: number | null;
     predictPackageId: string;
     paperTrading: boolean;

@@ -431,7 +431,12 @@ export function loadConfig(): SvxConfig {
     ),
     calibrationHarvestMaxCostPrice: TUNABLES.calibrationHarvestMaxCostPrice,
     calibrationHarvestNotionalDusdc: TUNABLES.calibrationHarvestNotionalDusdc,
-    harvestV2Enabled: parseBool(process.env.HARVEST_V2_ENABLED, TUNABLES.harvestV2Enabled),
+    // Reads SVX_HARVEST_V2, NOT the old HARVEST_V2_ENABLED: Coolify
+    // auto-materialized that name into the env panel with value 'true' (from
+    // an early compose `:-true` default) and the stored entry kept overriding
+    // every attempt to switch the strategy off — code default, panel edits,
+    // empty-string semantics. A fresh name has no poisoned panel entry.
+    harvestV2Enabled: parseBool(process.env.SVX_HARVEST_V2, TUNABLES.harvestV2Enabled),
     harvestV2MinTtmSec: TUNABLES.harvestV2MinTtmSec,
     harvestV2MaxTtmSec: TUNABLES.harvestV2MaxTtmSec,
     harvestV2TargetProb: TUNABLES.harvestV2TargetProb,

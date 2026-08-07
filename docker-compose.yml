@@ -42,11 +42,12 @@ services:
       # halt live trading without a code change).
       PAPER_TRADING: "${PAPER_TRADING:-true}"
       # Strategy master switches. NOTE: compose uses an explicit map, so a
-      # Coolify panel var reaches the container ONLY if it is listed here —
-      # HARVEST_V2_ENABLED=false silently did nothing until this mapping.
-      # Empty default = "unset": the bot falls back to the tunables default
-      # (a `:-true` here silently overrode the code default to ON).
-      HARVEST_V2_ENABLED: "${HARVEST_V2_ENABLED:-}"
+      # Coolify panel var reaches the container ONLY if it is listed here.
+      # Empty default = "unset": the bot falls back to the tunables default.
+      # SVX_HARVEST_V2 replaced HARVEST_V2_ENABLED — Coolify auto-materialized
+      # the old name into its env panel as 'true' (from an early `:-true`
+      # default) and that stored entry overrode every off-switch attempt.
+      SVX_HARVEST_V2: "${SVX_HARVEST_V2:-}"
       CALIBRATION_HARVEST_ENABLED: "${CALIBRATION_HARVEST_ENABLED:-}"
       # Infra identity.
       SVX_LOG_LEVEL: "${SVX_LOG_LEVEL:-info}"
@@ -134,7 +135,7 @@ services:
       PAPER_TRADING: "${MAINNET_PAPER_TRADING:-true}"
       # Same passthrough rule as the testnet bot: unlisted vars never arrive,
       # and empty means "use the tunables default".
-      HARVEST_V2_ENABLED: "${MAINNET_HARVEST_V2_ENABLED:-}"
+      SVX_HARVEST_V2: "${MAINNET_SVX_HARVEST_V2:-}"
       CALIBRATION_HARVEST_ENABLED: "${MAINNET_CALIBRATION_HARVEST_ENABLED:-}"
       POLY_EXECUTION_ENABLED: "${MAINNET_POLY_EXECUTION_ENABLED:-false}"
       HL_EXECUTION_ENABLED: "${MAINNET_HL_EXECUTION_ENABLED:-false}"

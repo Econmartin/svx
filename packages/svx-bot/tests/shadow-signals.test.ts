@@ -107,4 +107,28 @@ describe('scoreShadowSignals', () => {
     expect(s3.n).toBe(2);
     expect(s8.n).toBe(2);
   });
+
+  it('fade_spike buys the cheap far side only after a spike away from the strike', () => {
+    const pick = (over: Partial<ReturnType<typeof mk>> & { mom30s?: number; binVsRef?: number }) =>
+      scoreShadowSignals([row({ ttmMs: 30_000, ...over } as never)]).find(
+        (x) => x.signal === 'fade_spike' && x.slot === 'all',
+      );
+    // BTC $30 above the strike after rising over 30s; DOWN is cheap (up 0.8).
+    const base = { boardUp: 0.8, mom30s: 0.0004, binVsRef: 30, outcomeUp: false };
+    const hit = pick(base)!;
+    expect(hit.n).toBe(1);
+    expect(hit.hitRate).toBe(1); // picked DOWN and it reversed
+    expect(pick({ ...base, mom30s: -0.0004 })).toBeUndefined(); // no spike: moved toward strike
+    expect(pick({ ...base, binVsRef: 10 })).toBeUndefined(); // too close to the strike
+    expect(pick({ ...base, boardUp: 0.6 })).toBeUndefined(); // far side not cheap
+    expect(pick({ ...base, ttmMs: 90_000 })).toBeUndefined(); // not the last minute
+  });
+
+  it('cheap_far_side is the no-spike control', () => {
+    const rows = [row({ ttmMs: 30_000, boardUp: 0.8, outcomeUp: false, binVsRef: 30, mom30s: -0.0004 } as never)];
+    const s = scoreShadowSignals(rows).find((x) => x.signal === 'cheap_far_side' && x.slot === 'all')!;
+    expect(s.n).toBe(1);
+    expect(scoreShadowSignals(rows).find((x) => x.signal === 'fade_spike')).toBeUndefined();
+  });
 });
+

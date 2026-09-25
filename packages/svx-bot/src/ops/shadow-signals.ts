@@ -34,6 +34,9 @@ import { log } from '../util/log.js';
 
 /** Decision points, as time-to-expiry windows. One row per market per slot. */
 const SLOTS: Array<{ slot: string; minMs: number; maxMs: number }> = [
+  // Last-minute checkpoint for the spike-fade pattern; clear of the 10s
+  // pre-expiry no-trade window.
+  { slot: 't30s', minMs: 22_000, maxMs: 36_000 },
   { slot: 't50s', minMs: 40_000, maxMs: 60_000 },
   { slot: 't4m', minMs: 220_000, maxMs: 260_000 },
 ];
@@ -54,6 +57,8 @@ export interface ExternalSignals {
   funding: number | null;
   /** Hyperliquid BTC perp mid. */
   hlMid: number | null;
+  /** Binance log return over the last 30 seconds (1s candles). */
+  mom30s: number | null;
 }
 
 let extCache: { atMs: number; v: ExternalSignals } | null = null;
@@ -66,7 +71,7 @@ export async function fetchExternalSignals(nowMs = Date.now()): Promise<External
       .get<T>(url, { timeout: 4_000 })
       .then((r) => r.data)
       .catch(() => null);
-  const [klines, depth, funding, hlMids] = await Promise.all([
+  const [klines, depth, funding, hlMids, secs] = await Promise.all([
     // [openTime, open, high, low, close, volume, closeTime, quoteVol, trades, takerBuyBase, ...]
     get<Array<Array<string | number>>>(`${BINANCE}/klines?symbol=BTCUSDT&interval=1m&limit=16`),
     get<{ bids: [string, string][]; asks: [string, string][] }>(
@@ -77,6 +82,7 @@ export async function fetchExternalSignals(nowMs = Date.now()): Promise<External
       .post<Record<string, string>>(HL_INFO, { type: 'allMids' }, { timeout: 4_000 })
       .then((r) => r.data)
       .catch(() => null),
+    get<Array<Array<string | number>>>(`${BINANCE}/klines?symbol=BTCUSDT&interval=1s&limit=31`),
   ]);
   const v: ExternalSignals = {
     binMid: null,
@@ -87,6 +93,7 @@ export async function fetchExternalSignals(nowMs = Date.now()): Promise<External
     takerBuyRatio: null,
     funding: null,
     hlMid: null,
+    mom30s: null,
   };
   if (depth?.bids?.length && depth.asks?.length) {
     const bid = Number(depth.bids[0]![0]);
@@ -111,6 +118,11 @@ export async function fetchExternalSignals(nowMs = Date.now()): Promise<External
   }
   const f = Number(funding?.data?.[0]?.fundingRate);
   if (Number.isFinite(f)) v.funding = f;
+  if (Array.isArray(secs) && secs.length >= 25) {
+    const first = Number(secs[0]![4]);
+    const last = Number(secs[secs.length - 1]![4]);
+    if (first > 0 && last > 0) v.mom30s = Math.log(last / first);
+  }
   const hl = Number(hlMids?.BTC);
   if (Number.isFinite(hl) && hl > 0) v.hlMid = hl;
   extCache = { atMs: nowMs, v };
@@ -182,6 +194,8 @@ export async function recordShadowDecisions(deps: {
       );
     };
     const binImpliedUp = impliedUp('binance', ext.binMid, snap, reference);
+    const binBasis = basisEwma.get('binance');
+    const binVsRef = ext.binMid != null && binBasis ? ext.binMid / binBasis - reference : null;
     const hlImpliedUp = impliedUp('hyperliquid', ext.hlMid, snap, reference);
     const ok = ledger.insertShadowDecision({
       network: suiNetwork(),
@@ -205,6 +219,8 @@ export async function recordShadowDecisions(deps: {
       funding: ext.funding,
       hlMid: ext.hlMid,
       hlImpliedUp,
+      mom30s: ext.mom30s,
+      binVsRef,
     });
     if (ok) recorded++;
   }
@@ -260,7 +276,30 @@ export const SHADOW_SIGNALS: Record<string, (r: ShadowDecisionRow) => Pick> = {
     r.binImpliedUp == null ? null : sign(r.binImpliedUp - r.boardUp, 0.08),
   hl_lead_3pp: (r) =>
     r.hlImpliedUp == null ? null : sign(r.hlImpliedUp - r.boardUp, 0.03),
+  // The pattern three mainnet wallets profit from (z 3.6–6.6, 2026-09-25):
+  // in the last minute, after BTC ran ≥$20 past the strike over the prior
+  // 30s, buy the now-cheap far side (≤30¢) betting the spike partly reverses.
+  fade_spike: (r) => fadeSpike(r, 20, 0.3),
+  fade_spike_40: (r) => fadeSpike(r, 40, 0.3),
+  // Control: same cheap far side, no spike requirement — separates "cheap
+  // last-minute underdogs are underpriced" from "spikes reverse".
+  cheap_far_side: (r) => {
+    if (r.ttmMs > 60_000 || r.binVsRef == null) return null;
+    const far: Pick = r.binVsRef > 0 ? 'down' : 'up';
+    const farPrice = far === 'up' ? r.boardUp : 1 - r.boardUp;
+    return farPrice <= 0.3 ? far : null;
+  },
 };
+
+function fadeSpike(r: ShadowDecisionRow, minUsd: number, maxPrice: number): Pick {
+  if (r.ttmMs > 60_000 || r.binVsRef == null || r.mom30s == null) return null;
+  if (Math.abs(r.binVsRef) < minUsd) return null;
+  // The last 30s must have pushed price AWAY from the strike (a spike).
+  if (Math.sign(r.mom30s) !== Math.sign(r.binVsRef)) return null;
+  const far: Pick = r.binVsRef > 0 ? 'down' : 'up';
+  const farPrice = far === 'up' ? r.boardUp : 1 - r.boardUp;
+  return farPrice <= maxPrice ? far : null;
+}
 
 export interface ShadowSignalScore {
   signal: string;

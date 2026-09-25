@@ -1536,6 +1536,12 @@ export class LedgerStore {
     if (!cols.includes('hl_implied_up')) {
       this.db.exec(`ALTER TABLE shadow_decisions ADD COLUMN hl_implied_up REAL`);
     }
+    // Spike-fade inputs (2026-09-25): Binance 30s log return and the
+    // basis-adjusted Binance price minus the reference strike, in USD.
+    if (!cols.includes('mom_30s')) this.db.exec(`ALTER TABLE shadow_decisions ADD COLUMN mom_30s REAL`);
+    if (!cols.includes('bin_vs_ref')) {
+      this.db.exec(`ALTER TABLE shadow_decisions ADD COLUMN bin_vs_ref REAL`);
+    }
   }
 
 
@@ -1545,8 +1551,8 @@ export class LedgerStore {
         `INSERT OR IGNORE INTO shadow_decisions (id, network, market_id, slot, expiry_ms,
            recorded_at_ms, ttm_ms, reference, forward, board_up, cost_up, cost_down,
            bin_mid, bin_implied_up, mom_1m, mom_5m, mom_15m, book_imb, taker_buy_ratio, funding,
-           hl_mid, hl_implied_up)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           hl_mid, hl_implied_up, mom_30s, bin_vs_ref)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         randomUUID(),
@@ -1571,6 +1577,8 @@ export class LedgerStore {
         d.funding,
         d.hlMid ?? null,
         d.hlImpliedUp ?? null,
+        d.mom30s ?? null,
+        d.binVsRef ?? null,
       );
     return res.changes > 0;
   }
@@ -1628,6 +1636,8 @@ export class LedgerStore {
         takerBuyRatio: r.taker_buy_ratio as number | null,
         funding: r.funding as number | null,
         hlImpliedUp: (r.hl_implied_up as number | null) ?? null,
+        mom30s: (r.mom_30s as number | null) ?? null,
+        binVsRef: (r.bin_vs_ref as number | null) ?? null,
         outcomeUp: Number(r.outcome_up) === 1,
       }));
   }
@@ -2640,6 +2650,8 @@ export interface ShadowDecisionInput {
   funding: number | null;
   hlMid?: number | null;
   hlImpliedUp?: number | null;
+  mom30s?: number | null;
+  binVsRef?: number | null;
 }
 
 export interface ShadowDecisionRow {
@@ -2656,6 +2668,8 @@ export interface ShadowDecisionRow {
   takerBuyRatio: number | null;
   funding: number | null;
   hlImpliedUp?: number | null;
+  mom30s?: number | null;
+  binVsRef?: number | null;
   outcomeUp: boolean;
 }
 

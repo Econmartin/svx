@@ -408,6 +408,14 @@ export const TUNABLES = {
   harvestV2MinTtmSec: 45,
   harvestV2MaxTtmSec: 150,
   harvestV2TargetProb: 0.75,
+  /** Max fee drag per $1 contract on a LIVE Predict mint (all-in cost minus
+   *  entry probability, from the exact pre-trade quote). Mainnet launched
+   *  with base_fee 0.204 → 0.204·√(p(1−p)) = 6–10¢ at 60–90¢ entries, ×3 in
+   *  the final minute; the testnet favorites edge measured +5.7..+7.3pp. At
+   *  3¢ this gate blocks live entries under today's fee policy — on purpose:
+   *  paper keeps recording fee-inclusive fills until mainnet data shows an
+   *  edge that clears the fee. */
+  harvestV2MaxFeeDrag: 0.03,
   /** Max simultaneous open harvest positions (distinct oracle/strike). */
   calibrationHarvestMaxOpen: 10,
   /** Stand down for the day at −this realized dUSDC over trailing 24h. */

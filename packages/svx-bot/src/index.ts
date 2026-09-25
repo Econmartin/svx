@@ -39,15 +39,14 @@ import {
   recordBoardTenorProbes,
   resolveV2CalibrationProbes,
 } from './ops/calibration-v2.js';
-import {
-  buildV2MintTx,
-  readV2WrapperDusdc,
-  resolveV2Objects,
-  type V2Objects,
-} from './exec/ptb-v2.js';
 import { decideHarvestV2 } from './strategy/harvest-v2.js';
 import { admissibleStrike } from './exec/ptb-v2.js';
-import { boardPrice, decodeMintFill } from './pricing/predict-sdk.js';
+import {
+  accountBalance,
+  estimateMintCost,
+  wrapperIdFor,
+} from './pricing/predict-sdk.js';
+import { DEFAULT_LIVE_MINT_GATES, mintLive } from './exec/mint-v2.js';
 import axios from 'axios';
 import {
   PolymarketClient,
@@ -528,14 +527,16 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       // never depend on the predict-server API — an upstream outage (the
       // 2026-08-02 DNS teardown) must not blank our own balances.
       (async () => {
-        const wrapperId = process.env.PREDICT_V2_WRAPPER_ID;
-        if (
-          wrapperId &&
-          (!state.v2Wrapper || Date.now() - state.v2Wrapper.updatedAtMs > 60_000)
-        ) {
-          const bal = await readV2WrapperDusdc(makeSuiClient(), wrapperId).catch(() => null);
+        // The operator's Predict account is DERIVED from its address (no env
+        // id to keep in sync); balance is the account's custody balance.
+        if (live && (!state.v2Wrapper || Date.now() - state.v2Wrapper.updatedAtMs > 60_000)) {
+          const bal = await accountBalance(live.operatorAddress);
           if (bal != null) {
-            state.v2Wrapper = { id: wrapperId, balanceUsdc: bal, updatedAtMs: Date.now() };
+            state.v2Wrapper = {
+              id: wrapperIdFor(live.operatorAddress),
+              balanceUsdc: bal,
+              updatedAtMs: Date.now(),
+            };
           }
         }
         if (live && Date.now() - state.lastManagerBalanceAtMs > 300_000) {
@@ -2929,54 +2930,6 @@ async function runVolArbStep(args: {
  * Settlement, PnL, and redeem ride the existing oracle-settlement machinery —
  * the trade row is a normal Predict trade tagged with the strategy.
  */
-/** Cached V2 exec objects; re-resolved when the deployment package changes
- *  (testnet republishes under new ids on non-upgrade-safe changes). */
-let v2ExecCache: { objects: V2Objects; fetchedAtMs: number } | null = null;
-async function getV2Objects(
-  marketId: string,
-  predictClient?: PredictReader | PredictV2Client,
-): Promise<{ objects: V2Objects; tickSizeRaw: number; admissionTickSizeRaw: number }> {
-  let tickSizeRaw = NaN;
-  let admissionTickSizeRaw = NaN;
-  let pkg: string | undefined;
-  // Chain-native metadata first when available (the indexer host has been
-  // torn down twice while the protocol kept running).
-  const meta =
-    predictClient && 'marketMetaFor' in predictClient
-      ? predictClient.marketMetaFor(marketId)
-      : undefined;
-  if (meta && Number.isFinite(meta.tickSizeRaw) && meta.tickSizeRaw > 0) {
-    tickSizeRaw = meta.tickSizeRaw;
-    admissionTickSizeRaw = meta.admissionTickSizeRaw;
-    pkg = meta.packageId;
-  } else {
-    const { data: st } = await axios.get<{
-      market?: {
-        tick_size?: number | string;
-        admission_tick_size?: number | string;
-        package?: string;
-      };
-    }>(`${ADDRESSES.predictServerUrl}/markets/${marketId}/state`, { timeout: 10_000 });
-    tickSizeRaw = Number(st?.market?.tick_size);
-    admissionTickSizeRaw = Number(st?.market?.admission_tick_size ?? st?.market?.tick_size);
-    pkg = st?.market?.package;
-  }
-  if (!Number.isFinite(admissionTickSizeRaw) || admissionTickSizeRaw <= 0) {
-    admissionTickSizeRaw = tickSizeRaw;
-  }
-  if (!Number.isFinite(tickSizeRaw) || tickSizeRaw <= 0 || !pkg) {
-    throw new Error('v2 market state missing tick_size/package');
-  }
-  if (
-    !v2ExecCache ||
-    Date.now() - v2ExecCache.fetchedAtMs > 3600_000 ||
-    v2ExecCache.objects.predictPackageId !== pkg
-  ) {
-    v2ExecCache = { objects: await resolveV2Objects(pkg), fetchedAtMs: Date.now() };
-  }
-  return { objects: v2ExecCache.objects, tickSizeRaw, admissionTickSizeRaw };
-}
-
 /**
  * Harvest-V2 step: surface-only favored entries on V2's short markets — the
  * trigger validated by /calibration-v2 (favorites 60–90¢ near expiry realize
@@ -3047,84 +3000,86 @@ async function runHarvestV2Step(deps: {
     if (!decision.enter) continue;
 
     let quantityDusdc = cfg.calibrationHarvestNotionalDusdc;
-    let costUsdc = quantityDusdc * decision.costPrice;
     let costPrice = decision.costPrice;
+    // Paper books what the mint would REALLY have cost: premium plus the
+    // market's own fee policy (base fee × √(p(1−p)), ramping near expiry).
+    // Booking premium alone overstated paper PnL by the entire fee load —
+    // 6–15¢ per contract on mainnet, larger than the edge being measured.
+    const feeEst = meta?.feePolicy
+      ? estimateMintCost({
+          fees: meta.feePolicy,
+          expiryMs: o.expiryMs,
+          nowMs,
+          sideProbability: decision.costPrice,
+          direction: decision.direction,
+          quantity: quantityDusdc,
+        })
+      : null;
+    let costUsdc = feeEst?.cost ?? quantityDusdc * decision.costPrice;
     let mode: 'paper' | 'live' = 'paper';
     let txDigest: string | undefined;
-    const wrapperId = process.env.PREDICT_V2_WRAPPER_ID;
-    if (!cfg.paperTrading && cfg.predictV2LiveEnabled && wrapperId && live) {
+    if (!cfg.paperTrading && cfg.predictV2LiveEnabled && live) {
       try {
-        const v2o = await getV2Objects(o.oracleId, predict);
-        // Cap against the BOARD price, not our model price: the protocol
-        // fills at its own quote (skew included), and a cap derived from our
-        // surface aborted with EMintProbabilityAboveMax whenever the two
-        // disagreed by more than the buffer.
-        const board = await boardPrice(
-          o.underlyingAsset,
-          o.expiryMs,
-          Math.round(decision.strike),
-        );
-        const boardSide =
-          board && (decision.direction === 'up' ? board.up : board.down);
-        const basis =
-          typeof boardSide === 'number' && boardSide > 0 ? boardSide : decision.costPrice;
-        const capProbability = Math.min(basis + 0.05, 0.97);
-        if (typeof boardSide === 'number' && boardSide > cfg.calibrationHarvestMaxCostPrice) {
-          log.info('svx.harvest_v2.board_above_band', {
-            oracleId: o.oracleId,
-            modelProb: Number(decision.costPrice.toFixed(4)),
-            boardProb: Number(boardSide.toFixed(4)),
-          });
-          continue; // the tradeable price is outside the validated band
-        }
-        const tx = buildV2MintTx(v2o.objects, {
-          marketId: o.oracleId,
-          wrapperId,
-          strike: decision.strike,
-          direction: decision.direction,
-          tickSizeRaw: v2o.tickSizeRaw,
-          admissionTickSizeRaw: v2o.admissionTickSizeRaw,
-          quantityDusdc,
-          // All-in ceiling from the same basis, plus fee/ramp headroom.
-          maxCostDusdc: quantityDusdc * capProbability * 1.15 + 0.10,
-          maxProbability: capProbability,
+        const outcome = await mintLive({
+          sui: live.sui,
+          keypair: live.keypair,
+          owner: live.operatorAddress,
+          order: {
+            underlying: o.underlyingAsset,
+            expiryMs: o.expiryMs,
+            marketId: o.oracleId,
+            strike: decision.strike,
+            direction: decision.direction,
+            quantity: quantityDusdc,
+          },
+          gates: {
+            ...DEFAULT_LIVE_MINT_GATES,
+            maxEntryProbability: cfg.calibrationHarvestMaxCostPrice,
+            maxFeeDrag: cfg.harvestV2MaxFeeDrag,
+          },
         });
-        const result = await submitTx(live.sui, tx, live.keypair);
-        if (!result.ok) {
+        if (outcome.kind === 'skipped') {
+          log.info('svx.harvest_v2.live_skipped', {
+            oracleId: o.oracleId,
+            reason: outcome.reason,
+            modelProb: Number(decision.costPrice.toFixed(4)),
+            entryProb: outcome.quote && Number(outcome.quote.entryProbability.toFixed(4)),
+            allInPerContract:
+              outcome.quote && Number(outcome.quote.costPerContract.toFixed(4)),
+          });
+          continue; // price moved or fees exceed the edge — not a failure
+        }
+        if (outcome.kind === 'failed') {
           harvestFailCooldown.set(o.oracleId, Date.now() + HARVEST_FAIL_COOLDOWN_MS);
           log.warn('svx.harvest_v2.live_failed', {
             oracleId: o.oracleId,
-            digest: result.digest,
-            error: result.error,
+            digest: outcome.digest,
+            error: outcome.reason,
             cooldownSec: HARVEST_FAIL_COOLDOWN_MS / 1000,
           });
           continue;
         }
-        txDigest = result.digest;
+        txDigest = outcome.digest;
         mode = 'live';
         // Book the EXACT fill from the tx's mint event — entry probability,
-        // chain-floored quantity, and the all-in debit including fees. The
-        // modeled cost stays in predictProbAtExec; this closes the
-        // ledger-vs-wallet gap that made PnL under-report fees.
-        const fill = decodeMintFill(result.events);
+        // chain-floored quantity, and the all-in debit including fees.
+        const fill = outcome.fill;
         if (fill) {
           quantityDusdc = fill.quantityDusdc;
           costUsdc = fill.costUsdc;
           costPrice = fill.entryProbability;
           log.info('svx.harvest_v2.fill', {
-            digest: result.digest,
+            digest: outcome.digest,
             entryProbability: Number(fill.entryProbability.toFixed(4)),
             quantityDusdc: fill.quantityDusdc,
             netPremiumUsdc: Number(fill.netPremiumUsdc.toFixed(4)),
-            feesUsdc: Number(
-              (fill.costUsdc - fill.netPremiumUsdc).toFixed(4),
-            ),
+            feesUsdc: Number((fill.costUsdc - fill.netPremiumUsdc).toFixed(4)),
             allInCostUsdc: Number(fill.costUsdc.toFixed(4)),
             modelProb: Number(decision.costPrice.toFixed(4)),
           });
         } else {
           log.warn('svx.harvest_v2.fill_decode_failed', {
-            digest: result.digest,
+            digest: outcome.digest,
             note: 'booking modeled cost — ledger may drift from wallet on this trade',
           });
         }
@@ -3254,59 +3209,52 @@ async function maybeFavoredMint(args: {
   let mode: 'paper' | 'live' = 'paper';
 
   if (!cfg.paperTrading && cfg.predictV2 && cfg.predictV2LiveEnabled && live) {
-    // ── V2 live mint (2026-07 cutover) ───────────────────────────────────
-    // Funds come from the shared AccountWrapper (pre-deposited via the
-    // `deposit-v2` CLI); the PTB loads a live pricer and mints with an
-    // all-in cost cap and an entry-probability cap so inventory skew or
-    // quote drift can only make the fill BETTER than modeled, never worse.
-    const wrapperId = process.env.PREDICT_V2_WRAPPER_ID;
-    if (!wrapperId) {
-      log.warn('svx.favored.v2_no_wrapper', {
-        note: 'set PREDICT_V2_WRAPPER_ID (run `svx setup-account-v2` once)',
-      });
-      return;
-    }
+    // ── V2 live mint ─────────────────────────────────────────────────────
+    // Funds come from the operator's derived Predict account (funded via the
+    // `deposit-v2` CLI). Quote → gate → capped mint → decoded receipt; see
+    // exec/mint-v2.ts.
     try {
-      const v2o = await getV2Objects(oracleSnap.oracleId);
-      const tx = buildV2MintTx(v2o.objects, {
-        marketId: oracleSnap.oracleId,
-        wrapperId,
-        strike: polySnap.strike,
-        direction: decision.direction,
-        tickSizeRaw: v2o.tickSizeRaw,
-        admissionTickSizeRaw: v2o.admissionTickSizeRaw,
-        quantityDusdc,
-        // All-in cap: modeled cost + fee headroom (protocol base fee 2% +
-        // near-expiry ramp) + small slippage margin.
-        maxCostDusdc: costUsdc * 1.08 + 0.05,
-        maxProbability: Math.min(decision.costPrice + 0.03, 0.97),
+      const outcome = await mintLive({
+        sui: live.sui,
+        keypair: live.keypair,
+        owner: live.operatorAddress,
+        order: {
+          underlying: oracleSnap.underlyingAsset,
+          expiryMs: oracleSnap.expiryMs,
+          marketId: oracleSnap.oracleId,
+          strike: polySnap.strike,
+          direction: decision.direction,
+          quantity: quantityDusdc,
+        },
+        gates: {
+          ...DEFAULT_LIVE_MINT_GATES,
+          maxEntryProbability: Math.min(decision.costPrice + 0.03, 0.97),
+          maxFeeDrag: cfg.harvestV2MaxFeeDrag,
+        },
       });
-      const result = await submitTx(live.sui, tx, live.keypair);
-      if (!result.ok) {
-        log.warn('svx.favored.v2_live_failed', {
-          digest: result.digest,
-          error: result.error,
-          status: result.status,
+      if (outcome.kind !== 'filled') {
+        log.warn('svx.favored.v2_live_not_filled', {
+          kind: outcome.kind,
+          reason: outcome.reason,
+          ...(outcome.kind === 'failed' && { digest: outcome.digest }),
         });
         return;
       }
-      txDigest = result.digest;
+      txDigest = outcome.digest;
       mode = 'live';
-      // Same exact-fill booking as the harvest path: the mint event carries
-      // the real entry probability, chain-floored quantity, and all-in cost.
-      const fill = decodeMintFill(result.events);
+      const fill = outcome.fill;
       if (fill) {
         quantityDusdc = fill.quantityDusdc;
         costUsdc = fill.costUsdc;
         costPrice = fill.entryProbability;
         log.info('svx.favored.v2_fill', {
-          digest: result.digest,
+          digest: outcome.digest,
           entryProbability: Number(fill.entryProbability.toFixed(4)),
           allInCostUsdc: Number(fill.costUsdc.toFixed(4)),
           modelProb: Number(decision.costPrice.toFixed(4)),
         });
       } else {
-        log.warn('svx.favored.v2_fill_decode_failed', { digest: result.digest });
+        log.warn('svx.favored.v2_fill_decode_failed', { digest: outcome.digest });
       }
     } catch (e) {
       log.warn('svx.favored.v2_live_error', { err: errMsg(e) });

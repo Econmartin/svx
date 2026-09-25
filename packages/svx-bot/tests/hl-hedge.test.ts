@@ -33,6 +33,7 @@ const baseCfg: SvxConfig = {
   harvestV2MinTtmSec: 45,
   harvestV2MaxTtmSec: 150,
   harvestV2TargetProb: 0.75,
+  harvestV2MaxFeeDrag: 0.03,
   spreadThreshold: 0.03,
   maxPositionDusdc: 15,
   maxPositionPct: 0.5,

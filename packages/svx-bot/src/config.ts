@@ -175,6 +175,9 @@ const Schema = z.object({
   harvestV2MinTtmSec: z.number().positive().default(45),
   harvestV2MaxTtmSec: z.number().positive().default(150),
   harvestV2TargetProb: z.number().min(0.5).max(1).default(0.75),
+  /** Max fee drag per $1 contract (all-in cost − entry probability) a LIVE
+   *  Predict mint may carry. Checked against the exact pre-trade quote. */
+  harvestV2MaxFeeDrag: z.number().min(0).max(0.5).default(0.03),
   calibrationHarvestMaxOpen: z.number().int().positive().default(10),
   calibrationHarvestDailyLossLimitDusdc: z.number().positive().default(20),
   /** Max time-to-expiry for favored-side mints (validated-tenor gate). */
@@ -440,6 +443,7 @@ export function loadConfig(): SvxConfig {
     harvestV2MinTtmSec: TUNABLES.harvestV2MinTtmSec,
     harvestV2MaxTtmSec: TUNABLES.harvestV2MaxTtmSec,
     harvestV2TargetProb: TUNABLES.harvestV2TargetProb,
+    harvestV2MaxFeeDrag: TUNABLES.harvestV2MaxFeeDrag,
     calibrationHarvestMaxOpen: TUNABLES.calibrationHarvestMaxOpen,
     calibrationHarvestDailyLossLimitDusdc: TUNABLES.calibrationHarvestDailyLossLimitDusdc,
     favoredMintMaxTtmHours: TUNABLES.favoredMintMaxTtmHours,

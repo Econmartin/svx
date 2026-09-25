@@ -6,6 +6,8 @@
  * gRPC with no server in between. This module is the single place the bot
  * constructs a chain client, so the transport choice is one edit, not thirty.
  *
+ * `SUI_NETWORK` (testnet | mainnet, default testnet) picks the deployment —
+ * it also selects the Predict SDK's address book, so the two cannot drift.
  * `SUI_GRPC_URL` overrides the endpoint; the default is the network's public
  * fullnode, which serves gRPC even though its JSON-RPC port returns 404.
  */
@@ -16,14 +18,18 @@ export type SuiChainClient = SuiGrpcClient;
 
 let cached: SuiGrpcClient | undefined;
 
+export function suiNetwork(): 'testnet' | 'mainnet' {
+  return process.env.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
+}
+
 export function suiGrpcUrl(): string {
-  return process.env.SUI_GRPC_URL ?? 'https://fullnode.testnet.sui.io:443';
+  return process.env.SUI_GRPC_URL || `https://fullnode.${suiNetwork()}.sui.io:443`;
 }
 
 export function makeSuiClient(): SuiChainClient {
   if (cached) return cached;
   cached = new SuiGrpcClient({
-    network: (process.env.SUI_NETWORK as 'testnet' | 'mainnet') ?? 'testnet',
+    network: suiNetwork(),
     baseUrl: suiGrpcUrl(),
   });
   return cached;

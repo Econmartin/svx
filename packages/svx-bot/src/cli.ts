@@ -22,11 +22,14 @@ import { setKillFlag, clearKillFlag, isKilled } from './ops/kill.js';
 import { loadOperatorKey } from './exec/keypair.js';
 import { buildMintRangeTx, buildSupplyPlpTx } from './exec/ptb.js';
 import {
-  buildCreateV2AccountTx,
-  buildV2DepositTx,
-  resolveV2Objects,
-} from './exec/ptb-v2.js';
-import axios from 'axios';
+  accountBalance,
+  accountExists,
+  buildDepositTx,
+  buildWithdrawTx,
+  quoteCoinType,
+  wrapperIdFor,
+} from './pricing/predict-sdk.js';
+import { suiNetwork } from './exec/sui-client.js';
 import { submitTx } from './exec/submit.js';
 import { PredictClient } from './pricing/predict.js';
 import { buildLadder } from './strategy/range-ladder.js';
@@ -53,10 +56,12 @@ async function main(): Promise<void> {
       return mintLadder(rest);
     case 'supply-plp':
       return supplyPlp(rest);
-    case 'setup-account-v2':
-      return setupAccountV2(rest);
     case 'deposit-v2':
       return depositV2(rest);
+    case 'withdraw-v2':
+      return withdrawV2(rest);
+    case 'account-v2':
+      return accountV2();
     case 'withdraw-v1':
       return withdrawV1(rest);
     default:
@@ -226,17 +231,6 @@ function rebaseline(): void {
  *
  *   svx supply-plp --amount 5 [--dry]
  */
-/** Resolve V2 objects off the live deployment (predict pkg from /markets). */
-async function v2Objects() {
-  const { data: markets } = await axios.get<Array<{ package: string }>>(
-    `${ADDRESSES.predictServerUrl}/markets`,
-    { timeout: 15_000 },
-  );
-  const pkg = markets[0]?.package;
-  if (!pkg) throw new Error('no V2 markets visible — cannot resolve package');
-  return resolveV2Objects(pkg);
-}
-
 /**
  * Withdraw dUSDC from the RETIRED V1 PredictManager back to the operator
  * wallet (the V1 package is retired but still on-chain and callable). Used
@@ -285,81 +279,125 @@ async function withdrawV1(rest: string[]): Promise<void> {
 }
 
 /**
- * One-time V2 setup: create + share the operator's canonical account wrapper.
- * Prints the wrapper id — set PREDICT_V2_WRAPPER_ID to it in the deployment.
+ * The operator's Predict account: derived wrapper id, custody balance, and
+ * the wallet's quote-coin (USDC on mainnet) and SUI balances. Read-only.
  *
- *   svx setup-account-v2 [--dry]
+ *   svx account-v2
  */
-async function setupAccountV2(rest: string[]): Promise<void> {
+async function accountV2(): Promise<void> {
   loadConfig();
+  const { address } = loadOperatorKey();
+  const sui = makeSuiClient();
+  const coin = quoteCoinType();
+  const [exists, balance, walletQuote, walletSui] = await Promise.all([
+    accountExists(address),
+    accountBalance(address),
+    readCoinBalance(sui, address, coin, 1e6),
+    readCoinBalance(sui, address, '0x2::sui::SUI', 1e9),
+  ]);
+  console.log(
+    JSON.stringify({
+      msg: 'svx.account_v2',
+      network: suiNetwork(),
+      operator: address,
+      wrapperId: wrapperIdFor(address),
+      accountExists: exists,
+      accountBalanceUsdc: balance,
+      walletQuoteUsdc: walletQuote,
+      walletSui,
+      quoteCoinType: coin,
+    }),
+  );
+}
+
+/** Deposits above this need --i-know-what-im-doing (start small until the
+ *  mainnet path is proven bug-free). */
+const DEPOSIT_SAFETY_CAP_USDC = 50;
+
+/**
+ * Fund the operator's Predict account from the wallet's quote coin. The
+ * account is DERIVED from the operator address, so the first deposit also
+ * creates and shares it in the same PTB — no separate setup step, no wrapper
+ * id to copy into env.
+ *
+ *   svx deposit-v2 --amount 20 [--dry] [--i-know-what-im-doing]
+ */
+async function depositV2(rest: string[]): Promise<void> {
+  loadConfig();
+  const i = rest.indexOf('--amount');
+  const amount = i >= 0 && rest[i + 1] ? Number(rest[i + 1]) : NaN;
+  if (!(amount > 0)) throw new Error('pass --amount N (USD)');
+  if (amount > DEPOSIT_SAFETY_CAP_USDC && !rest.includes('--i-know-what-im-doing')) {
+    throw new Error(
+      `refusing to deposit $${amount} > $${DEPOSIT_SAFETY_CAP_USDC} safety cap; ` +
+        'pass --i-know-what-im-doing to override',
+    );
+  }
   const dry = rest.includes('--dry');
   const { keypair, address } = loadOperatorKey();
   const sui = makeSuiClient();
-  const o = await v2Objects();
-  console.log(JSON.stringify({ msg: 'svx.setup_v2.plan', operator: address, objects: o }));
-  if (dry) return;
-  const result = await submitTx(sui, buildCreateV2AccountTx(o), keypair);
-  let sharedCreated: Array<{ id: string; owner: unknown }> = [];
-  if (result.ok) {
-    const txd = (await sui.getTransaction({ digest: result.digest })) as unknown as {
-      Transaction?: { effects?: { changedObjects?: unknown[] } };
-      transaction?: { effects?: { changedObjects?: unknown[] } };
-    };
-    const changed =
-      (txd.Transaction ?? txd.transaction)?.effects?.changedObjects ?? ([] as unknown[]);
-    sharedCreated = (changed as Array<Record<string, unknown>>)
-      .filter((c) => JSON.stringify(c.outputOwner ?? c.owner ?? '').includes('Shared'))
-      .map((c) => ({ id: String(c.objectId ?? c.id ?? ''), owner: c.outputOwner ?? c.owner }));
-  }
+  const coin = quoteCoinType();
+  const [walletBalance, exists] = await Promise.all([
+    readCoinBalance(sui, address, coin, 1e6),
+    accountExists(address),
+  ]);
   console.log(
     JSON.stringify({
-      msg: result.ok ? 'svx.setup_v2.ok' : 'svx.setup_v2.failed',
+      msg: 'svx.deposit_v2.plan',
+      network: suiNetwork(),
+      operator: address,
+      wrapperId: wrapperIdFor(address),
+      createsAccount: !exists,
+      walletQuoteUsdc: walletBalance,
+      depositUsdc: amount,
+      quoteCoinType: coin,
+    }),
+  );
+  if (walletBalance < amount) {
+    throw new Error(`wallet has ${walletBalance} < ${amount} requested (${coin})`);
+  }
+  if (dry) return;
+  const result = await submitTx(sui, buildDepositTx(address, amount, !exists), keypair);
+  console.log(
+    JSON.stringify({
+      msg: result.ok ? 'svx.deposit_v2.ok' : 'svx.deposit_v2.failed',
       digest: result.digest,
       error: result.error,
-      sharedCreated,
-      note: 'set PREDICT_V2_WRAPPER_ID to the AccountWrapper id above',
     }),
   );
 }
 
 /**
- * Deposit dUSDC from the operator wallet into the V2 account wrapper.
+ * Withdraw from the Predict account back to the operator wallet (lands in
+ * the address balance).
  *
- *   svx deposit-v2 --amount 50 [--wrapper 0x…] [--dry]
+ *   svx withdraw-v2 --amount 20 [--dry]
  */
-async function depositV2(rest: string[]): Promise<void> {
+async function withdrawV2(rest: string[]): Promise<void> {
   loadConfig();
   const i = rest.indexOf('--amount');
-  const amount = i >= 0 && rest[i + 1] ? Number(rest[i + 1]) : 50;
-  const w = rest.indexOf('--wrapper');
-  const wrapperId = w >= 0 && rest[w + 1] ? rest[w + 1]! : process.env.PREDICT_V2_WRAPPER_ID;
-  if (!wrapperId) throw new Error('pass --wrapper 0x… or set PREDICT_V2_WRAPPER_ID');
+  const amount = i >= 0 && rest[i + 1] ? Number(rest[i + 1]) : NaN;
+  if (!(amount > 0)) throw new Error('pass --amount N (USD)');
   const dry = rest.includes('--dry');
   const { keypair, address } = loadOperatorKey();
-  const sui = makeSuiClient();
-  const coinIds = await listCoinObjectIds(sui, address, ADDRESSES.dusdcType);
-  const balance = await readCoinBalance(sui, address, ADDRESSES.dusdcType, 1e6);
-  const o = await v2Objects();
+  const balance = await accountBalance(address);
   console.log(
     JSON.stringify({
-      msg: 'svx.deposit_v2.plan',
+      msg: 'svx.withdraw_v2.plan',
+      network: suiNetwork(),
       operator: address,
-      wrapperId,
-      walletDusdc: balance,
-      depositDusdc: amount,
+      accountBalanceUsdc: balance,
+      withdrawUsdc: amount,
     }),
   );
-  if (balance < amount) throw new Error(`wallet has ${balance} dUSDC < ${amount} requested`);
+  if (balance == null || balance < amount) {
+    throw new Error(`account holds ${balance ?? 'nothing'} < ${amount} requested`);
+  }
   if (dry) return;
-  const tx = buildV2DepositTx(o, {
-    wrapperId,
-    dusdcCoinObjectIds: coinIds,
-    amountDusdc: amount,
-  });
-  const result = await submitTx(sui, tx, keypair);
+  const result = await submitTx(makeSuiClient(), buildWithdrawTx(address, amount), keypair);
   console.log(
     JSON.stringify({
-      msg: result.ok ? 'svx.deposit_v2.ok' : 'svx.deposit_v2.failed',
+      msg: result.ok ? 'svx.withdraw_v2.ok' : 'svx.withdraw_v2.failed',
       digest: result.digest,
       error: result.error,
     }),
@@ -425,6 +463,13 @@ Commands:
                     only; --notional N dUSDC per rung (default 2).
   supply-plp        Supply dUSDC into the PLP vault (returns Coin<PLP> share
                     tokens). --amount N (default 5); --dry to plan only.
+  account-v2        Show the operator's Predict account (derived id, custody
+                    balance, wallet USDC + SUI) on SUI_NETWORK.
+  deposit-v2        Fund the Predict account from wallet USDC; creates the
+                    account on first deposit. --amount N; capped at $50
+                    without --i-know-what-im-doing; --dry to plan only.
+  withdraw-v2       Withdraw from the Predict account to the wallet.
+                    --amount N; --dry to plan only.
 `);
 }
 

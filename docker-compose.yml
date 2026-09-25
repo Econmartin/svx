@@ -126,13 +126,18 @@ services:
     environment:
       SERVICE_FQDN_BOT_MAINNET_4321: ""
       NODE_ENV: production
-      # Sui stays on testnet — Predict has no mainnet yet. Paper-trading by
-      # default means signals don't mint on Sui; only Polymarket fires.
-      SUI_NETWORK: testnet
-      SUI_RPC_URL: "${MAINNET_SUI_RPC_URL:-https://fullnode.testnet.sui.io:443}"
+      # DeepBook Predict launched on Sui mainnet 2026-09-24. SUI_NETWORK also
+      # selects the Predict SDK's address book (packages, markets, USDC), so
+      # this one switch moves reads, quotes and mints together.
+      SUI_NETWORK: "${MAINNET_SUI_NETWORK:-mainnet}"
+      SUI_GRPC_URL: "${MAINNET_SUI_GRPC_URL:-}"
+      SUI_RPC_URL: "${MAINNET_SUI_RPC_URL:-https://sui-rpc.publicnode.com}"
       PREDICT_SERVER_URL: "${MAINNET_PREDICT_SERVER_URL:-https://predict-server.testnet.mystenlabs.com}"
-      # Execution kill-switches.
+      # Execution kill-switches. A live Predict mint needs BOTH
+      # PAPER_TRADING=false AND PREDICT_V2_LIVE=true, a funded account
+      # (`svx deposit-v2`), and a quote that clears the fee-drag gate.
       PAPER_TRADING: "${MAINNET_PAPER_TRADING:-true}"
+      PREDICT_V2_LIVE: "${MAINNET_PREDICT_V2_LIVE:-false}"
       # Same passthrough rule as the testnet bot: unlisted vars never arrive,
       # and empty means "use the tunables default".
       SVX_HARVEST_V2: "${MAINNET_SVX_HARVEST_V2:-}"

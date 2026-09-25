@@ -218,6 +218,40 @@ CREATE INDEX IF NOT EXISTS ix_v2probe_market ON v2_calibration_probes(market_id)
 CREATE INDEX IF NOT EXISTS ix_v2probe_unsettled
   ON v2_calibration_probes(expiry_ms) WHERE settlement_price IS NULL;
 
+/* Shadow signal tracker: one row per (market, slot) decision point on the
+   short up/down markets, recording the board price, the all-in cost of each
+   side, and every external signal we can read (Binance momentum / book /
+   taker flow, OKX funding, Binance-implied fair value). Resolved against the
+   settlement; nothing is ever traded from this table. */
+CREATE TABLE IF NOT EXISTS shadow_decisions (
+  id TEXT PRIMARY KEY,
+  network TEXT NOT NULL,
+  market_id TEXT NOT NULL,
+  slot TEXT NOT NULL,
+  expiry_ms INTEGER NOT NULL,
+  recorded_at_ms INTEGER NOT NULL,
+  ttm_ms INTEGER NOT NULL,
+  reference REAL NOT NULL,
+  forward REAL NOT NULL,
+  board_up REAL NOT NULL,
+  cost_up REAL,
+  cost_down REAL,
+  bin_mid REAL,
+  bin_implied_up REAL,
+  mom_1m REAL,
+  mom_5m REAL,
+  mom_15m REAL,
+  book_imb REAL,
+  taker_buy_ratio REAL,
+  funding REAL,
+  settlement_price REAL,
+  outcome_up INTEGER,
+  settled_at_ms INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_shadow_market_slot ON shadow_decisions(market_id, slot);
+CREATE INDEX IF NOT EXISTS ix_shadow_unsettled
+  ON shadow_decisions(expiry_ms) WHERE settlement_price IS NULL;
+
 /* One-row-per-key operational state that must survive restarts: one-shot
    migration markers, the wallet-reconciliation baseline, etc. */
 CREATE TABLE IF NOT EXISTS meta (
@@ -1433,6 +1467,104 @@ export class LedgerStore {
       }));
   }
 
+  // ── Shadow signal decisions ───────────────────────────────────────────────
+
+  insertShadowDecision(d: ShadowDecisionInput): boolean {
+    const res = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO shadow_decisions (id, network, market_id, slot, expiry_ms,
+           recorded_at_ms, ttm_ms, reference, forward, board_up, cost_up, cost_down,
+           bin_mid, bin_implied_up, mom_1m, mom_5m, mom_15m, book_imb, taker_buy_ratio, funding)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        randomUUID(),
+        d.network,
+        d.marketId,
+        d.slot,
+        d.expiryMs,
+        d.recordedAtMs,
+        d.ttmMs,
+        d.reference,
+        d.forward,
+        d.boardUp,
+        d.costUp,
+        d.costDown,
+        d.binMid,
+        d.binImpliedUp,
+        d.mom1m,
+        d.mom5m,
+        d.mom15m,
+        d.bookImb,
+        d.takerBuyRatio,
+        d.funding,
+      );
+    return res.changes > 0;
+  }
+
+  hasShadowDecision(marketId: string, slot: string): boolean {
+    const row = this.db
+      .prepare<[string, string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM shadow_decisions WHERE market_id = ? AND slot = ?`,
+      )
+      .get(marketId, slot);
+    return (row?.c ?? 0) > 0;
+  }
+
+  unsettledShadowMarkets(nowMs: number, limit = 50): string[] {
+    return this.db
+      .prepare<[number, number], { market_id: string }>(
+        `SELECT DISTINCT market_id FROM shadow_decisions
+         WHERE settlement_price IS NULL AND expiry_ms < ?
+         ORDER BY expiry_ms ASC LIMIT ?`,
+      )
+      .all(nowMs, limit)
+      .map((r) => r.market_id);
+  }
+
+  /** UP wins when the settlement lands strictly above the reference strike. */
+  resolveShadowMarket(marketId: string, settlementPrice: number, settledAtMs: number): number {
+    return this.db
+      .prepare(
+        `UPDATE shadow_decisions
+         SET settlement_price = ?, settled_at_ms = ?,
+             outcome_up = CASE WHEN ? > reference THEN 1 ELSE 0 END
+         WHERE market_id = ? AND settlement_price IS NULL`,
+      )
+      .run(settlementPrice, settledAtMs, settlementPrice, marketId).changes;
+  }
+
+  settledShadowDecisions(network: string, sinceMs = 0): ShadowDecisionRow[] {
+    return this.db
+      .prepare<[string, number], Record<string, number | string | null>>(
+        `SELECT * FROM shadow_decisions
+         WHERE network = ? AND settlement_price IS NOT NULL AND recorded_at_ms >= ?`,
+      )
+      .all(network, sinceMs)
+      .map((r) => ({
+        slot: String(r.slot),
+        ttmMs: Number(r.ttm_ms),
+        boardUp: Number(r.board_up),
+        costUp: r.cost_up as number | null,
+        costDown: r.cost_down as number | null,
+        binImpliedUp: r.bin_implied_up as number | null,
+        mom1m: r.mom_1m as number | null,
+        mom5m: r.mom_5m as number | null,
+        mom15m: r.mom_15m as number | null,
+        bookImb: r.book_imb as number | null,
+        takerBuyRatio: r.taker_buy_ratio as number | null,
+        funding: r.funding as number | null,
+        outcomeUp: Number(r.outcome_up) === 1,
+      }));
+  }
+
+  /** Oldest unresolved rows get pruned after a week (markets that never settle). */
+  pruneShadowDecisions(olderThanMs: number): number {
+    return this.db
+      .prepare(`DELETE FROM shadow_decisions WHERE settlement_price IS NULL AND expiry_ms < ?`)
+      .run(olderThanMs).changes;
+  }
+
   butterflyStats(): {
     scans: number;
     violations: number;
@@ -2186,4 +2318,42 @@ export class LedgerStore {
       polyHighWaterFrac: r.poly_high_water_frac ?? undefined,
     }));
   }
+}
+
+export interface ShadowDecisionInput {
+  network: string;
+  marketId: string;
+  slot: string;
+  expiryMs: number;
+  recordedAtMs: number;
+  ttmMs: number;
+  reference: number;
+  forward: number;
+  boardUp: number;
+  costUp: number | null;
+  costDown: number | null;
+  binMid: number | null;
+  binImpliedUp: number | null;
+  mom1m: number | null;
+  mom5m: number | null;
+  mom15m: number | null;
+  bookImb: number | null;
+  takerBuyRatio: number | null;
+  funding: number | null;
+}
+
+export interface ShadowDecisionRow {
+  slot: string;
+  ttmMs: number;
+  boardUp: number;
+  costUp: number | null;
+  costDown: number | null;
+  binImpliedUp: number | null;
+  mom1m: number | null;
+  mom5m: number | null;
+  mom15m: number | null;
+  bookImb: number | null;
+  takerBuyRatio: number | null;
+  funding: number | null;
+  outcomeUp: boolean;
 }

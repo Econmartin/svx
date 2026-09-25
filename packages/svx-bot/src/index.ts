@@ -40,6 +40,7 @@ import {
   resolveV2CalibrationProbes,
 } from './ops/calibration-v2.js';
 import { decideHarvestV2 } from './strategy/harvest-v2.js';
+import { recordShadowDecisions, resolveShadowDecisions } from './ops/shadow-signals.js';
 import { admissibleStrike } from './exec/ptb-v2.js';
 import {
   accountBalance,
@@ -611,6 +612,17 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
           }
         })
         .then(() => resolveV2CalibrationProbes({ predict, ledger }))
+        // Shadow signal tracker: read-only decision log scored against
+        // settlements (GET /shadow-signals). SVX_SHADOW_SIGNALS=false disables.
+        .then(async () => {
+          if (process.env.SVX_SHADOW_SIGNALS === 'false') return;
+          await recordShadowDecisions({ predict, ledger }).catch((e) =>
+            log.warn('svx.shadow.record_error', { err: errMsg(e) }),
+          );
+          await resolveShadowDecisions({ predict, ledger }).catch((e) =>
+            log.warn('svx.shadow.resolve_error', { err: errMsg(e) }),
+          );
+        })
         .then(() => runHarvestV2Step({ predict, ledger, cfg, state, live }))
         .catch((e) => log.warn('svx.calib_v2.step_error', { err: errMsg(e) }))
         .finally(() => {

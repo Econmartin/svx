@@ -6,6 +6,8 @@
  */
 
 import express, { type Express, type Request, type Response } from 'express';
+import { scoreShadowSignals } from '../ops/shadow-signals.js';
+import { suiNetwork } from '../exec/sui-client.js';
 import cors from 'cors';
 import type { LedgerStore } from '../ledger/store.js';
 import type { SvxConfig } from '../config.js';
@@ -469,6 +471,21 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
   app.get('/board-comparison', (req, res) => {
     const sinceMs = clampFloat(req.query.sinceMs, 0, Number.MAX_SAFE_INTEGER, 0);
     res.json(computeBoardComparison(deps.ledger, sinceMs));
+  });
+
+  /**
+   * Shadow signal scoreboard: every signal's hit rate and fee-inclusive PnL
+   * per $1 contract on the short up/down markets, this network only. Nothing
+   * behind it trades. A signal is worth trading only when pnlPerContract is
+   * positive by more than the noise over a few thousand decisions.
+   *
+   *   GET /shadow-signals?sinceMs=<epoch-ms>
+   */
+  app.get('/shadow-signals', (req, res) => {
+    const sinceMs = clampFloat(req.query.sinceMs, 0, Number.MAX_SAFE_INTEGER, 0);
+    const network = suiNetwork();
+    const rows = deps.ledger.settledShadowDecisions(network, sinceMs);
+    res.json({ network, decisions: rows.length, scores: scoreShadowSignals(rows) });
   });
 
   app.get('/calibration-v2', (req, res) => {

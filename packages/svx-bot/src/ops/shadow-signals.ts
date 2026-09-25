@@ -14,7 +14,7 @@
  *
  *   - Binance BTCUSDT 1m/5m/15m momentum, top-of-book imbalance and taker
  *     buy ratio (data-api.binance.vision — the public, non-geo-blocked mirror)
- *   - OKX perpetual funding rate
+ *   - OKX perpetual funding rate, Hyperliquid BTC perp mid
  *   - a Binance-implied fair value: the chain's own rolled SVI surface priced
  *     off Binance mid (basis-adjusted) instead of the on-chain forward — the
  *     direct test of "does the chain's price lag the world?"
@@ -40,6 +40,7 @@ const SLOTS: Array<{ slot: string; minMs: number; maxMs: number }> = [
 
 const BINANCE = 'https://data-api.binance.vision/api/v3';
 const OKX_FUNDING = 'https://www.okx.com/api/v5/public/funding-rate?instId=BTC-USDT-SWAP';
+const HL_INFO = 'https://api.hyperliquid.xyz/info';
 
 export interface ExternalSignals {
   binMid: number | null;
@@ -51,6 +52,8 @@ export interface ExternalSignals {
   /** Taker-buy share of volume over the last 3 minutes, 0..1. */
   takerBuyRatio: number | null;
   funding: number | null;
+  /** Hyperliquid BTC perp mid. */
+  hlMid: number | null;
 }
 
 let extCache: { atMs: number; v: ExternalSignals } | null = null;
@@ -63,13 +66,17 @@ export async function fetchExternalSignals(nowMs = Date.now()): Promise<External
       .get<T>(url, { timeout: 4_000 })
       .then((r) => r.data)
       .catch(() => null);
-  const [klines, depth, funding] = await Promise.all([
+  const [klines, depth, funding, hlMids] = await Promise.all([
     // [openTime, open, high, low, close, volume, closeTime, quoteVol, trades, takerBuyBase, ...]
     get<Array<Array<string | number>>>(`${BINANCE}/klines?symbol=BTCUSDT&interval=1m&limit=16`),
     get<{ bids: [string, string][]; asks: [string, string][] }>(
       `${BINANCE}/depth?symbol=BTCUSDT&limit=20`,
     ),
     get<{ data?: Array<{ fundingRate?: string }> }>(OKX_FUNDING),
+    axios
+      .post<Record<string, string>>(HL_INFO, { type: 'allMids' }, { timeout: 4_000 })
+      .then((r) => r.data)
+      .catch(() => null),
   ]);
   const v: ExternalSignals = {
     binMid: null,
@@ -79,6 +86,7 @@ export async function fetchExternalSignals(nowMs = Date.now()): Promise<External
     bookImb: null,
     takerBuyRatio: null,
     funding: null,
+    hlMid: null,
   };
   if (depth?.bids?.length && depth.asks?.length) {
     const bid = Number(depth.bids[0]![0]);
@@ -103,13 +111,32 @@ export async function fetchExternalSignals(nowMs = Date.now()): Promise<External
   }
   const f = Number(funding?.data?.[0]?.fundingRate);
   if (Number.isFinite(f)) v.funding = f;
+  const hl = Number(hlMids?.BTC);
+  if (Number.isFinite(hl) && hl > 0) v.hlMid = hl;
   extCache = { atMs: nowMs, v };
   return v;
 }
 
-/** EWMA of Binance(USDT) / chain forward(USD), so the implied-value signal
- *  measures the MOVE, not the stablecoin basis. */
-let basisEwma: number | null = null;
+/** EWMA of venue price / chain forward, per venue, so the implied-value
+ *  signals measure the MOVE, not the stablecoin or perp basis. */
+const basisEwma = new Map<string, number>();
+
+function impliedUp(
+  venue: string,
+  mid: number | null,
+  snap: { forward: number; svi: import('svx-shared/types').SVIParams },
+  reference: number,
+): number | null {
+  if (mid == null || !(snap.forward > 0)) return null;
+  const ratio = mid / snap.forward;
+  const prev = basisEwma.get(venue);
+  const basis = prev == null ? ratio : prev * 0.9 + ratio * 0.1;
+  basisEwma.set(venue, basis);
+  const fwd = mid / basis;
+  const w = evalTotalVariance(Math.log(reference / fwd), snap.svi);
+  const up = binaryUpFromTotalVariance(reference, fwd, w);
+  return Number.isFinite(up) ? up : null;
+}
 
 export async function recordShadowDecisions(deps: {
   predict: PredictReader;
@@ -154,15 +181,8 @@ export async function recordShadowDecisions(deps: {
         })?.costPerContract ?? null
       );
     };
-    let binImpliedUp: number | null = null;
-    if (ext.binMid != null && snap.forward > 0) {
-      const ratio = ext.binMid / snap.forward;
-      basisEwma = basisEwma == null ? ratio : basisEwma * 0.9 + ratio * 0.1;
-      const fwd = ext.binMid / basisEwma;
-      const w = evalTotalVariance(Math.log(reference / fwd), snap.svi);
-      const up = binaryUpFromTotalVariance(reference, fwd, w);
-      if (Number.isFinite(up)) binImpliedUp = up;
-    }
+    const binImpliedUp = impliedUp('binance', ext.binMid, snap, reference);
+    const hlImpliedUp = impliedUp('hyperliquid', ext.hlMid, snap, reference);
     const ok = ledger.insertShadowDecision({
       network: suiNetwork(),
       marketId: m.id,
@@ -183,6 +203,8 @@ export async function recordShadowDecisions(deps: {
       bookImb: ext.bookImb,
       takerBuyRatio: ext.takerBuyRatio,
       funding: ext.funding,
+      hlMid: ext.hlMid,
+      hlImpliedUp,
     });
     if (ok) recorded++;
   }
@@ -236,6 +258,8 @@ export const SHADOW_SIGNALS: Record<string, (r: ShadowDecisionRow) => Pick> = {
     r.binImpliedUp == null ? null : sign(r.binImpliedUp - r.boardUp, 0.03),
   binance_lead_8pp: (r) =>
     r.binImpliedUp == null ? null : sign(r.binImpliedUp - r.boardUp, 0.08),
+  hl_lead_3pp: (r) =>
+    r.hlImpliedUp == null ? null : sign(r.hlImpliedUp - r.boardUp, 0.03),
 };
 
 export interface ShadowSignalScore {

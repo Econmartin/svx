@@ -7,6 +7,7 @@
 
 import express, { type Express, type Request, type Response } from 'express';
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
+import { scoreCrossVenue } from '../ops/cross-venue.js';
 import { suiNetwork } from '../exec/sui-client.js';
 import cors from 'cors';
 import type { LedgerStore } from '../ledger/store.js';
@@ -486,6 +487,19 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     const network = suiNetwork();
     const rows = deps.ledger.settledShadowDecisions(network, sinceMs);
     res.json({ network, decisions: rows.length, scores: scoreShadowSignals(rows) });
+  });
+
+  /**
+   * Predict vs Polymarket 5-minute BTC windows: how often buying opposite
+   * sides on the two venues cost < $1 all-in, and what those pairs realized
+   * once the venues' different settlement rules are counted. Read-only.
+   *
+   *   GET /cross-venue?sinceMs=<epoch-ms>
+   */
+  app.get('/cross-venue', (req, res) => {
+    const sinceMs = clampFloat(req.query.sinceMs, 0, Number.MAX_SAFE_INTEGER, 0);
+    const network = suiNetwork();
+    res.json({ network, ...scoreCrossVenue(deps.ledger.resolvedCrossVenuePairs(network, sinceMs)) });
   });
 
   app.get('/calibration-v2', (req, res) => {

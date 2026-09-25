@@ -252,6 +252,39 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_shadow_market_slot ON shadow_decisions(mark
 CREATE INDEX IF NOT EXISTS ix_shadow_unsettled
   ON shadow_decisions(expiry_ms) WHERE settlement_price IS NULL;
 
+/* Cross-venue pairs: the same 5-minute BTC window on Predict and on
+   Polymarket, priced at the same instant. Predict settles on Pyth spot at
+   expiry, strictly above its reference; Polymarket resolves Up when the
+   Chainlink 60s TWAP at the end is >= the start price. Both outcomes are
+   recorded so the report can count locked-profit pairs AND the windows
+   where the two rules disagree (both legs lose). Nothing trades. */
+CREATE TABLE IF NOT EXISTS cross_venue_pairs (
+  id TEXT PRIMARY KEY,
+  network TEXT NOT NULL,
+  market_id TEXT NOT NULL,
+  pm_condition_id TEXT NOT NULL,
+  slot TEXT NOT NULL,
+  expiry_ms INTEGER NOT NULL,
+  recorded_at_ms INTEGER NOT NULL,
+  ttm_ms INTEGER NOT NULL,
+  pred_reference REAL NOT NULL,
+  pred_board_up REAL NOT NULL,
+  pred_cost_up REAL,
+  pred_cost_down REAL,
+  pm_ask_up REAL,
+  pm_ask_down REAL,
+  pm_depth_up REAL,
+  pm_depth_down REAL,
+  pm_fee_rate REAL,
+  pm_fee_exponent REAL,
+  spot_mid REAL,
+  pred_outcome_up INTEGER,
+  pm_outcome_up INTEGER,
+  pred_settlement REAL,
+  resolved_at_ms INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cvp_market_slot ON cross_venue_pairs(market_id, slot);
+
 /* One-row-per-key operational state that must survive restarts: one-shot
    migration markers, the wallet-reconciliation baseline, etc. */
 CREATE TABLE IF NOT EXISTS meta (
@@ -280,6 +313,7 @@ export class LedgerStore {
     this.db.pragma('synchronous = NORMAL');
     this.db.exec(SCHEMA);
     this.ensureV2ProbeColumns();
+    this.ensureShadowColumns();
     // Backwards-compat migrations: add columns to existing DBs in-place.
     const cols = this.db
       .prepare<[], { name: string }>(`PRAGMA table_info(trades)`)
@@ -1468,14 +1502,27 @@ export class LedgerStore {
   }
 
   // ── Shadow signal decisions ───────────────────────────────────────────────
+  /** Additive: Hyperliquid inputs arrived after the table first shipped. */
+  private ensureShadowColumns(): void {
+    const cols = this.db
+      .prepare<[], { name: string }>(`PRAGMA table_info(shadow_decisions)`)
+      .all()
+      .map((r) => r.name);
+    if (!cols.includes('hl_mid')) this.db.exec(`ALTER TABLE shadow_decisions ADD COLUMN hl_mid REAL`);
+    if (!cols.includes('hl_implied_up')) {
+      this.db.exec(`ALTER TABLE shadow_decisions ADD COLUMN hl_implied_up REAL`);
+    }
+  }
+
 
   insertShadowDecision(d: ShadowDecisionInput): boolean {
     const res = this.db
       .prepare(
         `INSERT OR IGNORE INTO shadow_decisions (id, network, market_id, slot, expiry_ms,
            recorded_at_ms, ttm_ms, reference, forward, board_up, cost_up, cost_down,
-           bin_mid, bin_implied_up, mom_1m, mom_5m, mom_15m, book_imb, taker_buy_ratio, funding)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           bin_mid, bin_implied_up, mom_1m, mom_5m, mom_15m, book_imb, taker_buy_ratio, funding,
+           hl_mid, hl_implied_up)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         randomUUID(),
@@ -1498,6 +1545,8 @@ export class LedgerStore {
         d.bookImb,
         d.takerBuyRatio,
         d.funding,
+        d.hlMid ?? null,
+        d.hlImpliedUp ?? null,
       );
     return res.changes > 0;
   }
@@ -1554,6 +1603,7 @@ export class LedgerStore {
         bookImb: r.book_imb as number | null,
         takerBuyRatio: r.taker_buy_ratio as number | null,
         funding: r.funding as number | null,
+        hlImpliedUp: (r.hl_implied_up as number | null) ?? null,
         outcomeUp: Number(r.outcome_up) === 1,
       }));
   }
@@ -1562,6 +1612,127 @@ export class LedgerStore {
   pruneShadowDecisions(olderThanMs: number): number {
     return this.db
       .prepare(`DELETE FROM shadow_decisions WHERE settlement_price IS NULL AND expiry_ms < ?`)
+      .run(olderThanMs).changes;
+  }
+
+  // ── Cross-venue pairs ─────────────────────────────────────────────────────
+
+  insertCrossVenuePair(p: CrossVenuePairInput): boolean {
+    return (
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO cross_venue_pairs (id, network, market_id, pm_condition_id, slot,
+             expiry_ms, recorded_at_ms, ttm_ms, pred_reference, pred_board_up, pred_cost_up,
+             pred_cost_down, pm_ask_up, pm_ask_down, pm_depth_up, pm_depth_down, pm_fee_rate,
+             pm_fee_exponent, spot_mid)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          randomUUID(),
+          p.network,
+          p.marketId,
+          p.pmConditionId,
+          p.slot,
+          p.expiryMs,
+          p.recordedAtMs,
+          p.ttmMs,
+          p.predReference,
+          p.predBoardUp,
+          p.predCostUp,
+          p.predCostDown,
+          p.pmAskUp,
+          p.pmAskDown,
+          p.pmDepthUp,
+          p.pmDepthDown,
+          p.pmFeeRate,
+          p.pmFeeExponent,
+          p.spotMid,
+        ).changes > 0
+    );
+  }
+
+  hasCrossVenuePair(marketId: string, slot: string): boolean {
+    const row = this.db
+      .prepare<[string, string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM cross_venue_pairs WHERE market_id = ? AND slot = ?`,
+      )
+      .get(marketId, slot);
+    return (row?.c ?? 0) > 0;
+  }
+
+  /** Pairs past expiry still missing either venue's outcome. */
+  unresolvedCrossVenuePairs(nowMs: number, limit = 40): Array<{
+    marketId: string;
+    pmConditionId: string;
+    needPred: boolean;
+    needPm: boolean;
+  }> {
+    return this.db
+      .prepare<[number, number], Record<string, string | number | null>>(
+        `SELECT market_id, pm_condition_id,
+                MAX(pred_outcome_up IS NULL) AS need_pred, MAX(pm_outcome_up IS NULL) AS need_pm
+         FROM cross_venue_pairs
+         WHERE expiry_ms < ? AND (pred_outcome_up IS NULL OR pm_outcome_up IS NULL)
+         GROUP BY market_id, pm_condition_id ORDER BY MIN(expiry_ms) ASC LIMIT ?`,
+      )
+      .all(nowMs, limit)
+      .map((r) => ({
+        marketId: String(r.market_id),
+        pmConditionId: String(r.pm_condition_id),
+        needPred: Number(r.need_pred) === 1,
+        needPm: Number(r.need_pm) === 1,
+      }));
+  }
+
+  resolveCrossVenuePred(marketId: string, settlement: number, atMs: number): number {
+    return this.db
+      .prepare(
+        `UPDATE cross_venue_pairs SET pred_settlement = ?, resolved_at_ms = ?,
+           pred_outcome_up = CASE WHEN ? > pred_reference THEN 1 ELSE 0 END
+         WHERE market_id = ? AND pred_outcome_up IS NULL`,
+      )
+      .run(settlement, atMs, settlement, marketId).changes;
+  }
+
+  resolveCrossVenuePm(pmConditionId: string, up: boolean, atMs: number): number {
+    return this.db
+      .prepare(
+        `UPDATE cross_venue_pairs SET pm_outcome_up = ?, resolved_at_ms = ?
+         WHERE pm_condition_id = ? AND pm_outcome_up IS NULL`,
+      )
+      .run(up ? 1 : 0, atMs, pmConditionId).changes;
+  }
+
+  resolvedCrossVenuePairs(network: string, sinceMs = 0): CrossVenuePairRow[] {
+    return this.db
+      .prepare<[string, number], Record<string, number | string | null>>(
+        `SELECT * FROM cross_venue_pairs
+         WHERE network = ? AND pred_outcome_up IS NOT NULL AND pm_outcome_up IS NOT NULL
+           AND recorded_at_ms >= ?`,
+      )
+      .all(network, sinceMs)
+      .map((r) => ({
+        marketId: String(r.market_id),
+        slot: String(r.slot),
+        predCostUp: r.pred_cost_up as number | null,
+        predCostDown: r.pred_cost_down as number | null,
+        pmAskUp: r.pm_ask_up as number | null,
+        pmAskDown: r.pm_ask_down as number | null,
+        pmDepthUp: r.pm_depth_up as number | null,
+        pmDepthDown: r.pm_depth_down as number | null,
+        pmFeeRate: r.pm_fee_rate as number | null,
+        pmFeeExponent: r.pm_fee_exponent as number | null,
+        predOutcomeUp: Number(r.pred_outcome_up) === 1,
+        pmOutcomeUp: Number(r.pm_outcome_up) === 1,
+      }));
+  }
+
+  pruneCrossVenuePairs(olderThanMs: number): number {
+    return this.db
+      .prepare(
+        `DELETE FROM cross_venue_pairs
+         WHERE (pred_outcome_up IS NULL OR pm_outcome_up IS NULL) AND expiry_ms < ?`,
+      )
       .run(olderThanMs).changes;
   }
 
@@ -2340,6 +2511,8 @@ export interface ShadowDecisionInput {
   bookImb: number | null;
   takerBuyRatio: number | null;
   funding: number | null;
+  hlMid?: number | null;
+  hlImpliedUp?: number | null;
 }
 
 export interface ShadowDecisionRow {
@@ -2355,5 +2528,42 @@ export interface ShadowDecisionRow {
   bookImb: number | null;
   takerBuyRatio: number | null;
   funding: number | null;
+  hlImpliedUp?: number | null;
   outcomeUp: boolean;
+}
+
+export interface CrossVenuePairInput {
+  network: string;
+  marketId: string;
+  pmConditionId: string;
+  slot: string;
+  expiryMs: number;
+  recordedAtMs: number;
+  ttmMs: number;
+  predReference: number;
+  predBoardUp: number;
+  predCostUp: number | null;
+  predCostDown: number | null;
+  pmAskUp: number | null;
+  pmAskDown: number | null;
+  pmDepthUp: number | null;
+  pmDepthDown: number | null;
+  pmFeeRate: number | null;
+  pmFeeExponent: number | null;
+  spotMid: number | null;
+}
+
+export interface CrossVenuePairRow {
+  marketId: string;
+  slot: string;
+  predCostUp: number | null;
+  predCostDown: number | null;
+  pmAskUp: number | null;
+  pmAskDown: number | null;
+  pmDepthUp: number | null;
+  pmDepthDown: number | null;
+  pmFeeRate: number | null;
+  pmFeeExponent: number | null;
+  predOutcomeUp: boolean;
+  pmOutcomeUp: boolean;
 }

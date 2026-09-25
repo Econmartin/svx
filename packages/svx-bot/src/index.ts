@@ -41,6 +41,7 @@ import {
 } from './ops/calibration-v2.js';
 import { decideHarvestV2 } from './strategy/harvest-v2.js';
 import { recordShadowDecisions, resolveShadowDecisions } from './ops/shadow-signals.js';
+import { recordCrossVenuePairs, resolveCrossVenuePairs } from './ops/cross-venue.js';
 import { admissibleStrike } from './exec/ptb-v2.js';
 import {
   accountBalance,
@@ -621,6 +622,12 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
           );
           await resolveShadowDecisions({ predict, ledger }).catch((e) =>
             log.warn('svx.shadow.resolve_error', { err: errMsg(e) }),
+          );
+          await recordCrossVenuePairs({ predict, ledger }).catch((e) =>
+            log.warn('svx.cross_venue.record_error', { err: errMsg(e) }),
+          );
+          await resolveCrossVenuePairs({ predict, ledger }).catch((e) =>
+            log.warn('svx.cross_venue.resolve_error', { err: errMsg(e) }),
           );
         })
         .then(() => runHarvestV2Step({ predict, ledger, cfg, state, live }))

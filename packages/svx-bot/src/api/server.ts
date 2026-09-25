@@ -8,6 +8,7 @@
 import express, { type Express, type Request, type Response } from 'express';
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
 import { scoreCrossVenue } from '../ops/cross-venue.js';
+import { reportWatchedWallets } from '../ops/wallet-watch.js';
 import { suiNetwork } from '../exec/sui-client.js';
 import cors from 'cors';
 import type { LedgerStore } from '../ledger/store.js';
@@ -500,6 +501,18 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     const sinceMs = clampFloat(req.query.sinceMs, 0, Number.MAX_SAFE_INTEGER, 0);
     const network = suiNetwork();
     res.json({ network, ...scoreCrossVenue(deps.ledger.resolvedCrossVenuePairs(network, sinceMs)) });
+  });
+
+  /**
+   * Watched wallets: running record of the mainnet wallets whose results
+   * luck does not explain (SVX_WATCH_WALLETS overrides the list). Held
+   * positions: wins vs price-implied, z-score. Cash PnL is exact (entry
+   * cost, early-exit proceeds, settlement payouts). Read-only.
+   *
+   *   GET /watch
+   */
+  app.get('/watch', (_req, res) => {
+    res.json({ wallets: reportWatchedWallets(deps.ledger.watchedPositions()) });
   });
 
   app.get('/calibration-v2', (req, res) => {

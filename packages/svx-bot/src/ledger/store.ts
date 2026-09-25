@@ -285,6 +285,30 @@ CREATE TABLE IF NOT EXISTS cross_venue_pairs (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_cvp_market_slot ON cross_venue_pairs(market_id, slot);
 
+/* Watched wallets: every mint and early exit by a small set of mainnet
+   wallets whose results luck does not explain, keyed by the event's owner
+   (they trade through session keys, so the tx sender is not the wallet).
+   Held positions resolve against the market settlement; early exits carry
+   their net proceeds. Read-only research — nothing copies these trades. */
+CREATE TABLE IF NOT EXISTS watched_positions (
+  root_id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  market_id TEXT NOT NULL,
+  minted_at_ms INTEGER NOT NULL,
+  expiry_ms INTEGER,
+  entry_prob REAL NOT NULL,
+  quantity REAL NOT NULL,
+  cost REAL NOT NULL,
+  lower_tick TEXT NOT NULL,
+  higher_tick TEXT NOT NULL,
+  side TEXT NOT NULL,
+  exit_proceeds REAL,
+  exit_quantity REAL,
+  settlement_price REAL,
+  won INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_watched_owner ON watched_positions(owner);
+
 /* One-row-per-key operational state that must survive restarts: one-shot
    migration markers, the wallet-reconciliation baseline, etc. */
 CREATE TABLE IF NOT EXISTS meta (
@@ -1736,6 +1760,109 @@ export class LedgerStore {
       .run(olderThanMs).changes;
   }
 
+  // ── Watched wallets ───────────────────────────────────────────────────────
+
+  insertWatchedPosition(p: {
+    rootId: string;
+    owner: string;
+    marketId: string;
+    mintedAtMs: number;
+    expiryMs: number | null;
+    entryProb: number;
+    quantity: number;
+    cost: number;
+    lowerTick: string;
+    higherTick: string;
+    side: string;
+  }): boolean {
+    return (
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO watched_positions (root_id, owner, market_id, minted_at_ms,
+             expiry_ms, entry_prob, quantity, cost, lower_tick, higher_tick, side)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          p.rootId,
+          p.owner,
+          p.marketId,
+          p.mintedAtMs,
+          p.expiryMs,
+          p.entryProb,
+          p.quantity,
+          p.cost,
+          p.lowerTick,
+          p.higherTick,
+          p.side,
+        ).changes > 0
+    );
+  }
+
+  /** Early exit: accumulate net proceeds against the position root. */
+  addWatchedExit(rootId: string, proceeds: number, quantityClosed: number): number {
+    return this.db
+      .prepare(
+        `UPDATE watched_positions
+         SET exit_proceeds = COALESCE(exit_proceeds, 0) + ?,
+             exit_quantity = COALESCE(exit_quantity, 0) + ?
+         WHERE root_id = ?`,
+      )
+      .run(proceeds, quantityClosed, rootId).changes;
+  }
+
+  unresolvedWatchedMarkets(nowMs: number, limit = 40): string[] {
+    return this.db
+      .prepare<[number, number], { market_id: string }>(
+        `SELECT DISTINCT market_id FROM watched_positions
+         WHERE settlement_price IS NULL AND (expiry_ms IS NULL OR expiry_ms < ?)
+         ORDER BY minted_at_ms ASC LIMIT ?`,
+      )
+      .all(nowMs, limit)
+      .map((r) => r.market_id);
+  }
+
+  /** Resolve every watched position on a market: won iff the settlement
+   *  falls in (lower, higher] (tick 0 = −∞, pos-inf tick = +∞). */
+  resolveWatchedMarket(marketId: string, settlementPrice: number, tickSizeUsd: number): number {
+    const rows = this.db
+      .prepare<[string], { root_id: string; lower_tick: string; higher_tick: string }>(
+        `SELECT root_id, lower_tick, higher_tick FROM watched_positions
+         WHERE market_id = ? AND settlement_price IS NULL`,
+      )
+      .all(marketId);
+    const upd = this.db.prepare(
+      `UPDATE watched_positions SET settlement_price = ?, won = ? WHERE root_id = ?`,
+    );
+    const POS_INF = (1n << 30n) - 1n;
+    for (const r of rows) {
+      const lo = BigInt(r.lower_tick);
+      const hi = BigInt(r.higher_tick);
+      const above = lo === 0n || settlementPrice > Number(lo) * tickSizeUsd;
+      const below = hi === POS_INF || settlementPrice <= Number(hi) * tickSizeUsd;
+      upd.run(settlementPrice, above && below ? 1 : 0, r.root_id);
+    }
+    return rows.length;
+  }
+
+  watchedPositions(owner?: string): WatchedPositionRow[] {
+    const sql = `SELECT * FROM watched_positions ${owner ? 'WHERE owner = ?' : ''}
+                 ORDER BY minted_at_ms ASC`;
+    const stmt = this.db.prepare<unknown[], Record<string, number | string | null>>(sql);
+    return (owner ? stmt.all(owner) : stmt.all()).map((r) => ({
+      owner: String(r.owner),
+      marketId: String(r.market_id),
+      mintedAtMs: Number(r.minted_at_ms),
+      expiryMs: r.expiry_ms == null ? null : Number(r.expiry_ms),
+      entryProb: Number(r.entry_prob),
+      quantity: Number(r.quantity),
+      cost: Number(r.cost),
+      side: String(r.side),
+      exitProceeds: r.exit_proceeds == null ? null : Number(r.exit_proceeds),
+      exitQuantity: r.exit_quantity == null ? null : Number(r.exit_quantity),
+      won: r.won == null ? null : Number(r.won) === 1,
+    }));
+  }
+
   butterflyStats(): {
     scans: number;
     violations: number;
@@ -2566,4 +2693,18 @@ export interface CrossVenuePairRow {
   pmFeeExponent: number | null;
   predOutcomeUp: boolean;
   pmOutcomeUp: boolean;
+}
+
+export interface WatchedPositionRow {
+  owner: string;
+  marketId: string;
+  mintedAtMs: number;
+  expiryMs: number | null;
+  entryProb: number;
+  quantity: number;
+  cost: number;
+  side: string;
+  exitProceeds: number | null;
+  exitQuantity: number | null;
+  won: boolean | null;
 }

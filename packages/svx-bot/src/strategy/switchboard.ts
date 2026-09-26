@@ -6,8 +6,13 @@
  * side this signal picks, at the market's reference strike, at this
  * checkpoint"), scored exactly as the shadow scoreboard shows it:
  *
- *   ON   when its profit per $1 contract (after fees) is above zero
- *   OFF  when it is zero or below
+ *   ON   when its profit per $1 contract (after fees) is above +2¢
+ *   OFF  when it falls to zero or below
+ *
+ * Between 0 and +2¢ a strategy keeps whatever state it had: it needs a
+ * clear margin to switch on, then trades until it is actually losing. This
+ * stops strategies hovering around zero from flicking on after one lucky
+ * decision (taker_flow, 2026-09-26: on at +0.2¢, two losses, off again).
  *
  * Re-scored every few minutes, so a strategy switches off as soon as its
  * average turns red and back on when it turns green again. Every
@@ -20,6 +25,10 @@ import { log } from '../util/log.js';
 
 export const SWITCHBOARD = {
   reevaluateMs: 5 * 60_000,
+  /** Profit per $1 contract needed to switch ON (USD). */
+  onAbove: 0.02,
+  /** Switch OFF at or below this (USD per contract). */
+  offAtOrBelow: 0,
   // Per-trade size cap and a daily loss stop; no cap on how many strategies,
   // positions or trades run — every green strategy trades every signal.
   maxCostUsd: 2.5,
@@ -67,8 +76,15 @@ export function evaluateSwitchboard(
   );
   const entries: SwitchEntry[] = scores.map((s) => {
     const key = `${s.signal}@${s.slot}`;
-    const status: SwitchStatus = s.pnlPerContract > 0 ? 'on' : 'off';
     const before = prev.get(key);
+    const status: SwitchStatus =
+      before?.status === 'on'
+        ? s.pnlPerContract > SWITCHBOARD.offAtOrBelow
+          ? 'on'
+          : 'off'
+        : s.pnlPerContract > SWITCHBOARD.onAbove
+          ? 'on'
+          : 'off';
     if (before && before.status !== status) {
       log.info('svx.switchboard.switch', {
         strategy: key,

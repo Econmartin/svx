@@ -62,6 +62,23 @@ describe('switchboard: green on, red off', () => {
     expect(status('always_up@t50s', 30)).toBe('on');
   });
 
+  it('needs more than +2c to switch on, then stays on until it is losing', () => {
+    // always_up at 97c all-in: each win nets +3c, each loss −97c.
+    const at = (i: number, up: boolean) => {
+      ledger.insertShadowDecision(d(i, { costUp: 0.97 }));
+      settle(i, up);
+    };
+    at(1, true); // +3c → above +2c → on
+    expect(status('always_up@t50s', 10)).toBe('on');
+    // Nudge the average into (0, +2c): still on (hysteresis).
+    // (mom_1m_follow first sees data on this row: its only decision, +0.5c.)
+    ledger.insertShadowDecision(d(2, { costUp: 0.995, mom1m: 0.01 })); // +0.5c win
+    settle(2, true);
+    expect(status('always_up@t50s', 20)).toBe('on'); // avg +1.75c: stays on
+    // Never been on and only +0.5c: below the +2c bar, so it stays off.
+    expect(status('mom_1m_follow@t50s', 20)).toBe('off');
+  });
+
   it('has no cap on how many strategies run, and scopes them to their checkpoint', () => {
     ledger.insertShadowDecision(d(1, { mom1m: 0.01, mom5m: 0.01, mom15m: 0.01 }));
     settle(1, true);

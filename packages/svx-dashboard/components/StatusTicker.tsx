@@ -59,6 +59,13 @@ export function StatusTicker() {
         tone: pnl24h > 0 ? 'win' : pnl24h < 0 ? 'loss' : 'muted',
       });
       items.push({ label: 'Open', value: String(openLive) });
+      if ((status.predictUnclaimedUsdc ?? 0) > 0.005) {
+        items.push({
+          label: 'Unclaimed',
+          value: `$${formatUsdc(status.predictUnclaimedUsdc!)}`,
+          tone: 'muted',
+        });
+      }
       if (status.polyExecutionEnabled && status.polyPusdBalance != null) {
         items.push({ label: 'pUSD', value: formatUsdc(status.polyPusdBalance) });
       }

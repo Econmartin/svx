@@ -64,6 +64,8 @@ async function main(): Promise<void> {
       return accountV2();
     case 'new-key':
       return newKey();
+    case 'claim-settled':
+      return claimSettled(rest);
     case 'withdraw-v1':
       return withdrawV1(rest);
     default:
@@ -339,6 +341,42 @@ Then clear this terminal (it holds the key in scrollback).
 `);
 }
 
+/**
+ * Claim every settled position into the Predict account (winners pay out,
+ * losers just close). The running bot does this every 30s; this is the
+ * manual version. --dry reports what is owed without submitting.
+ *
+ *   svx claim-settled [--dry]
+ */
+async function claimSettled(rest: string[]): Promise<void> {
+  const cfg = loadConfig();
+  const { keypair, address } = loadOperatorKey();
+  const ledger = new LedgerStore(path.join(path.resolve(cfg.dataDir), 'svx.sqlite'));
+  const { claimSettledPositions } = await import('./exec/claim-settled.js');
+  const before = await accountBalance(address);
+  const r = await claimSettledPositions({
+    sui: makeSuiClient(),
+    keypair,
+    owner: address,
+    ledger,
+    dry: rest.includes('--dry'),
+  });
+  const after = await accountBalance(address);
+  console.log(
+    JSON.stringify({
+      msg: 'svx.claim_settled',
+      network: suiNetwork(),
+      dry: rest.includes('--dry'),
+      claimed: r.claimed,
+      paidUsdc: r.paidUsdc,
+      stillUnclaimedUsdc: r.unclaimedUsdc,
+      accountBefore: before,
+      accountAfter: after,
+    }),
+  );
+  ledger.close();
+}
+
 /** Deposits above this need --i-know-what-im-doing (start small until the
  *  mainnet path is proven bug-free). */
 const DEPOSIT_SAFETY_CAP_USDC = 50;
@@ -492,6 +530,8 @@ Commands:
                     only; --notional N dUSDC per rung (default 2).
   supply-plp        Supply dUSDC into the PLP vault (returns Coin<PLP> share
                     tokens). --amount N (default 5); --dry to plan only.
+  claim-settled     Claim settled Predict positions into the account
+                    (--dry: report what is owed without submitting).
   new-key           Generate a fresh bot operator key (prints address +
                     private key; writes nothing, calls nothing).
   account-v2        Show the operator's Predict account (derived id, custody

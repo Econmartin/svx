@@ -6,6 +6,7 @@
  */
 
 import express, { type Express, type Request, type Response } from 'express';
+import { unclaimedSummary } from '../exec/claim-settled.js';
 import { huntState, recentFadeEvals } from '../ops/fade-hunt.js';
 import { fadeSpikeSettings } from '../strategy/fade-spike.js';
 import { SWITCHBOARD, evaluateSwitchboard } from '../strategy/switchboard.js';
@@ -163,6 +164,10 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       // realizedPnlUsdc above blends the July V1 poly-arb era with whatever
       // trades today; consumers should sum the rows they mean.
       strategyPnl: deps.ledger.strategyPnlBreakdown(since24h),
+      // Settled Predict winners not yet claimed into the account (USD), from
+      // the last claim sweep. Non-zero for long = payouts are not landing.
+      predictUnclaimedUsdc: unclaimedSummary()?.unclaimedUsdc ?? null,
+      predictUnclaimedAtMs: unclaimedSummary()?.checkedAtMs ?? null,
       // Cost sitting in open (unsettled) positions. NOT a mark-to-market —
       // the old field here was a hardcoded `unrealizedPnlUsdc: 0`, which
       // claimed a flat book while money was at risk.

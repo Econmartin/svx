@@ -63,10 +63,13 @@ import {
 } from './strategy/fade-spike.js';
 import { isKilled } from './ops/kill.js';
 import { recordFadeEval, refreshHunt } from './ops/fade-hunt.js';
+import { claimSettledPositions } from './exec/claim-settled.js';
 import { pollWatchedWallets } from './ops/wallet-watch.js';
 
 /** Wallet-watch cadence (the 10s calibration tick is too chatty for it). */
 let lastWatchPollMs = 0;
+/** Settled-position claim sweep cadence. */
+let lastClaimSweepMs = 0;
 import { admissibleStrike } from './exec/ptb-v2.js';
 import {
   accountBalance,
@@ -655,6 +658,15 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
             await resolveCrossVenuePairs({ predict, ledger }).catch((e) =>
               log.warn('svx.cross_venue.resolve_error', { err: errMsg(e) }),
             );
+          }
+          if (live && Date.now() - lastClaimSweepMs >= 30_000) {
+            lastClaimSweepMs = Date.now();
+            await claimSettledPositions({
+              sui: live.sui,
+              keypair: live.keypair,
+              owner: live.operatorAddress,
+              ledger,
+            }).catch((e) => log.warn('svx.claim.sweep_error', { err: errMsg(e) }));
           }
           if (Date.now() - lastWatchPollMs >= 30_000) {
             lastWatchPollMs = Date.now();
@@ -3657,16 +3669,10 @@ async function reconcileSettlements(
       // 2026-07-30: wrapper balance rose with no redeem call). Calling the
       // retired V1 redeem builder for these rows produced a TypeMismatch on
       // every loop, so book them as redeemed instead of submitting anything.
-      if (predictV2) {
-        ledger.markRedeemed(t.id, 'auto_delivered_v2');
-        log.info('svx.redeem.auto_delivered', {
-          tradeId: t.id,
-          oracleId: t.oracleId,
-          payoutUsdc: t.payoutUsdc,
-          note: 'V2 settlement credits the account directly; no redeem tx needed',
-        });
-        continue;
-      }
+      // V2 winners are collected by the claim sweep (exec/claim-settled.ts),
+      // which marks the row with the real claim digest once it executes.
+      // (Pre-launch testnet auto-credited winners; mainnet does not.)
+      if (predictV2) continue;
       try {
         const tx = buildRedeemTx({
           oracleId: t.oracleId,

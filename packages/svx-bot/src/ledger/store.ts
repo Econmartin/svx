@@ -2225,6 +2225,20 @@ export class LedgerStore {
     );
   }
 
+  /**
+   * Live trades on a market whose payout has not been collected by a real
+   * claim yet: never redeemed, or only marked 'auto_delivered_v2' (the
+   * pre-launch assumption that V2 auto-credited winners; false on mainnet).
+   */
+  openOrUnredeemedLiveTradesFor(marketId: string): TradeRecord[] {
+    if (!/^0x[0-9a-fA-F]+$/.test(marketId)) return [];
+    return this.tradeRows(
+      `WHERE oracle_id = '${marketId}' AND mode = 'live'
+         AND (redeem_tx_digest IS NULL OR redeem_tx_digest = 'auto_delivered_v2')
+       ORDER BY ts_ms ASC`,
+    );
+  }
+
   markRedeemed(tradeId: string, redeemTxDigest: string): void {
     this.db
       .prepare(`UPDATE trades SET redeem_tx_digest = ? WHERE id = ?`)

@@ -396,3 +396,42 @@ export async function buildMintTx(
     },
   );
 }
+
+// ── settled positions ───────────────────────────────────────────────────────
+
+/** Every open position (market + order id) held by the owner's account. */
+export async function openPositions(
+  owner: string,
+): Promise<Array<{ marketId: string; orderId: bigint }>> {
+  const rows = await predict().read.positions(owner);
+  return rows.map((r) => ({ marketId: r.marketId, orderId: BigInt(r.orderId) }));
+}
+
+/** What a settled order pays: the minted quantity if the settlement lands in
+ *  its (lower, higher] range, else 0 (tick 0 = −∞, POS_INF_TICK = +∞). */
+export function settledOrderPayout(
+  orderId: bigint,
+  tickSizeRaw: bigint,
+  settlementPrice: number,
+): { payout: number; quantity: number } {
+  const range = sdkCost.decodeOrderRange(orderId);
+  const { lower, upper } = sdkCost.orderStrikes(range, tickSizeRaw);
+  const quantity = Number(range.quantity) / 1e6;
+  const won =
+    (lower == null || settlementPrice > lower) && (upper == null || settlementPrice <= upper);
+  return { payout: won ? quantity : 0, quantity };
+}
+
+/** Claim a settled order in full (the deployed entrypoint takes no quantity). */
+export async function buildClaimSettledTx(
+  owner: string,
+  market: { marketId: string; expiryMs: number; underlying?: string },
+  orderId: bigint,
+): Promise<Transaction> {
+  return predict().tx.claimSettled(
+    owner,
+    { underlying: market.underlying ?? 'BTC', expiryMs: market.expiryMs, marketId: market.marketId },
+    { orderId },
+  );
+}
+

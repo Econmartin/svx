@@ -85,3 +85,35 @@ describe('watchedWallets()', () => {
     expect(watchedWallets()).toEqual([]);
   });
 });
+
+describe('claimable live trades lookup', () => {
+  it('returns live trades not yet claimed (incl. the old auto_delivered marker) for a market', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svx-claim-'));
+    const ledger = new LedgerStore(path.join(tmp, 'svx.sqlite'));
+    const base = {
+      signalId: 'x@t50s',
+      timestampMs: 1,
+      oracleId: '0xabc',
+      underlyingAsset: 'BTC',
+      expiryMs: 2,
+      strike: 1,
+      direction: 'up' as const,
+      quantityDusdc: 1.78,
+      costPrice: 0.6,
+      costUsdc: 1.39,
+      settled: false,
+      strategy: 'auto_shadow' as const,
+    };
+    const a = ledger.insertTrade({ ...base, mode: 'live' });
+    const b = ledger.insertTrade({ ...base, mode: 'live' });
+    ledger.insertTrade({ ...base, mode: 'paper' });
+    ledger.markRedeemed(b, 'auto_delivered_v2');
+    expect(ledger.openOrUnredeemedLiveTradesFor('0xabc').map((t) => t.id).sort()).toEqual([a, b].sort());
+    ledger.markRedeemed(a, 'RealDigest111');
+    expect(ledger.openOrUnredeemedLiveTradesFor('0xabc').map((t) => t.id)).toEqual([b]);
+    expect(ledger.openOrUnredeemedLiveTradesFor("0xabc' OR 1=1 --")).toEqual([]);
+    ledger.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+});
+

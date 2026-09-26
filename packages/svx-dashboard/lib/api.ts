@@ -69,6 +69,8 @@ export interface BotStatus {
   totalBalanceUsdc?: number;
   v2WrapperId?: string | null;
   v2WrapperBalanceUsdc?: number | null;
+  /** Settled Predict winners not yet claimed into the account (USD). */
+  predictUnclaimedUsdc?: number | null;
   v2WrapperBalanceAtMs?: number | null;
   /** Operator SUI gas (testnet) — live mints fail silently when it runs dry. */
   operatorSuiGas?: number | null;

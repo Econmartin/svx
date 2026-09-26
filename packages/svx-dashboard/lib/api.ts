@@ -773,6 +773,12 @@ export interface SwitchboardState {
     slot: string;
     n: number;
     pnlPerContract: number;
+    /** Last up-to-10 shadow results, oldest first (1 won, 0 lost). */
+    recent?: number[];
+    /** +n wins / −n losses in a row, most recent. */
+    streak?: number;
+    /** Average profit per contract over the last up-to-20 decisions. */
+    recentPnl?: number;
     status: 'on' | 'off';
     sinceMs: number;
   }>;

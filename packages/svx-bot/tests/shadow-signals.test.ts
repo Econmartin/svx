@@ -132,3 +132,28 @@ describe('scoreShadowSignals', () => {
   });
 });
 
+describe('scoreShadowSignals recent form', () => {
+  const r = (outcomeUp: boolean) => ({
+    slot: 't50s', ttmMs: 50_000, boardUp: 0.5, costUp: 0.6, costDown: 0.6,
+    binImpliedUp: null, mom1m: null, mom5m: null, mom15m: null, bookImb: null,
+    takerBuyRatio: null, funding: null, outcomeUp,
+  });
+
+  it('reports the last results in time order, the current streak and the recent average', () => {
+    // always_up: W W L L L (in time order)
+    const rows = [r(true), r(true), r(false), r(false), r(false)];
+    const s = scoreShadowSignals(rows).find((x) => x.signal === 'always_up' && x.slot === 't50s')!;
+    expect(s.recent).toEqual([1, 1, 0, 0, 0]);
+    expect(s.streak).toBe(-3);
+    expect(s.recentPnl).toBeCloseTo((2 * 0.4 - 3 * 0.6) / 5, 10);
+    const d = scoreShadowSignals(rows).find((x) => x.signal === 'always_down' && x.slot === 't50s')!;
+    expect(d.streak).toBe(3);
+  });
+
+  it('keeps only the last 10 dots', () => {
+    const rows = Array.from({ length: 25 }, (_, i) => r(i % 2 === 0));
+    const s = scoreShadowSignals(rows).find((x) => x.signal === 'always_up' && x.slot === 't50s')!;
+    expect(s.recent).toHaveLength(10);
+  });
+});
+

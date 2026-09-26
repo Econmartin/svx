@@ -334,6 +334,21 @@ export interface ShadowSignalScore {
   pnlPerContract: number;
   /** Standard error of pnlPerContract (per-decision payout − cost). */
   pnlStdErr: number;
+  /** Last up-to-10 results, oldest first: 1 = won, 0 = lost. */
+  recent: number[];
+  /** Current run at the end: +n = n wins in a row, −n = n losses in a row. */
+  streak: number;
+  /** Average profit per contract over the last up-to-20 decisions. */
+  recentPnl: number;
+}
+
+/** +n wins or −n losses in a row at the end of the sequence. */
+function streakOf(seq: Array<{ won: boolean }>): number {
+  if (!seq.length) return 0;
+  const last = seq[seq.length - 1]!.won;
+  let n = 0;
+  for (let i = seq.length - 1; i >= 0 && seq[i]!.won === last; i--) n++;
+  return last ? n : -n;
 }
 
 export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore[] {
@@ -345,6 +360,7 @@ export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore
       let hits = 0;
       let cost = 0;
       let sumSq = 0; // of per-decision pnl, for the standard error
+      const tail: Array<{ won: boolean; pnl: number }> = []; // last 20, time order
       for (const r of rows) {
         if (slot !== 'all' && r.slot !== slot) continue;
         const pick = fn(r);
@@ -356,6 +372,8 @@ export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore
         if (won) hits++;
         const pnl = (won ? 1 : 0) - c;
         sumSq += pnl * pnl;
+        tail.push({ won, pnl });
+        if (tail.length > 20) tail.shift();
       }
       if (!n) continue;
       const hitRate = hits / n;
@@ -370,6 +388,9 @@ export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore
         avgCost: cost / n,
         pnlPerContract: mean,
         pnlStdErr: Math.sqrt(variance / n),
+        recent: tail.slice(-10).map((x) => (x.won ? 1 : 0)),
+        streak: streakOf(tail),
+        recentPnl: tail.reduce((a, x) => a + x.pnl, 0) / tail.length,
       });
     }
   }

@@ -37,6 +37,9 @@ const entry = (signal: string, slot: string, status: 'on' | 'off', pnl = 0.05): 
   slot,
   n: 10,
   pnlPerContract: status === 'on' ? pnl : -pnl,
+  recent: [],
+  streak: 0,
+  recentPnl: 0,
   status,
   sinceMs: 0,
 });

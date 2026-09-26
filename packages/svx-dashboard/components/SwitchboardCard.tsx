@@ -73,6 +73,7 @@ export function SwitchboardCard() {
                   <TableHead>Checkpoint</TableHead>
                   <TableHead>Decisions</TableHead>
                   <TableHead>Per $1 contract</TableHead>
+                  <TableHead>Recent</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead>Since</TableHead>
                 </TableRow>
@@ -86,6 +87,14 @@ export function SwitchboardCard() {
                     <TableCell className={cn('font-mono', s.pnlPerContract > 0 ? 'text-win' : 'text-loss')}>
                       {s.pnlPerContract >= 0 ? '+' : '−'}
                       {Math.abs(s.pnlPerContract * 100).toFixed(1)}¢
+                    </TableCell>
+                    <TableCell>
+                      <RecentForm
+                        recent={s.recent ?? []}
+                        streak={s.streak ?? 0}
+                        recentPnl={s.recentPnl}
+                        overall={s.pnlPerContract}
+                      />
                     </TableCell>
                     <TableCell>
                       <span
@@ -116,3 +125,58 @@ export function SwitchboardCard() {
     </Card>
   );
 }
+
+/**
+ * Last results as dots (oldest → newest), the current streak, and the
+ * direction of travel: the last-20 average against the overall average.
+ */
+function RecentForm({
+  recent,
+  streak,
+  recentPnl,
+  overall,
+}: {
+  recent: number[];
+  streak: number;
+  recentPnl?: number;
+  overall: number;
+}) {
+  if (!recent.length) return <span className="text-muted">—</span>;
+  const delta = recentPnl != null ? recentPnl - overall : 0;
+  const trend =
+    recentPnl == null || Math.abs(delta) < 0.01
+      ? { glyph: '→', cls: 'text-muted', label: 'steady' }
+      : delta > 0
+        ? { glyph: '↑', cls: 'text-win', label: 'improving' }
+        : { glyph: '↓', cls: 'text-loss', label: 'worsening' };
+  const streakLabel =
+    streak <= -2 ? `${-streak} losses in a row` : streak >= 2 ? `${streak} wins in a row` : null;
+  return (
+    <div className="flex items-center gap-2 justify-end">
+      <span className="inline-flex items-center gap-[3px]" aria-label={`last ${recent.length} results`}>
+        {recent.map((w, i) => (
+          <span
+            key={i}
+            className={cn('h-2 w-2 rounded-full', w ? 'bg-win' : 'bg-loss', i < recent.length - 5 && 'opacity-60')}
+          />
+        ))}
+      </span>
+      <span
+        className={cn('text-[15px] leading-none font-semibold', trend.cls)}
+        title={
+          recentPnl != null
+            ? `${trend.label}: last 20 ${recentPnl >= 0 ? '+' : '−'}${Math.abs(recentPnl * 100).toFixed(1)}¢ vs overall ${overall >= 0 ? '+' : '−'}${Math.abs(overall * 100).toFixed(1)}¢`
+            : undefined
+        }
+      >
+        {trend.glyph}
+      </span>
+      {streakLabel && (
+        <span className={cn('text-[12px] whitespace-nowrap', streak < 0 ? 'text-loss' : 'text-win')}>
+          {streakLabel}
+        </span>
+      )}
+    </div>
+  );
+}
+

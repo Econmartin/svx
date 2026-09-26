@@ -43,6 +43,12 @@ export interface SwitchEntry {
   slot: string;
   n: number;
   pnlPerContract: number;
+  /** Last up-to-10 shadow results, oldest first (1 won, 0 lost). */
+  recent: number[];
+  /** +n wins / −n losses in a row, most recent. */
+  streak: number;
+  /** Average profit per contract over the last up-to-20 decisions. */
+  recentPnl: number;
   status: SwitchStatus;
   /** When the current status began. */
   sinceMs: number;
@@ -99,6 +105,9 @@ export function evaluateSwitchboard(
       slot: s.slot,
       n: s.n,
       pnlPerContract: s.pnlPerContract,
+      recent: s.recent,
+      streak: s.streak,
+      recentPnl: s.recentPnl,
       status,
       sinceMs: before && before.status === status ? before.sinceMs : nowMs,
     };

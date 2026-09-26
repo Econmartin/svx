@@ -1619,7 +1619,8 @@ export class LedgerStore {
     return this.db
       .prepare<[string, number], Record<string, number | string | null>>(
         `SELECT * FROM shadow_decisions
-         WHERE network = ? AND settlement_price IS NOT NULL AND recorded_at_ms >= ?`,
+         WHERE network = ? AND settlement_price IS NOT NULL AND recorded_at_ms >= ?
+         ORDER BY recorded_at_ms ASC`,
       )
       .all(network, sinceMs)
       .map((r) => ({

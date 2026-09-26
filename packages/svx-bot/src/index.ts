@@ -46,11 +46,19 @@ import {
   recordCrossVenuePairs,
   resolveCrossVenuePairs,
 } from './ops/cross-venue.js';
-import type { ShadowDecisionEvent } from './ops/shadow-signals.js';
+import { SHADOW_SIGNALS, type ShadowDecisionEvent } from './ops/shadow-signals.js';
+import type { ShadowDecisionRow } from './ledger/store.js';
+import {
+  SWITCHBOARD,
+  enabledAt,
+  evaluateSwitchboard,
+  strategyTagFor,
+  type SwitchEntry,
+} from './strategy/switchboard.js';
+import { suiNetwork } from './exec/sui-client.js';
 import {
   fadeSpikeQuantity,
   fadeSpikeSettings,
-  fadeSpikeSide,
   fadeSpikeWhyNot,
 } from './strategy/fade-spike.js';
 import { isKilled } from './ops/kill.js';
@@ -666,7 +674,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
 
   // Fade-spike radar: live per-market state for the dashboard (read-only).
   let huntTimer: NodeJS.Timeout | undefined;
-  if (!opts.onceOnly && cfg.predictV2 && fadeSpikeSettings().enabled) {
+  if (!opts.onceOnly && cfg.predictV2) {
     let huntInFlight = false;
     huntTimer = setInterval(() => {
       if (huntInFlight) return;
@@ -2987,92 +2995,138 @@ async function runVolArbStep(args: {
  * the trade row is a normal Predict trade tagged with the strategy.
  */
 /**
- * Fade-spike executor: runs on every freshly recorded shadow decision. Paper
- * by default (fee-inclusive cost from the market's own fee policy); live only
- * with SVX_FADE_SPIKE_LIVE=true, PAPER_TRADING=false, a loaded operator key,
- * and neither the kill switch nor a ledger pause set. Every entry passes the
- * per-market dedupe, max-open, trades-per-day and daily-loss gates.
+ * Switchboard executor: runs on every freshly recorded shadow decision and
+ * trades whichever strategies the switchboard has switched ON for that
+ * checkpoint (strategy/switchboard.ts — green on the shadow scoreboard, off
+ * when red). Paper while PAPER_TRADING is on; live otherwise, as
+ * long as the operator key is loaded and neither the kill switch nor a ledger
+ * pause is set. All switched-on strategies share one risk budget.
+ *
+ * It also records the fade-spike rule's verdict at the radar's checkpoint so
+ * the dashboard can explain every window, traded or not.
  */
-let fadeSpikeLiveBlockLoggedAt = 0;
+const AUTO_STRATEGIES = ['fade_spike', 'auto_shadow'] as const;
+let autoLiveBlockLoggedAt = 0;
 export async function runFadeSpikeDecision(
   ev: ShadowDecisionEvent,
-  deps: { ledger: LedgerStore; cfg: SvxConfig; live?: LiveContext },
+  deps: {
+    ledger: LedgerStore;
+    cfg: SvxConfig;
+    live?: LiveContext;
+    /** Test hook: override the switchboard's current state. */
+    switchboard?: SwitchEntry[];
+  },
 ): Promise<void> {
-  const s = fadeSpikeSettings();
-  if (!s.enabled) return;
   const { ledger, cfg, live } = deps;
   const d = ev.decision;
-  const rowForRule = {
+  const rule = fadeSpikeSettings();
+  const row: ShadowDecisionRow = {
+    slot: d.slot,
     ttmMs: d.ttmMs,
-    binVsRef: d.binVsRef ?? null,
-    mom30s: d.mom30s ?? null,
     boardUp: d.boardUp,
+    costUp: d.costUp,
+    costDown: d.costDown,
+    binImpliedUp: d.binImpliedUp,
+    mom1m: d.mom1m,
+    mom5m: d.mom5m,
+    mom15m: d.mom15m,
+    bookImb: d.bookImb,
+    takerBuyRatio: d.takerBuyRatio,
+    funding: d.funding,
+    hlImpliedUp: d.hlImpliedUp ?? null,
+    mom30s: d.mom30s ?? null,
+    binVsRef: d.binVsRef ?? null,
+    outcomeUp: false, // unknown yet; signals never read it
   };
   const note = (outcome: string, detail: string) =>
     recordFadeEval({ marketId: d.marketId, slot: d.slot, atMs: Date.now(), outcome, detail });
-  // Only the configured checkpoints trade (default: ~50s before expiry);
-  // the others stay shadow-only for the timing study.
-  if (!s.tradeSlots.includes(d.slot)) return;
-  const side = fadeSpikeSide(rowForRule, s.minMoveUsd, s.maxFarPrice);
-  if (!side) {
-    note('no_signal', fadeSpikeWhyNot(rowForRule, s.minMoveUsd, s.maxFarPrice) ?? 'no signal');
+
+  const entries =
+    deps.switchboard ?? evaluateSwitchboard(ledger, suiNetwork());
+  const candidates = enabledAt(entries, d.slot);
+  const radarSlot = d.slot === 't50s';
+  if (!candidates.length) {
+    if (radarSlot) {
+      const why = fadeSpikeWhyNot(row, rule.minMoveUsd, rule.maxFarPrice);
+      note('no_signal', why ?? 'fade rule fired, but fade spike is red on the scoreboard (off)');
+    }
     return;
   }
-  const farPrice = side === 'up' ? d.boardUp : 1 - d.boardUp;
+  // Most profitable switched-on strategy that picks a side here (one
+  // position per market, so conflicting picks cannot both be bought).
+  let chosen: { entry: SwitchEntry; side: 'up' | 'down' } | null = null;
+  for (const entry of candidates) {
+    const pick = SHADOW_SIGNALS[entry.signal]?.(row) ?? null;
+    if (pick) {
+      chosen = { entry, side: pick };
+      break;
+    }
+  }
+  if (!chosen) {
+    if (radarSlot) {
+      note('no_signal', fadeSpikeWhyNot(row, rule.minMoveUsd, rule.maxFarPrice) ?? 'no signal');
+    }
+    return;
+  }
+  const { entry, side } = chosen;
+  const strategy = strategyTagFor(entry.signal);
+  const price = side === 'up' ? d.boardUp : 1 - d.boardUp;
   const costPerContract = side === 'up' ? d.costUp : d.costDown;
   const SKIP_WORDS: Record<string, string> = {
     no_fee_quote: 'no fee quote for this market',
+    price_out_of_bounds: `side priced ${(price * 100).toFixed(1)}¢, outside Predict's 2–97¢ entry band`,
     already_open_for_market: 'already holding this market',
     max_open: 'max open positions reached',
     daily_loss_limit: 'daily loss limit hit — standing down',
     max_trades_per_day: 'daily trade cap reached',
-    clip_above_cost_cap: `smallest clip costs more than the $${s.maxCostUsd} cap`,
+    clip_above_cost_cap: `smallest clip costs more than the $${SWITCHBOARD.maxCostUsd} cap`,
   };
   const skip = (reason: string) => {
-    note('skipped', SKIP_WORDS[reason] ?? reason);
-    log.info('svx.fade_spike.skip', { marketId: d.marketId, side, farPrice, reason });
+    note('skipped', `${entry.key}: ${SKIP_WORDS[reason] ?? reason}`);
+    log.info('svx.auto.skip', { marketId: d.marketId, strategy: entry.key, side, price, reason });
   };
   if (costPerContract == null) return skip('no_fee_quote');
+  if (price < 0.02 || price > 0.97) return skip('price_out_of_bounds');
 
   const nowMs = Date.now();
   const DAY = 24 * 3600_000;
-  if (ledger.openTrades().some((t) => t.oracleId === d.marketId && t.strategy === 'fade_spike')) {
-    return skip('already_open_for_market');
-  }
-  if (ledger.countOpenStrategyTrades('fade_spike') >= s.maxOpen) return skip('max_open');
-  if (ledger.realizedStrategyPnlSince('fade_spike', nowMs - DAY) <= -s.dailyLossLimitUsd) {
-    return skip('daily_loss_limit');
-  }
+  const isAuto = (t: { strategy?: string }) =>
+    (AUTO_STRATEGIES as readonly string[]).includes(t.strategy ?? '');
+  const open = ledger.openTrades().filter(isAuto);
+  if (open.some((t) => t.oracleId === d.marketId)) return skip('already_open_for_market');
+  if (open.length >= SWITCHBOARD.maxOpen) return skip('max_open');
+  const realized24h = AUTO_STRATEGIES.reduce(
+    (a, st) => a + ledger.realizedStrategyPnlSince(st, nowMs - DAY),
+    0,
+  );
+  if (realized24h <= -SWITCHBOARD.dailyLossLimitUsd) return skip('daily_loss_limit');
   const trades24h = ledger
     .strategyPnlBreakdown(nowMs - DAY)
-    .filter((r) => r.strategy === 'fade_spike')
+    .filter(isAuto)
     .reduce((a, r) => a + r.trades24h, 0);
-  if (trades24h >= s.maxTradesPerDay) return skip('max_trades_per_day');
-  const quantity = fadeSpikeQuantity(farPrice, costPerContract, s.maxCostUsd);
+  if (trades24h >= SWITCHBOARD.maxTradesPerDay) return skip('max_trades_per_day');
+  const quantity = fadeSpikeQuantity(price, costPerContract, SWITCHBOARD.maxCostUsd);
   if (quantity == null) return skip('clip_above_cost_cap');
 
   let mode: 'paper' | 'live' = 'paper';
   let qty = quantity;
   let costUsdc = quantity * costPerContract;
-  let costPrice = farPrice;
+  let costPrice = price;
   let txDigest: string | undefined;
-
-  const blocked = !cfg.paperTrading
-    ? !live
+  const blocked = cfg.paperTrading
+    ? 'paper_trading'
+    : !live
       ? 'no_operator_key'
       : isKilled()
         ? 'kill_switch'
         : ledger.getPause().paused
           ? 'ledger_paused'
-          : null
-    : 'paper_trading';
-  if (s.live && blocked) {
-    if (nowMs - fadeSpikeLiveBlockLoggedAt > 10 * 60_000) {
-      fadeSpikeLiveBlockLoggedAt = nowMs;
-      log.warn('svx.fade_spike.live_blocked', { reason: blocked, note: 'recording paper instead' });
-    }
+          : null;
+  if (blocked && blocked !== 'paper_trading' && nowMs - autoLiveBlockLoggedAt > 10 * 60_000) {
+    autoLiveBlockLoggedAt = nowMs;
+    log.warn('svx.auto.live_blocked', { reason: blocked, note: 'recording paper instead' });
   }
-  if (s.live && !blocked && live) {
+  if (!blocked && live) {
     const outcome = await mintLive({
       sui: live.sui,
       keypair: live.keypair,
@@ -3086,25 +3140,23 @@ export async function runFadeSpikeDecision(
         quantity,
       },
       gates: {
-        // Cheap contracts carry a fixed fee floor, so the per-contract drag is
-        // large by construction; the shadow score already nets it out. Cap the
-        // price and the total instead.
-        maxEntryProbability: s.maxFarPrice + 0.05,
+        maxEntryProbability: Math.min(0.97, price + 0.05),
         maxFeeDrag: 0.3,
         costSlippage: 0.03,
         probabilitySlippage: 0.03,
-        maxCostUsd: s.maxCostUsd,
+        maxCostUsd: SWITCHBOARD.maxCostUsd,
       },
     }).catch((e) => ({ kind: 'failed' as const, reason: errMsg(e) }));
     if (outcome.kind !== 'filled') {
       note(
         'not_filled',
         outcome.kind === 'skipped'
-          ? `quote moved: ${outcome.reason.replace(/_/g, ' ')}`
-          : `refused on-chain: ${outcome.reason.slice(0, 80)}`,
+          ? `${entry.key}: quote moved (${outcome.reason.replace(/_/g, ' ')})`
+          : `${entry.key}: refused on-chain: ${outcome.reason.slice(0, 80)}`,
       );
-      log.warn('svx.fade_spike.live_not_filled', {
+      log.warn('svx.auto.live_not_filled', {
         marketId: d.marketId,
+        strategy: entry.key,
         kind: outcome.kind,
         reason: outcome.reason,
       });
@@ -3120,7 +3172,7 @@ export async function runFadeSpikeDecision(
   }
 
   const tradeId = ledger.insertTrade({
-    signalId: 'fade_spike',
+    signalId: entry.key,
     timestampMs: nowMs,
     mode,
     oracleId: d.marketId,
@@ -3133,20 +3185,20 @@ export async function runFadeSpikeDecision(
     costUsdc,
     settled: false,
     msToExpiryAtExec: d.expiryMs - nowMs,
-    predictProbAtExec: farPrice,
-    strategy: 'fade_spike',
+    predictProbAtExec: price,
+    strategy,
     ...(txDigest && { txDigest }),
   });
-  note('entered', `bought ${side} @ ${(costPrice * 100).toFixed(1)}¢ · ${mode}`);
-  log.info('svx.fade_spike.entered', {
+  note('entered', `${entry.key}: bought ${side} @ ${(costPrice * 100).toFixed(1)}¢ · ${mode}`);
+  log.info('svx.auto.entered', {
     tradeId,
     mode,
+    strategy: entry.key,
     marketId: d.marketId,
     side,
-    farPrice: Number(farPrice.toFixed(4)),
+    price: Number(price.toFixed(4)),
     quantity: qty,
     costUsdc: Number(costUsdc.toFixed(4)),
-    moveUsd: d.binVsRef != null ? Number(d.binVsRef.toFixed(1)) : null,
     ttmSec: Math.round((d.expiryMs - nowMs) / 1000),
     ...(txDigest && { txDigest }),
   });

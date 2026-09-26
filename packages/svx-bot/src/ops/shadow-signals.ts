@@ -332,6 +332,8 @@ export interface ShadowSignalScore {
   avgCost: number;
   /** Realized payout minus all-in cost, per $1 contract. */
   pnlPerContract: number;
+  /** Standard error of pnlPerContract (per-decision payout − cost). */
+  pnlStdErr: number;
 }
 
 export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore[] {
@@ -342,6 +344,7 @@ export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore
       let n = 0;
       let hits = 0;
       let cost = 0;
+      let sumSq = 0; // of per-decision pnl, for the standard error
       for (const r of rows) {
         if (slot !== 'all' && r.slot !== slot) continue;
         const pick = fn(r);
@@ -349,10 +352,15 @@ export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore
         if (pick == null || c == null) continue;
         n++;
         cost += c;
-        if ((pick === 'up') === r.outcomeUp) hits++;
+        const won = (pick === 'up') === r.outcomeUp;
+        if (won) hits++;
+        const pnl = (won ? 1 : 0) - c;
+        sumSq += pnl * pnl;
       }
       if (!n) continue;
       const hitRate = hits / n;
+      const mean = hitRate - cost / n;
+      const variance = n > 1 ? Math.max(0, (sumSq - n * mean * mean) / (n - 1)) : 0.25;
       out.push({
         signal: name,
         slot,
@@ -360,7 +368,8 @@ export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore
         hitRate,
         noise: 2 * Math.sqrt(0.25 / n),
         avgCost: cost / n,
-        pnlPerContract: hitRate - cost / n,
+        pnlPerContract: mean,
+        pnlStdErr: Math.sqrt(variance / n),
       });
     }
   }

@@ -14,50 +14,21 @@
 
 import type { ShadowDecisionRow } from '../ledger/store.js';
 
+/** The fade-spike rule's parameters. Whether it trades is decided by the
+ *  strategy switchboard (strategy/switchboard.ts), not by settings. */
+/** The fade-spike rule's parameters. Whether it trades is decided by the
+ *  strategy switchboard (strategy/switchboard.ts), not by settings. */
 export interface FadeSpikeSettings {
-  /** Record paper trades (fee-inclusive) when the signal fires. */
-  enabled: boolean;
-  /** Mint for real. Also needs PAPER_TRADING=false and a funded account. */
-  live: boolean;
   /** Minimum USD distance past the strike (basis-adjusted Binance). */
   minMoveUsd: number;
   /** Maximum board price of the far side. */
   maxFarPrice: number;
-  /** Hard cap on one trade's all-in cost, USD. */
-  maxCostUsd: number;
-  /** Stand down for 24h at this trailing realized loss, USD. */
-  dailyLossLimitUsd: number;
-  /** Max trades opened in the trailing 24h. */
-  maxTradesPerDay: number;
-  /** Max positions open at once. */
-  maxOpen: number;
-  /** Shadow checkpoints the strategy trades on (paper and live alike). */
-  tradeSlots: string[];
 }
 
-const num = (v: string | undefined, d: number) => {
-  const n = Number(v);
-  return v != null && v !== '' && Number.isFinite(n) ? n : d;
-};
+export const FADE_SPIKE_RULE: FadeSpikeSettings = { minMoveUsd: 20, maxFarPrice: 0.3 };
 
-/** Env-driven so Coolify can tune without a redeploy of code. */
-export function fadeSpikeSettings(env: NodeJS.ProcessEnv = process.env): FadeSpikeSettings {
-  return {
-    enabled: env.SVX_FADE_SPIKE !== 'false',
-    live: env.SVX_FADE_SPIKE_LIVE === 'true',
-    minMoveUsd: num(env.SVX_FADE_SPIKE_MIN_MOVE_USD, 20),
-    maxFarPrice: num(env.SVX_FADE_SPIKE_MAX_PRICE, 0.3),
-    maxCostUsd: num(env.SVX_FADE_SPIKE_MAX_COST_USD, 2.5),
-    dailyLossLimitUsd: num(env.SVX_FADE_SPIKE_DAILY_LOSS_USD, 15),
-    maxTradesPerDay: num(env.SVX_FADE_SPIKE_MAX_TRADES_DAY, 80),
-    maxOpen: num(env.SVX_FADE_SPIKE_MAX_OPEN, 4),
-    // ~50s only: the 30s check lost money in shadow (fee ramp ×2, less time
-    // to reverse) while ~50s was the best timing measured (2026-09-26).
-    tradeSlots: (env.SVX_FADE_SPIKE_SLOTS || 't50s')
-      .split(',')
-      .map((x) => x.trim())
-      .filter(Boolean),
-  };
+export function fadeSpikeSettings(): FadeSpikeSettings {
+  return FADE_SPIKE_RULE;
 }
 
 type Side = 'up' | 'down';

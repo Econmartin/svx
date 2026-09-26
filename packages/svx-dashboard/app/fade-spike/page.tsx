@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import { StatRow } from '@/components/StatRow';
 import { PageIntro } from '@/components/PageIntro';
 import { FadeHuntRadar } from '@/components/FadeHuntRadar';
+import { SwitchboardCard } from '@/components/SwitchboardCard';
 import {
   Table,
   TableBody,
@@ -69,9 +70,12 @@ export default function FadeSpikePage() {
       client.shadowSignals().catch(() => null),
       client.watch().catch(() => null),
     ]);
-    const isFade = (t: TradeRecord) => t.strategy === 'fade_spike';
+    // Everything the switchboard trades: fade spike plus any other green signal.
+    const isFade = (t: TradeRecord) => t.strategy === 'fade_spike' || t.strategy === 'auto_shadow';
     return {
-      rows: (status.strategyPnl ?? []).filter((r) => r.strategy === 'fade_spike'),
+      rows: (status.strategyPnl ?? []).filter(
+        (r) => r.strategy === 'fade_spike' || r.strategy === 'auto_shadow',
+      ),
       open: open.filter(isFade),
       closed: closed.filter(isFade),
       shadow: (shadow?.scores ?? []).filter((s) => SHADOW.includes(s.signal)),
@@ -80,8 +84,25 @@ export default function FadeSpikePage() {
   }, [client]);
   const { data, error } = usePolling(fetcher, 15_000);
 
-  const live = data?.rows.find((r) => r.mode === 'live');
-  const paper = data?.rows.find((r) => r.mode === 'paper');
+  const sumRows = (mode: 'live' | 'paper') => {
+    const rs = (data?.rows ?? []).filter((r) => r.mode === mode);
+    if (!rs.length) return undefined;
+    return rs.reduce(
+      (a, r) => ({
+        ...a,
+        trades: a.trades + r.trades,
+        open: a.open + r.open,
+        settled: a.settled + r.settled,
+        wins: a.wins + r.wins,
+        pnlUsdc: a.pnlUsdc + r.pnlUsdc,
+        pnl24hUsdc: a.pnl24hUsdc + r.pnl24hUsdc,
+        trades24h: a.trades24h + r.trades24h,
+      }),
+      { ...rs[0]!, trades: 0, open: 0, settled: 0, wins: 0, pnlUsdc: 0, pnl24hUsdc: 0, trades24h: 0 },
+    );
+  };
+  const live = sumRows('live');
+  const paper = sumRows('paper');
   const mode = live && (live.trades > 0 || live.open > 0) ? 'live' : 'paper';
   const recent = [...(data?.open ?? []), ...(data?.closed ?? [])]
     .sort((a, b) => b.timestampMs - a.timestampMs)
@@ -100,6 +121,8 @@ export default function FadeSpikePage() {
 
       <FadeHuntRadar />
 
+      <SwitchboardCard />
+
       <PageIntro
         summary={
           <>
@@ -112,8 +135,8 @@ export default function FadeSpikePage() {
         hints={[
           'Most trades lose: it buys 2–30¢ contracts that win roughly one time in six or seven. Judge it on the running total, not single trades.',
           'It buys at one check per window, about 50 seconds before the end: later checks lost money in testing (fees triple through the final minute and there is less time for the move to reverse).',
-          'Live needs SVX_FADE_SPIKE_LIVE=true and PAPER_TRADING=false; otherwise every signal is booked as paper at real fees.',
-          'Hard limits: $2.50 per trade, one position per market, 4 open, 80 a day, and a 24-hour stand-down after a $15 loss.',
+          'What trades is decided by the switchboard below: every strategy that is green on the shadow scoreboard trades, red ones stop until they turn green again.',
+          'Shared limits: $2.50 per trade, one position per market, 4 open, 80 a day, and a 24-hour stand-down after a $15 loss.',
         ]}
       />
 
@@ -175,6 +198,7 @@ export default function FadeSpikePage() {
                   <TableRow>
                     <TableHead>When</TableHead>
                     <TableHead>Mode</TableHead>
+                    <TableHead>Strategy</TableHead>
                     <TableHead>Side</TableHead>
                     <TableHead>Strike</TableHead>
                     <TableHead>Price</TableHead>
@@ -189,6 +213,9 @@ export default function FadeSpikePage() {
                       <TableCell className="text-muted">{formatRelative(t.timestampMs)}</TableCell>
                       <TableCell>
                         <Badge variant={t.mode === 'live' ? 'live' : 'default'}>{t.mode}</Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-strong">
+                        {(t.signalId ?? '').replace(/_/g, ' ').replace('@t', ' · ')}
                       </TableCell>
                       <TableCell className="capitalize">{t.direction}</TableCell>
                       <TableCell className="font-mono">${t.strike.toFixed(2)}</TableCell>

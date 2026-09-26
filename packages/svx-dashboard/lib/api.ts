@@ -226,7 +226,7 @@ export interface TradeRecord {
    *  Polymarket certainty-discount buyer), or 'divergence_mint' (Predict
    *  favored-side mint at ≥8pp divergence). Defaults to 'poly_arb' on rows
    *  that pre-date the strategy tag (May 2026). */
-  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest' | 'fade_spike';
+  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest' | 'fade_spike' | 'auto_shadow';
   /** High-water mark of the poly leg's P&L fraction (trailing ratchet). */
   polyHighWaterFrac?: number;
 }
@@ -729,6 +729,7 @@ export function createApi(base: string) {
       get<ShadowSignalsReport>(`/shadow-signals${sinceMs ? `?sinceMs=${sinceMs}` : ''}`),
     watch: () => get<WatchReport>('/watch'),
     fadeSpikeState: () => get<FadeSpikeState>('/strategy/fade-spike/state'),
+    switchboard: () => get<SwitchboardState>('/strategy/switchboard'),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
     surfaceHistory: (oracleId: string, limit = 200) =>
       get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),
@@ -757,6 +758,22 @@ export interface ShadowSignalsReport {
   network: string;
   decisions: number;
   scores: ShadowSignalScore[];
+}
+
+/** GET /strategy/switchboard — green strategies trade, red ones don't. */
+export interface SwitchboardState {
+  rules: { maxCostUsd: number; dailyLossLimitUsd: number; maxTradesPerDay: number; maxOpen: number };
+  live: boolean;
+  paused: boolean;
+  strategies: Array<{
+    key: string;
+    signal: string;
+    slot: string;
+    n: number;
+    pnlPerContract: number;
+    status: 'on' | 'off';
+    sinceMs: number;
+  }>;
 }
 
 /** GET /strategy/fade-spike/state — live radar state (read-only). */

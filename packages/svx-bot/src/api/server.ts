@@ -8,6 +8,7 @@
 import express, { type Express, type Request, type Response } from 'express';
 import { huntState, recentFadeEvals } from '../ops/fade-hunt.js';
 import { fadeSpikeSettings } from '../strategy/fade-spike.js';
+import { SWITCHBOARD, evaluateSwitchboard } from '../strategy/switchboard.js';
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
 import { scoreCrossVenue } from '../ops/cross-venue.js';
 import { reportWatchedWallets } from '../ops/wallet-watch.js';
@@ -711,6 +712,8 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
   app.get('/strategy/fade-spike/state', (_req, res) => {
     const s = fadeSpikeSettings();
     const pause = deps.ledger.getPause();
+    const board = evaluateSwitchboard(deps.ledger, suiNetwork());
+    const fadeOn = board.filter((e) => e.status === 'on' && e.signal.startsWith('fade_spike'));
     const trades = [...deps.ledger.openTrades(), ...deps.ledger.closedTrades(200)]
       .filter((t) => t.strategy === 'fade_spike')
       .sort((x, y) => y.timestampMs - x.timestampMs)
@@ -722,19 +725,43 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
         minFarPrice: 0.02,
         lastWindowMs: 60_000,
         noTradeWindowMs: 10_000,
-        maxCostUsd: s.maxCostUsd,
-        tradeSlots: s.tradeSlots,
-        /** Time-to-expiry windows (ms) in which each checkpoint runs. */
-        checkWindowsMs: { t30s: [22_000, 34_999], t40s: [35_000, 45_999], t50s: [46_000, 57_999] },
+        maxCostUsd: SWITCHBOARD.maxCostUsd,
+        // The radar follows the switched-on fade checkpoint, else ~50s.
+        tradeSlots: fadeOn.length ? fadeOn.map((e) => e.slot) : ['t50s'],
+        checkWindowsMs: {
+          t30s: [22_000, 34_999],
+          t40s: [35_000, 45_999],
+          t50s: [46_000, 57_999],
+          t60s: [58_000, 69_999],
+          t75s: [70_000, 82_999],
+          t90s: [83_000, 95_999],
+        },
       },
-      enabled: s.enabled,
-      liveArmed: s.live && !deps.cfg.paperTrading && !pause.paused,
-      liveRequested: s.live,
+      enabled: true,
+      switchedOn: fadeOn.map((e) => e.key),
+      liveArmed: fadeOn.length > 0 && !deps.cfg.paperTrading && !pause.paused,
+      liveRequested: !deps.cfg.paperTrading,
       paused: pause.paused,
       pauseReason: pause.reason ?? null,
       hunt: huntState(),
       evaluations: recentFadeEvals(60),
       trades,
+    });
+  });
+
+  /**
+   * Strategy switchboard: every shadow signal × checkpoint with its score
+   * and ON (green) / OFF (red) state, plus the shared risk budget.
+   *
+   *   GET /strategy/switchboard
+   */
+  app.get('/strategy/switchboard', (_req, res) => {
+    const pause = deps.ledger.getPause();
+    res.json({
+      rules: SWITCHBOARD,
+      live: !deps.cfg.paperTrading && !pause.paused,
+      paused: pause.paused,
+      strategies: evaluateSwitchboard(deps.ledger, suiNetwork()),
     });
   });
 

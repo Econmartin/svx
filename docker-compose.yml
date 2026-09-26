@@ -138,14 +138,10 @@ services:
       # (`svx deposit-v2`), and a quote that clears the fee-drag gate.
       PAPER_TRADING: "${MAINNET_PAPER_TRADING:-true}"
       PREDICT_V2_LIVE: "${MAINNET_PREDICT_V2_LIVE:-false}"
-      # Fade-spike: paper by default. Live needs MAINNET_SVX_FADE_SPIKE_LIVE=true
-      # AND MAINNET_PAPER_TRADING=false AND a funded operator account; the
-      # kill switch (svx pause) and ledger pauses always win. Empty = default.
-      SVX_FADE_SPIKE: "${MAINNET_SVX_FADE_SPIKE:-}"
-      SVX_FADE_SPIKE_LIVE: "${MAINNET_SVX_FADE_SPIKE_LIVE:-false}"
-      SVX_FADE_SPIKE_MAX_COST_USD: "${MAINNET_SVX_FADE_SPIKE_MAX_COST_USD:-}"
-      SVX_FADE_SPIKE_DAILY_LOSS_USD: "${MAINNET_SVX_FADE_SPIKE_DAILY_LOSS_USD:-}"
-      SVX_FADE_SPIKE_MAX_TRADES_DAY: "${MAINNET_SVX_FADE_SPIKE_MAX_TRADES_DAY:-}"
+      # What trades is decided in code by the strategy switchboard
+      # (packages/svx-bot/src/strategy/switchboard.ts): every shadow signal
+      # that is green on the scoreboard trades, red ones do not. Live needs
+      # MAINNET_PAPER_TRADING=false; `svx pause` stops everything.
       # Predict-vs-Polymarket pair recorder: off (ruled out 2026-09-26).
       SVX_CROSS_VENUE: "${MAINNET_SVX_CROSS_VENUE:-}"
       # Same passthrough rule as the testnet bot: unlisted vars never arrive,

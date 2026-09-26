@@ -39,30 +39,14 @@ describe('fadeSpikeQuantity', () => {
 });
 
 describe('fadeSpikeSettings', () => {
-  it('is paper-on, live-off by default', () => {
-    const s = fadeSpikeSettings({});
-    expect(s.enabled).toBe(true);
-    expect(s.live).toBe(false);
-    expect(s.maxCostUsd).toBe(2.5);
-    expect(s.dailyLossLimitUsd).toBe(15);
-    expect(s.tradeSlots).toEqual(['t50s']);
+  it('is a code constant: $20 move, far side up to 30c', () => {
+    expect(fadeSpikeSettings()).toEqual({ minMoveUsd: 20, maxFarPrice: 0.3 });
   });
 
   it('the timing-study variant accepts entries before the last minute', () => {
     const early = { ttmMs: 80_000, binVsRef: 30, mom30s: 0.0004, boardUp: 0.85 };
     expect(fadeSpikeSide(early, 20, 0.3)).toBeNull();
     expect(fadeSpikeSide(early, 20, 0.3, 100_000)).toBe('down');
-  });
-
-  it('reads overrides and treats empty strings as unset', () => {
-    const s = fadeSpikeSettings({
-      SVX_FADE_SPIKE_LIVE: 'true',
-      SVX_FADE_SPIKE_MAX_COST_USD: '1.5',
-      SVX_FADE_SPIKE_DAILY_LOSS_USD: '',
-    });
-    expect(s.live).toBe(true);
-    expect(s.maxCostUsd).toBe(1.5);
-    expect(s.dailyLossLimitUsd).toBe(15);
   });
 });
 

@@ -73,6 +73,7 @@ let lastClaimSweepMs = 0;
 import { admissibleStrike } from './exec/ptb-v2.js';
 import {
   accountBalance,
+  boardPrice,
   estimateMintCost,
   quoteCoinType,
   wrapperIdFor,
@@ -3130,6 +3131,20 @@ export async function runFadeSpikeDecision(
       log.warn('svx.auto.live_blocked', { reason: blocked, note: 'recording paper instead' });
     }
     if (!blocked && live) {
+      // Re-price right before buying: the checkpoint's price can be seconds
+      // old, and if the side got cheaper the same clip falls under Predict's
+      // $1 minimum premium (EPremiumBelowMinimum, abort 3). Size off the live
+      // board price instead; fees per contract carry over from the snapshot.
+      const fresh = await boardPrice(ev.underlying, d.expiryMs, 'reference');
+      const priceNow = fresh ? (side === 'up' ? fresh.up : fresh.down) : price;
+      if (priceNow < 0.02 || priceNow > 0.97) return skip('price_out_of_bounds');
+      const feePerContract = Math.max(0, costPerContract - price);
+      const liveQuantity = fadeSpikeQuantity(
+        priceNow,
+        priceNow + feePerContract,
+        SWITCHBOARD.maxCostUsd,
+      );
+      if (liveQuantity == null) return skip('clip_above_cost_cap');
       const outcome = await mintLive({
         sui: live.sui,
         keypair: live.keypair,
@@ -3140,10 +3155,10 @@ export async function runFadeSpikeDecision(
           marketId: d.marketId,
           strike: 'reference',
           direction: side,
-          quantity,
+          quantity: liveQuantity,
         },
         gates: {
-          maxEntryProbability: Math.min(0.97, price + 0.05),
+          maxEntryProbability: Math.min(0.97, priceNow + 0.05),
           maxFeeDrag: 0.3,
           costSlippage: 0.03,
           probabilitySlippage: 0.03,

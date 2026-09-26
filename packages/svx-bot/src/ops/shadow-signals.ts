@@ -36,10 +36,16 @@ import type { ShadowDecisionInput } from '../ledger/store.js';
 
 /** Decision points, as time-to-expiry windows. One row per market per slot. */
 const SLOTS: Array<{ slot: string; minMs: number; maxMs: number }> = [
-  // Last-minute checkpoint for the spike-fade pattern; clear of the 10s
-  // pre-expiry no-trade window.
-  { slot: 't30s', minMs: 22_000, maxMs: 36_000 },
-  { slot: 't50s', minMs: 40_000, maxMs: 60_000 },
+  // Contiguous ~11s windows across the last ~95s (the loop ticks every 10s,
+  // so each window is hit once). t50s is the live fade-spike entry; the rest
+  // measure whether earlier or later timing would do better. Clear of the
+  // 10s pre-expiry no-trade window.
+  { slot: 't30s', minMs: 22_000, maxMs: 34_999 },
+  { slot: 't40s', minMs: 35_000, maxMs: 45_999 },
+  { slot: 't50s', minMs: 46_000, maxMs: 57_999 },
+  { slot: 't60s', minMs: 58_000, maxMs: 69_999 },
+  { slot: 't75s', minMs: 70_000, maxMs: 82_999 },
+  { slot: 't90s', minMs: 83_000, maxMs: 95_999 },
   { slot: 't4m', minMs: 220_000, maxMs: 260_000 },
 ];
 
@@ -298,6 +304,9 @@ export const SHADOW_SIGNALS: Record<string, (r: ShadowDecisionRow) => Pick> = {
   // in the last minute, after BTC ran ≥$20 past the strike over the prior
   // 30s, buy the now-cheap far side (≤30¢) betting the spike partly reverses.
   fade_spike: (r) => fadeSpike(r, 20, 0.3),
+  // Timing study: the same rule without the last-minute limit, so the
+  // t60s/t75s/t90s checkpoints show whether entering earlier pays better.
+  fade_spike_any_time: (r) => fadeSpikeSide(r, 20, 0.3, 100_000),
   fade_spike_40: (r) => fadeSpike(r, 40, 0.3),
   // Control: same cheap far side, no spike requirement — separates "cheap
   // last-minute underdogs are underpriced" from "spikes reverse".

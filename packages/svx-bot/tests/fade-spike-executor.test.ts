@@ -8,10 +8,10 @@ import { runFadeSpikeDecision } from '../src/index.js';
 const decision = (over: Partial<ShadowDecisionInput> = {}): ShadowDecisionInput => ({
   network: 'mainnet',
   marketId: '0xmarket',
-  slot: 't30s',
-  expiryMs: Date.now() + 30_000,
+  slot: 't50s',
+  expiryMs: Date.now() + 50_000,
   recordedAtMs: Date.now(),
-  ttmMs: 30_000,
+  ttmMs: 50_000,
   reference: 84_000,
   forward: 84_030,
   boardUp: 0.88, // DOWN (the far side) costs 12c
@@ -74,6 +74,14 @@ describe('runFadeSpikeDecision (paper)', () => {
     await run(decision());
     await run(decision());
     await run(decision({ marketId: '0xother', mom30s: -0.0004 })); // not a spike
+    expect(ledger.openTrades().filter((x) => x.strategy === 'fade_spike')).toHaveLength(1);
+  });
+
+  it('only trades at the configured checkpoint (default ~50s); 30s stays shadow-only', async () => {
+    await run(decision({ slot: 't30s', ttmMs: 30_000 }));
+    expect(ledger.openTrades().filter((x) => x.strategy === 'fade_spike')).toHaveLength(0);
+    process.env.SVX_FADE_SPIKE_SLOTS = 't50s,t30s';
+    await run(decision({ slot: 't30s', ttmMs: 30_000 }));
     expect(ledger.openTrades().filter((x) => x.strategy === 'fade_spike')).toHaveLength(1);
   });
 

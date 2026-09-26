@@ -45,6 +45,13 @@ describe('fadeSpikeSettings', () => {
     expect(s.live).toBe(false);
     expect(s.maxCostUsd).toBe(2.5);
     expect(s.dailyLossLimitUsd).toBe(15);
+    expect(s.tradeSlots).toEqual(['t50s']);
+  });
+
+  it('the timing-study variant accepts entries before the last minute', () => {
+    const early = { ttmMs: 80_000, binVsRef: 30, mom30s: 0.0004, boardUp: 0.85 };
+    expect(fadeSpikeSide(early, 20, 0.3)).toBeNull();
+    expect(fadeSpikeSide(early, 20, 0.3, 100_000)).toBe('down');
   });
 
   it('reads overrides and treats empty strings as unset', () => {

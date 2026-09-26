@@ -723,6 +723,9 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
         lastWindowMs: 60_000,
         noTradeWindowMs: 10_000,
         maxCostUsd: s.maxCostUsd,
+        tradeSlots: s.tradeSlots,
+        /** Time-to-expiry windows (ms) in which each checkpoint runs. */
+        checkWindowsMs: { t30s: [22_000, 34_999], t40s: [35_000, 45_999], t50s: [46_000, 57_999] },
       },
       enabled: s.enabled,
       liveArmed: s.live && !deps.cfg.paperTrading && !pause.paused,

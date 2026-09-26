@@ -31,6 +31,8 @@ export interface FadeSpikeSettings {
   maxTradesPerDay: number;
   /** Max positions open at once. */
   maxOpen: number;
+  /** Shadow checkpoints the strategy trades on (paper and live alike). */
+  tradeSlots: string[];
 }
 
 const num = (v: string | undefined, d: number) => {
@@ -49,6 +51,12 @@ export function fadeSpikeSettings(env: NodeJS.ProcessEnv = process.env): FadeSpi
     dailyLossLimitUsd: num(env.SVX_FADE_SPIKE_DAILY_LOSS_USD, 15),
     maxTradesPerDay: num(env.SVX_FADE_SPIKE_MAX_TRADES_DAY, 80),
     maxOpen: num(env.SVX_FADE_SPIKE_MAX_OPEN, 4),
+    // ~50s only: the 30s check lost money in shadow (fee ramp ×2, less time
+    // to reverse) while ~50s was the best timing measured (2026-09-26).
+    tradeSlots: (env.SVX_FADE_SPIKE_SLOTS || 't50s')
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean),
   };
 }
 
@@ -59,8 +67,10 @@ export function fadeSpikeSide(
   r: Pick<ShadowDecisionRow, 'ttmMs' | 'binVsRef' | 'mom30s' | 'boardUp'>,
   minMoveUsd: number,
   maxFarPrice: number,
+  /** Latest entry the rule accepts (the live rule: the last minute). */
+  maxTtmMs = 60_000,
 ): Side | null {
-  if (r.ttmMs > 60_000 || r.binVsRef == null || r.mom30s == null) return null;
+  if (r.ttmMs > maxTtmMs || r.binVsRef == null || r.mom30s == null) return null;
   if (Math.abs(r.binVsRef) < minMoveUsd) return null;
   // The last 30s must have pushed price AWAY from the strike (a spike).
   if (Math.sign(r.mom30s) !== Math.sign(r.binVsRef)) return null;

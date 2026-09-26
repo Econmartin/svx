@@ -203,10 +203,18 @@ function Lane({
     past && now - past.t > 20_000
       ? Math.sign(latest) === Math.sign(latest - past.v) && Math.abs(latest) > Math.abs(past.v)
       : mom30s != null && mom30s !== 0 && Math.sign(mom30s) === Math.sign(latest);
+  const tradeSlot = rule.tradeSlots?.[0] ?? 't50s';
+  const [winLo, winHi] = rule.checkWindowsMs?.[tradeSlot] ?? [46_000, 57_999];
+  const slotSec = tradeSlot.replace(/\D/g, '');
   const conds = [
     {
-      label: ttm <= rule.noTradeWindowMs ? 'Closed' : 'Last minute',
-      ok: ttm <= rule.lastWindowMs && ttm > rule.noTradeWindowMs,
+      label:
+        ttm > winHi
+          ? `Checks at ~${slotSec}s`
+          : ttm >= winLo
+            ? `${slotSec}s check window`
+            : 'Check passed',
+      ok: ttm <= winHi && ttm >= winLo,
     },
     { label: `${usd(latest)} vs strike`, ok: Math.abs(latest) >= rule.minMoveUsd },
     { label: 'Moving away', ok: spikingAway },
@@ -234,10 +242,12 @@ function Lane({
         cls: 'bg-accent text-bg',
       }
     : armed
-      ? { label: 'Armed · fires at the next check', cls: 'bg-accent/[0.16] text-accent animate-pulse' }
-      : ttm > rule.lastWindowMs
-        ? { label: 'Waiting for last minute', cls: 'bg-white/[0.05] text-muted' }
-        : { label: 'Watching', cls: 'bg-white/[0.07] text-muted-strong' };
+      ? { label: 'Armed · buying at this check', cls: 'bg-accent/[0.16] text-accent animate-pulse' }
+      : ttm > winHi
+        ? { label: `Waiting for the ${slotSec}s check`, cls: 'bg-white/[0.05] text-muted' }
+        : ttm >= winLo
+          ? { label: 'Checking', cls: 'bg-white/[0.07] text-muted-strong' }
+          : { label: 'Done for this window', cls: 'bg-white/[0.04] text-muted' };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[180px_1fr_300px] gap-x-6 gap-y-3 px-6 py-4 items-center">
@@ -286,9 +296,9 @@ function Lane({
           )}
         </div>
         <div className="space-y-0.5 text-[12px] leading-snug">
-          {['t50s', 't30s'].map((slot) => {
+          {[tradeSlot].map((slot) => {
             const c = checks.find((e) => e.slot === slot);
-            const label = slot === 't50s' ? '50s check' : '30s check';
+            const label = `${slotSec}s check`;
             return (
               <div key={slot} className="flex gap-1.5">
                 <span className="text-muted/80 w-[68px] flex-shrink-0">{label}</span>
@@ -303,11 +313,7 @@ function Lane({
                           : 'text-muted-strong',
                   )}
                 >
-                  {!c
-                    ? ttm > (slot === 't50s' ? 50_000 : 30_000)
-                      ? 'upcoming'
-                      : 'not run'
-                    : c.detail}
+                  {!c ? (ttm > winLo ? 'upcoming' : 'not run') : c.detail}
                 </span>
               </div>
             );

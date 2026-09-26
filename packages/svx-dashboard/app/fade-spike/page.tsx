@@ -45,12 +45,17 @@ interface PageData {
   watch: WatchedWallet[];
 }
 
-const SHADOW = ['fade_spike', 'fade_spike_40', 'cheap_far_side'];
+const SHADOW = ['fade_spike', 'fade_spike_any_time', 'fade_spike_40', 'cheap_far_side'];
 const SHADOW_LABEL: Record<string, string> = {
   fade_spike: 'Fade spike (≥ $20 move)',
+  fade_spike_any_time: 'Timing study: same rule, any checkpoint',
   fade_spike_40: 'Fade spike (≥ $40 move)',
   cheap_far_side: 'Control: cheap far side, no spike',
 };
+
+/** 'all' first, then checkpoints from earliest (most time left) to latest. */
+const slotOrder = (slot: string) =>
+  slot === 'all' ? -1 : -(Number(slot.replace(/\D/g, '')) * (slot.endsWith('m') ? 60 : 1));
 
 const cents = (x: number) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1)}¢`;
 
@@ -106,6 +111,7 @@ export default function FadeSpikePage() {
         }
         hints={[
           'Most trades lose: it buys 2–30¢ contracts that win roughly one time in six or seven. Judge it on the running total, not single trades.',
+          'It buys at one check per window, about 50 seconds before the end: later checks lost money in testing (fees triple through the final minute and there is less time for the move to reverse).',
           'Live needs SVX_FADE_SPIKE_LIVE=true and PAPER_TRADING=false; otherwise every signal is booked as paper at real fees.',
           'Hard limits: $2.50 per trade, one position per market, 4 open, 80 a day, and a 24-hour stand-down after a $15 loss.',
         ]}
@@ -234,7 +240,7 @@ export default function FadeSpikePage() {
                     .sort(
                       (a, b) =>
                         SHADOW.indexOf(a.signal) - SHADOW.indexOf(b.signal) ||
-                        a.slot.localeCompare(b.slot),
+                        slotOrder(a.slot) - slotOrder(b.slot),
                     )
                     .map((s) => (
                       <TableRow key={`${s.signal}-${s.slot}`}>

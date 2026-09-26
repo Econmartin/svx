@@ -3010,6 +3010,9 @@ export async function runFadeSpikeDecision(
   };
   const note = (outcome: string, detail: string) =>
     recordFadeEval({ marketId: d.marketId, slot: d.slot, atMs: Date.now(), outcome, detail });
+  // Only the configured checkpoints trade (default: ~50s before expiry);
+  // the others stay shadow-only for the timing study.
+  if (!s.tradeSlots.includes(d.slot)) return;
   const side = fadeSpikeSide(rowForRule, s.minMoveUsd, s.maxFarPrice);
   if (!side) {
     note('no_signal', fadeSpikeWhyNot(rowForRule, s.minMoveUsd, s.maxFarPrice) ?? 'no signal');

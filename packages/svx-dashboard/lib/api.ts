@@ -781,6 +781,8 @@ export interface FadeSpikeState {
     lastWindowMs: number;
     noTradeWindowMs: number;
     maxCostUsd: number;
+    tradeSlots?: string[];
+    checkWindowsMs?: Record<string, [number, number]>;
   };
   enabled: boolean;
   liveArmed: boolean;

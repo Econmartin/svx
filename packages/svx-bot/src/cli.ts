@@ -62,6 +62,8 @@ async function main(): Promise<void> {
       return withdrawV2(rest);
     case 'account-v2':
       return accountV2();
+    case 'new-key':
+      return newKey();
     case 'withdraw-v1':
       return withdrawV1(rest);
     default:
@@ -310,6 +312,33 @@ async function accountV2(): Promise<void> {
   );
 }
 
+/**
+ * Generate a fresh ed25519 operator key for a bot. Prints the address (safe
+ * to share) and the bech32 private key (secret: goes into the deployment's
+ * secret env and a password manager, nowhere else). Nothing is written to
+ * disk and nothing touches the network.
+ *
+ *   svx new-key
+ */
+async function newKey(): Promise<void> {
+  const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
+  const kp = Ed25519Keypair.generate();
+  const address = kp.toSuiAddress();
+  console.log(`
+New Sui operator key (ed25519)
+
+  Address (public — fund this):  ${address}
+
+  Private key (SECRET):          ${kp.getSecretKey()}
+
+Store the private key in two places only:
+  1. Coolify → bot-mainnet → env: MAINNET_SUI_PRIVATE_KEY_BECH32  (mark as secret)
+  2. Your password manager, as a backup
+Optional guard: MAINNET_OPERATOR_JSON = {"operatorAddress":"${address}"}
+Then clear this terminal (it holds the key in scrollback).
+`);
+}
+
 /** Deposits above this need --i-know-what-im-doing (start small until the
  *  mainnet path is proven bug-free). */
 const DEPOSIT_SAFETY_CAP_USDC = 50;
@@ -463,6 +492,8 @@ Commands:
                     only; --notional N dUSDC per rung (default 2).
   supply-plp        Supply dUSDC into the PLP vault (returns Coin<PLP> share
                     tokens). --amount N (default 5); --dry to plan only.
+  new-key           Generate a fresh bot operator key (prints address +
+                    private key; writes nothing, calls nothing).
   account-v2        Show the operator's Predict account (derived id, custody
                     balance, wallet USDC + SUI) on SUI_NETWORK.
   deposit-v2        Fund the Predict account from wallet USDC; creates the

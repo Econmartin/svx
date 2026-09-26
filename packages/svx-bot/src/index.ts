@@ -57,6 +57,7 @@ import { admissibleStrike } from './exec/ptb-v2.js';
 import {
   accountBalance,
   estimateMintCost,
+  quoteCoinType,
   wrapperIdFor,
 } from './pricing/predict-sdk.js';
 import { DEFAULT_LIVE_MINT_GATES, mintLive } from './exec/mint-v2.js';
@@ -399,44 +400,43 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   let live: LiveContext | undefined;
   if (!cfg.paperTrading) {
     const operatorFile = path.join(dataDir, 'operator.json');
-    let op: { operatorAddress: string; managerId: string };
-    // Coolify-friendly: allow injecting the operator record via env var
-    // (OPERATOR_JSON) instead of a file. Falls back to the on-disk file.
+    const { keypair, address } = loadOperatorKey();
+    // The operator record pins the expected address (a guard against loading
+    // the wrong key) and, on the retired V1 protocol, the PredictManager id.
+    // Mainnet Predict (V2) needs neither — the trading account is DERIVED
+    // from the key — so the record is optional: without one, the loaded
+    // key's own address is the operator and there is no V1 manager.
+    let op: { operatorAddress: string; managerId?: string };
     if (process.env.OPERATOR_JSON) {
       op = JSON.parse(process.env.OPERATOR_JSON);
     } else if (fs.existsSync(operatorFile)) {
       op = JSON.parse(fs.readFileSync(operatorFile, 'utf8'));
     } else {
-      throw new Error(
-        `Live trading enabled but no operator record found. Set OPERATOR_JSON env var or run \`pnpm --filter svx-bot setup-manager\` to write ${operatorFile}.`,
-      );
+      op = { operatorAddress: address };
     }
-    const { keypair, address } = loadOperatorKey();
     if (address.toLowerCase() !== op.operatorAddress.toLowerCase()) {
       throw new Error(
-        `operator.json says address ${op.operatorAddress} but loaded keypair is ${address}. Refusing to live-trade.`,
+        `operator record says address ${op.operatorAddress} but loaded keypair is ${address}. Refusing to live-trade.`,
       );
     }
     live = {
       sui: makeSuiClient(),
       keypair,
-      managerId: op.managerId,
+      managerId: op.managerId ?? '',
       operatorAddress: op.operatorAddress,
     };
     state.suiAddress = op.operatorAddress;
     state.managerId = op.managerId;
     realWalletReader = () => readManagerBalance(live!);
-    // Refresh NAV (operator wallet) and manager balance from on-chain.
+    // Refresh NAV (operator wallet) and, on V1 only, the manager balance.
     state.navUsdc = await realWalletReader();
-    state.managerBalanceUsdc = await readManagerDusdcBalance(
-      live.sui,
-      live.managerId,
-      live.operatorAddress,
-    );
+    state.managerBalanceUsdc = live.managerId
+      ? await readManagerDusdcBalance(live.sui, live.managerId, live.operatorAddress)
+      : 0;
     state.lastManagerBalanceAtMs = Date.now();
     log.info('svx.live.context_loaded', {
       operator: op.operatorAddress,
-      manager: op.managerId,
+      manager: op.managerId ?? null,
       walletDusdc: state.navUsdc,
       managerDusdc: state.managerBalanceUsdc,
     });
@@ -450,7 +450,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       state.suiAddress = address;
       const sui = makeSuiClient();
       realWalletReader = () =>
-        readCoinBalance(sui, address, ADDRESSES.dusdcType, Number(QUOTE_UNIT));
+        readCoinBalance(sui, address, quoteCoinType(), Number(QUOTE_UNIT));
       const real = await realWalletReader();
       state.navUsdc = real;
       log.info('svx.paper.real_wallet_loaded', { address, navDusdc: real, virtualBudget: PAPER_INITIAL_NAV });
@@ -554,11 +554,9 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
         }
         if (live && Date.now() - state.lastManagerBalanceAtMs > 300_000) {
           try {
-            state.managerBalanceUsdc = await readManagerDusdcBalance(
-              live.sui,
-              live.managerId,
-              live.operatorAddress,
-            );
+            state.managerBalanceUsdc = live.managerId
+              ? await readManagerDusdcBalance(live.sui, live.managerId, live.operatorAddress)
+              : 0;
             state.lastManagerBalanceAtMs = Date.now();
             state.navUsdc = await readManagerBalance(live);
           } catch (e) {
@@ -760,12 +758,8 @@ async function readManagerBalance(live: LiveContext): Promise<number> {
   // directly and read the inner balance_manager balance field.
   // For now we approximate by summing dUSDC coins owned by the operator,
   // since the bot tops up the manager from the wallet on each mint.
-  return readCoinBalance(
-    live.sui,
-    live.operatorAddress,
-    ADDRESSES.dusdcType,
-    Number(QUOTE_UNIT),
-  );
+  // The deployment's quote coin (Circle USDC on mainnet), not V1's dUSDC.
+  return readCoinBalance(live.sui, live.operatorAddress, quoteCoinType(), Number(QUOTE_UNIT));
 }
 
 interface LoopDeps {
@@ -1842,7 +1836,7 @@ export async function runOnce(deps: LoopDeps): Promise<void> {
 
   // Refresh on-chain manager balance every ~30s (live mode only). Manager
   // balance grows from auto-redeems and shrinks from per-trade top-ups.
-  if (live && Date.now() - state.lastManagerBalanceAtMs > MANAGER_BALANCE_REFRESH_MS) {
+  if (live && live.managerId && Date.now() - state.lastManagerBalanceAtMs > MANAGER_BALANCE_REFRESH_MS) {
     try {
       state.managerBalanceUsdc = await readManagerDusdcBalance(
         live.sui,
@@ -2978,7 +2972,7 @@ async function runVolArbStep(args: {
  * per-market dedupe, max-open, trades-per-day and daily-loss gates.
  */
 let fadeSpikeLiveBlockLoggedAt = 0;
-async function runFadeSpikeDecision(
+export async function runFadeSpikeDecision(
   ev: ShadowDecisionEvent,
   deps: { ledger: LedgerStore; cfg: SvxConfig; live?: LiveContext },
 ): Promise<void> {

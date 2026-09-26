@@ -49,6 +49,7 @@ import {
 import type { ShadowDecisionEvent } from './ops/shadow-signals.js';
 import { fadeSpikeQuantity, fadeSpikeSettings, fadeSpikeSide } from './strategy/fade-spike.js';
 import { isKilled } from './ops/kill.js';
+import { refreshHunt } from './ops/fade-hunt.js';
 import { pollWatchedWallets } from './ops/wallet-watch.js';
 
 /** Wallet-watch cadence (the 10s calibration tick is too chatty for it). */
@@ -657,6 +658,22 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
     }, 10_000);
     log.info('svx.calib_v2.recorder_started', { tickMs: 10_000 });
   }
+
+  // Fade-spike radar: live per-market state for the dashboard (read-only).
+  let huntTimer: NodeJS.Timeout | undefined;
+  if (!opts.onceOnly && cfg.predictV2 && fadeSpikeSettings().enabled) {
+    let huntInFlight = false;
+    huntTimer = setInterval(() => {
+      if (huntInFlight) return;
+      huntInFlight = true;
+      refreshHunt({ predict })
+        .catch((e) => log.debug('svx.fade_hunt.refresh_error', { err: errMsg(e) }))
+        .finally(() => {
+          huntInFlight = false;
+        });
+    }, 4_000);
+  }
+  void huntTimer;
 
   let volArbTimer: NodeJS.Timeout | undefined;
   if (!opts.onceOnly && hlExec) {

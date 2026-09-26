@@ -728,6 +728,7 @@ export function createApi(base: string) {
     shadowSignals: (sinceMs?: number) =>
       get<ShadowSignalsReport>(`/shadow-signals${sinceMs ? `?sinceMs=${sinceMs}` : ''}`),
     watch: () => get<WatchReport>('/watch'),
+    fadeSpikeState: () => get<FadeSpikeState>('/strategy/fade-spike/state'),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
     surfaceHistory: (oracleId: string, limit = 200) =>
       get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),
@@ -756,6 +757,44 @@ export interface ShadowSignalsReport {
   network: string;
   decisions: number;
   scores: ShadowSignalScore[];
+}
+
+/** GET /strategy/fade-spike/state — live radar state (read-only). */
+export interface FadeHuntMarket {
+  marketId: string;
+  cadenceSec: number | null;
+  expiryMs: number;
+  reference: number;
+  forward: number;
+  forwardVsRef: number;
+  boardUp: number;
+  farSide: 'up' | 'down';
+  farPrice: number;
+  farCost: number | null;
+  updatedAtMs: number;
+}
+export interface FadeSpikeState {
+  rule: {
+    minMoveUsd: number;
+    maxFarPrice: number;
+    minFarPrice: number;
+    lastWindowMs: number;
+    noTradeWindowMs: number;
+    maxCostUsd: number;
+  };
+  enabled: boolean;
+  liveArmed: boolean;
+  liveRequested: boolean;
+  paused: boolean;
+  pauseReason: string | null;
+  hunt: {
+    updatedAtMs: number;
+    btcMid: number | null;
+    basis: number | null;
+    mom30s: number | null;
+    markets: FadeHuntMarket[];
+  } | null;
+  trades: TradeRecord[];
 }
 
 /** GET /watch — running record of watched mainnet wallets. */

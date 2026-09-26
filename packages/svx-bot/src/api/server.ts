@@ -6,6 +6,8 @@
  */
 
 import express, { type Express, type Request, type Response } from 'express';
+import { huntState } from '../ops/fade-hunt.js';
+import { fadeSpikeSettings } from '../strategy/fade-spike.js';
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
 import { scoreCrossVenue } from '../ops/cross-venue.js';
 import { reportWatchedWallets } from '../ops/wallet-watch.js';
@@ -697,6 +699,39 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       log.warn('api.surface.error', { err: e instanceof Error ? e.message : String(e) });
       res.status(500).json({ error: 'failed to compute surface' });
     }
+  });
+
+  /**
+   * Fade-spike radar: live per-market hunt state (strike, forward vs strike,
+   * far side and its all-in cost, BTC mid, 30s momentum), the active rule
+   * settings, whether live trading is armed, and the latest fade trades.
+   *
+   *   GET /strategy/fade-spike/state
+   */
+  app.get('/strategy/fade-spike/state', (_req, res) => {
+    const s = fadeSpikeSettings();
+    const pause = deps.ledger.getPause();
+    const trades = [...deps.ledger.openTrades(), ...deps.ledger.closedTrades(200)]
+      .filter((t) => t.strategy === 'fade_spike')
+      .sort((x, y) => y.timestampMs - x.timestampMs)
+      .slice(0, 30);
+    res.json({
+      rule: {
+        minMoveUsd: s.minMoveUsd,
+        maxFarPrice: s.maxFarPrice,
+        minFarPrice: 0.02,
+        lastWindowMs: 60_000,
+        noTradeWindowMs: 10_000,
+        maxCostUsd: s.maxCostUsd,
+      },
+      enabled: s.enabled,
+      liveArmed: s.live && !deps.cfg.paperTrading && !pause.paused,
+      liveRequested: s.live,
+      paused: pause.paused,
+      pauseReason: pause.reason ?? null,
+      hunt: huntState(),
+      trades,
+    });
   });
 
   app.get('/strategy/margin-lever/state', (_req, res) => {

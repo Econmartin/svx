@@ -27,6 +27,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { StatRow } from '@/components/StatRow';
 import { PageIntro } from '@/components/PageIntro';
+import { FadeHuntRadar } from '@/components/FadeHuntRadar';
 import {
   Table,
   TableBody,
@@ -91,6 +92,8 @@ export default function FadeSpikePage() {
           {mode === 'live' ? 'trading live' : 'paper'}
         </Badge>
       </header>
+
+      <FadeHuntRadar />
 
       <PageIntro
         summary={

@@ -31,6 +31,8 @@ import { PredictV2Client, type PredictReader } from '../pricing/predict-v2.js';
 import { evalTotalVariance } from '../pricing/svi.js';
 import { suiNetwork } from '../exec/sui-client.js';
 import { log } from '../util/log.js';
+import { fadeSpikeSide } from '../strategy/fade-spike.js';
+import type { ShadowDecisionInput } from '../ledger/store.js';
 
 /** Decision points, as time-to-expiry windows. One row per market per slot. */
 const SLOTS: Array<{ slot: string; minMs: number; maxMs: number }> = [
@@ -150,10 +152,18 @@ function impliedUp(
   return Number.isFinite(up) ? up : null;
 }
 
+/** A freshly recorded decision, with what an executor needs to act on it. */
+export interface ShadowDecisionEvent {
+  decision: ShadowDecisionInput;
+  underlying: string;
+}
+
 export async function recordShadowDecisions(deps: {
   predict: PredictReader;
   ledger: LedgerStore;
   nowMs?: number;
+  /** Called once per newly recorded decision (e.g. the fade-spike executor). */
+  onDecision?: (e: ShadowDecisionEvent) => Promise<void>;
 }): Promise<number> {
   const { predict, ledger } = deps;
   const now = deps.nowMs ?? Date.now();
@@ -197,7 +207,7 @@ export async function recordShadowDecisions(deps: {
     const binBasis = basisEwma.get('binance');
     const binVsRef = ext.binMid != null && binBasis ? ext.binMid / binBasis - reference : null;
     const hlImpliedUp = impliedUp('hyperliquid', ext.hlMid, snap, reference);
-    const ok = ledger.insertShadowDecision({
+    const decision: ShadowDecisionInput = {
       network: suiNetwork(),
       marketId: m.id,
       slot,
@@ -221,7 +231,15 @@ export async function recordShadowDecisions(deps: {
       hlImpliedUp,
       mom30s: ext.mom30s,
       binVsRef,
-    });
+    };
+    const ok = ledger.insertShadowDecision(decision);
+    if (ok && deps.onDecision) {
+      await deps.onDecision({ decision, underlying: snap.underlyingAsset }).catch((e) =>
+        log.warn('svx.shadow.on_decision_error', {
+          err: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    }
     if (ok) recorded++;
   }
   if (recorded) log.info('svx.shadow.recorded', { decisions: recorded });
@@ -292,13 +310,7 @@ export const SHADOW_SIGNALS: Record<string, (r: ShadowDecisionRow) => Pick> = {
 };
 
 function fadeSpike(r: ShadowDecisionRow, minUsd: number, maxPrice: number): Pick {
-  if (r.ttmMs > 60_000 || r.binVsRef == null || r.mom30s == null) return null;
-  if (Math.abs(r.binVsRef) < minUsd) return null;
-  // The last 30s must have pushed price AWAY from the strike (a spike).
-  if (Math.sign(r.mom30s) !== Math.sign(r.binVsRef)) return null;
-  const far: Pick = r.binVsRef > 0 ? 'down' : 'up';
-  const farPrice = far === 'up' ? r.boardUp : 1 - r.boardUp;
-  return farPrice <= maxPrice ? far : null;
+  return fadeSpikeSide(r, minUsd, maxPrice);
 }
 
 export interface ShadowSignalScore {

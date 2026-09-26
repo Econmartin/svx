@@ -17,7 +17,15 @@
  * rate·p·(1−p)^exponent), resolves both outcomes, and GET /cross-venue
  * reports how often the pair costs < $1 after fees and what it realized
  * once disagreements are counted. Nothing trades.
+ *
+ * RESULT (2026-09-26, 257 windows): the venues settled differently in 18%
+ * of windows and under-$1 pairs realized -3c / -18c per pair, so the
+ * recorder is OFF by default. SVX_CROSS_VENUE=true re-enables it.
  */
+
+export function crossVenueEnabled(): boolean {
+  return process.env.SVX_CROSS_VENUE === 'true';
+}
 
 import axios from 'axios';
 import type { CrossVenuePairRow, LedgerStore } from '../ledger/store.js';

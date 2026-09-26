@@ -342,8 +342,9 @@ export interface BinaryOrder {
   expiryMs: number;
   /** Pin the exact ExpiryMarket object we priced (no re-resolution). */
   marketId: string;
-  /** Admission-grid USD strike. */
-  strike: number;
+  /** Admission-grid USD strike, or the market's own reference strike (the
+   *  one finite strike the chain admits off the admission grid). */
+  strike: number | 'reference';
   direction: 'up' | 'down';
   /** Max payout, USD. */
   quantity: number;

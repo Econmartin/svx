@@ -488,7 +488,7 @@ export class LedgerStore {
       predictIvAtExec?: number;
       edgeAtExec?: number;
       /** Strategy tag. Defaults to 'poly_arb' for backwards compatibility. */
-      strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest';
+      strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest' | 'fade_spike';
     },
   ): string {
     const id = t.id ?? randomUUID();

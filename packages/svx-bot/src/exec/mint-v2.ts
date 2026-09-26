@@ -44,6 +44,8 @@ export interface LiveMintGates {
   costSlippage: number;
   /** Headroom on the entry-probability cap (absolute, e.g. 0.02). */
   probabilitySlippage: number;
+  /** Optional hard cap on the trade's all-in cost, USD. */
+  maxCostUsd?: number;
 }
 
 export const DEFAULT_LIVE_MINT_GATES: LiveMintGates = {
@@ -78,6 +80,9 @@ export async function mintLive(args: {
   }
   if (costPerContract - q.entryProbability > gates.maxFeeDrag) {
     return { kind: 'skipped', reason: 'fee_drag', quote };
+  }
+  if (gates.maxCostUsd != null && q.cost * (1 + gates.costSlippage) > gates.maxCostUsd) {
+    return { kind: 'skipped', reason: 'cost_above_cap', quote };
   }
   const tx = await buildMintTx(args.owner, order, {
     maxCost: q.cost * (1 + gates.costSlippage),

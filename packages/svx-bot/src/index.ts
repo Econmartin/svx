@@ -41,7 +41,14 @@ import {
 } from './ops/calibration-v2.js';
 import { decideHarvestV2 } from './strategy/harvest-v2.js';
 import { recordShadowDecisions, resolveShadowDecisions } from './ops/shadow-signals.js';
-import { recordCrossVenuePairs, resolveCrossVenuePairs } from './ops/cross-venue.js';
+import {
+  crossVenueEnabled,
+  recordCrossVenuePairs,
+  resolveCrossVenuePairs,
+} from './ops/cross-venue.js';
+import type { ShadowDecisionEvent } from './ops/shadow-signals.js';
+import { fadeSpikeQuantity, fadeSpikeSettings, fadeSpikeSide } from './strategy/fade-spike.js';
+import { isKilled } from './ops/kill.js';
 import { pollWatchedWallets } from './ops/wallet-watch.js';
 
 /** Wallet-watch cadence (the 10s calibration tick is too chatty for it). */
@@ -621,18 +628,22 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
         // settlements (GET /shadow-signals). SVX_SHADOW_SIGNALS=false disables.
         .then(async () => {
           if (process.env.SVX_SHADOW_SIGNALS === 'false') return;
-          await recordShadowDecisions({ predict, ledger }).catch((e) =>
-            log.warn('svx.shadow.record_error', { err: errMsg(e) }),
-          );
+          await recordShadowDecisions({
+            predict,
+            ledger,
+            onDecision: (ev) => runFadeSpikeDecision(ev, { ledger, cfg, live }),
+          }).catch((e) => log.warn('svx.shadow.record_error', { err: errMsg(e) }));
           await resolveShadowDecisions({ predict, ledger }).catch((e) =>
             log.warn('svx.shadow.resolve_error', { err: errMsg(e) }),
           );
-          await recordCrossVenuePairs({ predict, ledger }).catch((e) =>
-            log.warn('svx.cross_venue.record_error', { err: errMsg(e) }),
-          );
-          await resolveCrossVenuePairs({ predict, ledger }).catch((e) =>
-            log.warn('svx.cross_venue.resolve_error', { err: errMsg(e) }),
-          );
+          if (crossVenueEnabled()) {
+            await recordCrossVenuePairs({ predict, ledger }).catch((e) =>
+              log.warn('svx.cross_venue.record_error', { err: errMsg(e) }),
+            );
+            await resolveCrossVenuePairs({ predict, ledger }).catch((e) =>
+              log.warn('svx.cross_venue.resolve_error', { err: errMsg(e) }),
+            );
+          }
           if (Date.now() - lastWatchPollMs >= 30_000) {
             lastWatchPollMs = Date.now();
             await pollWatchedWallets({ ledger }).catch((e) =>
@@ -2959,6 +2970,145 @@ async function runVolArbStep(args: {
  * Settlement, PnL, and redeem ride the existing oracle-settlement machinery —
  * the trade row is a normal Predict trade tagged with the strategy.
  */
+/**
+ * Fade-spike executor: runs on every freshly recorded shadow decision. Paper
+ * by default (fee-inclusive cost from the market's own fee policy); live only
+ * with SVX_FADE_SPIKE_LIVE=true, PAPER_TRADING=false, a loaded operator key,
+ * and neither the kill switch nor a ledger pause set. Every entry passes the
+ * per-market dedupe, max-open, trades-per-day and daily-loss gates.
+ */
+let fadeSpikeLiveBlockLoggedAt = 0;
+async function runFadeSpikeDecision(
+  ev: ShadowDecisionEvent,
+  deps: { ledger: LedgerStore; cfg: SvxConfig; live?: LiveContext },
+): Promise<void> {
+  const s = fadeSpikeSettings();
+  if (!s.enabled) return;
+  const { ledger, cfg, live } = deps;
+  const d = ev.decision;
+  const side = fadeSpikeSide(
+    { ttmMs: d.ttmMs, binVsRef: d.binVsRef ?? null, mom30s: d.mom30s ?? null, boardUp: d.boardUp },
+    s.minMoveUsd,
+    s.maxFarPrice,
+  );
+  if (!side) return;
+  const farPrice = side === 'up' ? d.boardUp : 1 - d.boardUp;
+  const costPerContract = side === 'up' ? d.costUp : d.costDown;
+  const skip = (reason: string) =>
+    log.info('svx.fade_spike.skip', { marketId: d.marketId, side, farPrice, reason });
+  if (costPerContract == null) return skip('no_fee_quote');
+
+  const nowMs = Date.now();
+  const DAY = 24 * 3600_000;
+  if (ledger.openTrades().some((t) => t.oracleId === d.marketId && t.strategy === 'fade_spike')) {
+    return skip('already_open_for_market');
+  }
+  if (ledger.countOpenStrategyTrades('fade_spike') >= s.maxOpen) return skip('max_open');
+  if (ledger.realizedStrategyPnlSince('fade_spike', nowMs - DAY) <= -s.dailyLossLimitUsd) {
+    return skip('daily_loss_limit');
+  }
+  const trades24h = ledger
+    .strategyPnlBreakdown(nowMs - DAY)
+    .filter((r) => r.strategy === 'fade_spike')
+    .reduce((a, r) => a + r.trades24h, 0);
+  if (trades24h >= s.maxTradesPerDay) return skip('max_trades_per_day');
+  const quantity = fadeSpikeQuantity(farPrice, costPerContract, s.maxCostUsd);
+  if (quantity == null) return skip('clip_above_cost_cap');
+
+  let mode: 'paper' | 'live' = 'paper';
+  let qty = quantity;
+  let costUsdc = quantity * costPerContract;
+  let costPrice = farPrice;
+  let txDigest: string | undefined;
+
+  const blocked = !cfg.paperTrading
+    ? !live
+      ? 'no_operator_key'
+      : isKilled()
+        ? 'kill_switch'
+        : ledger.getPause().paused
+          ? 'ledger_paused'
+          : null
+    : 'paper_trading';
+  if (s.live && blocked) {
+    if (nowMs - fadeSpikeLiveBlockLoggedAt > 10 * 60_000) {
+      fadeSpikeLiveBlockLoggedAt = nowMs;
+      log.warn('svx.fade_spike.live_blocked', { reason: blocked, note: 'recording paper instead' });
+    }
+  }
+  if (s.live && !blocked && live) {
+    const outcome = await mintLive({
+      sui: live.sui,
+      keypair: live.keypair,
+      owner: live.operatorAddress,
+      order: {
+        underlying: ev.underlying,
+        expiryMs: d.expiryMs,
+        marketId: d.marketId,
+        strike: 'reference',
+        direction: side,
+        quantity,
+      },
+      gates: {
+        // Cheap contracts carry a fixed fee floor, so the per-contract drag is
+        // large by construction; the shadow score already nets it out. Cap the
+        // price and the total instead.
+        maxEntryProbability: s.maxFarPrice + 0.05,
+        maxFeeDrag: 0.3,
+        costSlippage: 0.03,
+        probabilitySlippage: 0.03,
+        maxCostUsd: s.maxCostUsd,
+      },
+    }).catch((e) => ({ kind: 'failed' as const, reason: errMsg(e) }));
+    if (outcome.kind !== 'filled') {
+      log.warn('svx.fade_spike.live_not_filled', {
+        marketId: d.marketId,
+        kind: outcome.kind,
+        reason: outcome.reason,
+      });
+      return; // nothing booked: the trade did not happen
+    }
+    mode = 'live';
+    txDigest = outcome.digest;
+    if (outcome.fill) {
+      qty = outcome.fill.quantityDusdc;
+      costUsdc = outcome.fill.costUsdc;
+      costPrice = outcome.fill.entryProbability;
+    }
+  }
+
+  const tradeId = ledger.insertTrade({
+    signalId: 'fade_spike',
+    timestampMs: nowMs,
+    mode,
+    oracleId: d.marketId,
+    underlyingAsset: ev.underlying,
+    expiryMs: d.expiryMs,
+    strike: d.reference,
+    direction: side,
+    quantityDusdc: qty,
+    costPrice,
+    costUsdc,
+    settled: false,
+    msToExpiryAtExec: d.expiryMs - nowMs,
+    predictProbAtExec: farPrice,
+    strategy: 'fade_spike',
+    ...(txDigest && { txDigest }),
+  });
+  log.info('svx.fade_spike.entered', {
+    tradeId,
+    mode,
+    marketId: d.marketId,
+    side,
+    farPrice: Number(farPrice.toFixed(4)),
+    quantity: qty,
+    costUsdc: Number(costUsdc.toFixed(4)),
+    moveUsd: d.binVsRef != null ? Number(d.binVsRef.toFixed(1)) : null,
+    ttmSec: Math.round((d.expiryMs - nowMs) / 1000),
+    ...(txDigest && { txDigest }),
+  });
+}
+
 /**
  * Harvest-V2 step: surface-only favored entries on V2's short markets — the
  * trigger validated by /calibration-v2 (favorites 60–90¢ near expiry realize

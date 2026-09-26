@@ -47,9 +47,14 @@ import {
   resolveCrossVenuePairs,
 } from './ops/cross-venue.js';
 import type { ShadowDecisionEvent } from './ops/shadow-signals.js';
-import { fadeSpikeQuantity, fadeSpikeSettings, fadeSpikeSide } from './strategy/fade-spike.js';
+import {
+  fadeSpikeQuantity,
+  fadeSpikeSettings,
+  fadeSpikeSide,
+  fadeSpikeWhyNot,
+} from './strategy/fade-spike.js';
 import { isKilled } from './ops/kill.js';
-import { refreshHunt } from './ops/fade-hunt.js';
+import { recordFadeEval, refreshHunt } from './ops/fade-hunt.js';
 import { pollWatchedWallets } from './ops/wallet-watch.js';
 
 /** Wallet-watch cadence (the 10s calibration tick is too chatty for it). */
@@ -2997,16 +3002,33 @@ export async function runFadeSpikeDecision(
   if (!s.enabled) return;
   const { ledger, cfg, live } = deps;
   const d = ev.decision;
-  const side = fadeSpikeSide(
-    { ttmMs: d.ttmMs, binVsRef: d.binVsRef ?? null, mom30s: d.mom30s ?? null, boardUp: d.boardUp },
-    s.minMoveUsd,
-    s.maxFarPrice,
-  );
-  if (!side) return;
+  const rowForRule = {
+    ttmMs: d.ttmMs,
+    binVsRef: d.binVsRef ?? null,
+    mom30s: d.mom30s ?? null,
+    boardUp: d.boardUp,
+  };
+  const note = (outcome: string, detail: string) =>
+    recordFadeEval({ marketId: d.marketId, slot: d.slot, atMs: Date.now(), outcome, detail });
+  const side = fadeSpikeSide(rowForRule, s.minMoveUsd, s.maxFarPrice);
+  if (!side) {
+    note('no_signal', fadeSpikeWhyNot(rowForRule, s.minMoveUsd, s.maxFarPrice) ?? 'no signal');
+    return;
+  }
   const farPrice = side === 'up' ? d.boardUp : 1 - d.boardUp;
   const costPerContract = side === 'up' ? d.costUp : d.costDown;
-  const skip = (reason: string) =>
+  const SKIP_WORDS: Record<string, string> = {
+    no_fee_quote: 'no fee quote for this market',
+    already_open_for_market: 'already holding this market',
+    max_open: 'max open positions reached',
+    daily_loss_limit: 'daily loss limit hit — standing down',
+    max_trades_per_day: 'daily trade cap reached',
+    clip_above_cost_cap: `smallest clip costs more than the $${s.maxCostUsd} cap`,
+  };
+  const skip = (reason: string) => {
+    note('skipped', SKIP_WORDS[reason] ?? reason);
     log.info('svx.fade_spike.skip', { marketId: d.marketId, side, farPrice, reason });
+  };
   if (costPerContract == null) return skip('no_fee_quote');
 
   const nowMs = Date.now();
@@ -3072,6 +3094,12 @@ export async function runFadeSpikeDecision(
       },
     }).catch((e) => ({ kind: 'failed' as const, reason: errMsg(e) }));
     if (outcome.kind !== 'filled') {
+      note(
+        'not_filled',
+        outcome.kind === 'skipped'
+          ? `quote moved: ${outcome.reason.replace(/_/g, ' ')}`
+          : `refused on-chain: ${outcome.reason.slice(0, 80)}`,
+      );
       log.warn('svx.fade_spike.live_not_filled', {
         marketId: d.marketId,
         kind: outcome.kind,
@@ -3106,6 +3134,7 @@ export async function runFadeSpikeDecision(
     strategy: 'fade_spike',
     ...(txDigest && { txDigest }),
   });
+  note('entered', `bought ${side} @ ${(costPrice * 100).toFixed(1)}¢ · ${mode}`);
   log.info('svx.fade_spike.entered', {
     tradeId,
     mode,

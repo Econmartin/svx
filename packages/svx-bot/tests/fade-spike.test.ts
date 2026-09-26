@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { fadeSpikeQuantity, fadeSpikeSettings, fadeSpikeSide } from '../src/strategy/fade-spike.js';
+import {
+  fadeSpikeQuantity,
+  fadeSpikeSettings,
+  fadeSpikeSide,
+  fadeSpikeWhyNot,
+} from '../src/strategy/fade-spike.js';
 
 describe('fadeSpikeSide', () => {
   const base = { ttmMs: 30_000, binVsRef: 30, mom30s: 0.0004, boardUp: 0.85 };
@@ -53,3 +58,26 @@ describe('fadeSpikeSettings', () => {
     expect(s.dailyLossLimitUsd).toBe(15);
   });
 });
+
+describe('fadeSpikeWhyNot', () => {
+  it('explains a miss exactly when the rule does not fire', () => {
+    const grid = [];
+    for (const ttmMs of [30_000, 90_000])
+      for (const binVsRef of [-45, -25, -5, 5, 25, 45])
+        for (const mom30s of [-0.0004, 0.0004])
+          for (const boardUp of [0.005, 0.1, 0.5, 0.9, 0.995])
+            grid.push({ ttmMs, binVsRef, mom30s, boardUp });
+    for (const r of grid) {
+      const fires = fadeSpikeSide(r, 20, 0.3) != null;
+      expect(fadeSpikeWhyNot(r, 20, 0.3) == null).toBe(fires);
+    }
+  });
+
+  it('names the failing condition in plain words', () => {
+    const base = { ttmMs: 30_000, binVsRef: 30, mom30s: 0.0004, boardUp: 0.985 };
+    expect(fadeSpikeWhyNot(base, 20, 0.3)).toMatch(/too cheap \(1\.5¢/);
+    expect(fadeSpikeWhyNot({ ...base, binVsRef: 8 }, 20, 0.3)).toMatch(/only \$8 from the strike/);
+    expect(fadeSpikeWhyNot({ ...base, mom30s: -0.0004 }, 20, 0.3)).toMatch(/moving back/);
+  });
+});
+

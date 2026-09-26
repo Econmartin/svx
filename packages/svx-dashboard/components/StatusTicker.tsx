@@ -12,6 +12,9 @@ import { useApiClient, useNetwork } from '@/lib/network-context';
 import { usePolling } from '@/lib/usePolling';
 import { formatUsdc, v2LivePnl } from '@/lib/api';
 
+/** Strategies the mainnet bot can run live on Predict today. */
+const CURRENT_PREDICT = ['fade_spike', 'calibration_harvest', 'divergence_mint'];
+
 export function StatusTicker() {
   const client = useApiClient();
   const { network } = useNetwork();
@@ -40,18 +43,26 @@ export function StatusTicker() {
       items.push({ label: 'BTC', value: `$${formatUsdc(status.spotBtc, 0)}` });
     }
     if (isMainnet) {
-      const poly = status.realizedPolyPnlUsdc ?? 0;
-      const hl = status.realizedHlPnlUsdc ?? 0;
-      const combined = poly + hl;
+      // What the mainnet bot trades today: the Predict account and its live
+      // strategies. Polymarket / Hyperliquid only appear while enabled.
+      const liveRows = (status.strategyPnl ?? []).filter(
+        (r) => r.mode === 'live' && CURRENT_PREDICT.includes(r.strategy),
+      );
+      const pnl24h = liveRows.reduce((a, r) => a + r.pnl24hUsdc, 0);
+      const openLive = liveRows.reduce((a, r) => a + r.open, 0);
+      if (status.v2WrapperBalanceUsdc != null) {
+        items.push({ label: 'Balance', value: `$${formatUsdc(status.v2WrapperBalanceUsdc)}` });
+      }
       items.push({
-        label: 'PnL',
-        value: `${combined >= 0 ? '+' : ''}$${combined.toFixed(2)}`,
-        tone: combined >= 0 ? 'win' : 'loss',
+        label: 'Today',
+        value: `${pnl24h >= 0 ? '+' : '−'}$${Math.abs(pnl24h).toFixed(2)}`,
+        tone: pnl24h > 0 ? 'win' : pnl24h < 0 ? 'loss' : 'muted',
       });
-      if (status.polyPusdBalance != null) {
+      items.push({ label: 'Open', value: String(openLive) });
+      if (status.polyExecutionEnabled && status.polyPusdBalance != null) {
         items.push({ label: 'pUSD', value: formatUsdc(status.polyPusdBalance) });
       }
-      if (status.hlAccountValueUsdc != null) {
+      if (status.hlExecutionEnabled && status.hlAccountValueUsdc != null) {
         items.push({ label: 'HL', value: `$${formatUsdc(status.hlAccountValueUsdc)}` });
       }
     } else {
@@ -70,8 +81,8 @@ export function StatusTicker() {
         tone: realized >= 0 ? 'win' : 'loss',
       });
     }
-    if (status.openPositionCount != null) {
-      items.push({ label: 'OPEN', value: status.openPositionCount.toString() });
+    if (!isMainnet && status.openPositionCount != null) {
+      items.push({ label: 'Open', value: status.openPositionCount.toString() });
     }
   }
 

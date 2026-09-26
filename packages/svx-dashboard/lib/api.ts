@@ -793,7 +793,21 @@ export interface FadeSpikeState {
     basis: number | null;
     mom30s: number | null;
     markets: FadeHuntMarket[];
+    upcoming?: Array<{
+      marketId: string;
+      cadenceSec: number | null;
+      expiryMs: number;
+      opensAtMs: number | null;
+    }>;
   } | null;
+  /** Executor checks (≈50s and ≈30s before expiry), newest first. */
+  evaluations?: Array<{
+    marketId: string;
+    slot: string;
+    atMs: number;
+    outcome: 'entered' | 'skipped' | 'no_signal' | 'not_filled' | string;
+    detail: string;
+  }>;
   trades: TradeRecord[];
 }
 

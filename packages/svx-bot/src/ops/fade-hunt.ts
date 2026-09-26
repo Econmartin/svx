@@ -30,6 +30,35 @@ export interface HuntMarket {
   updatedAtMs: number;
 }
 
+/** One executor check of one market (at the ~50s or ~30s checkpoint). */
+export interface FadeEval {
+  marketId: string;
+  slot: string;
+  atMs: number;
+  /** 'entered' | 'skipped' | 'no_signal' | 'not_filled' */
+  outcome: string;
+  /** Plain-words reason / detail for the dashboard. */
+  detail: string;
+}
+
+const evals: FadeEval[] = [];
+export function recordFadeEval(e: FadeEval): void {
+  evals.push(e);
+  if (evals.length > 200) evals.splice(0, evals.length - 200);
+}
+export function recentFadeEvals(limit = 60): FadeEval[] {
+  return evals.slice(-limit).reverse();
+}
+
+/** A window listed on-chain whose strike is not set yet (opens soon). */
+export interface HuntUpcoming {
+  marketId: string;
+  cadenceSec: number | null;
+  expiryMs: number;
+  /** When the window opens (strike is set), if the cadence is known. */
+  opensAtMs: number | null;
+}
+
 export interface HuntState {
   updatedAtMs: number;
   btcMid: number | null;
@@ -38,6 +67,7 @@ export interface HuntState {
   basis: number | null;
   mom30s: number | null;
   markets: HuntMarket[];
+  upcoming: HuntUpcoming[];
 }
 
 let state: HuntState | null = null;
@@ -66,6 +96,17 @@ export async function refreshHunt(deps: { predict: PredictReader; nowMs?: number
   const live = markets.filter(
     (m) => m.referencePrice != null && m.expiryMs > now && m.expiryMs - now <= HORIZON_MS,
   );
+  const upcoming: HuntUpcoming[] = [];
+  for (const m of markets) {
+    if (m.referencePrice != null || m.expiryMs <= now || m.expiryMs - now > 11 * 60_000) continue;
+    const cadenceSec = await cadenceOf(m.id, m.expiryMs);
+    upcoming.push({
+      marketId: m.id,
+      cadenceSec,
+      expiryMs: m.expiryMs,
+      opensAtMs: cadenceSec ? m.expiryMs - cadenceSec * 1000 : null,
+    });
+  }
   const out: HuntMarket[] = [];
   let basis: number | null = null;
   await Promise.all(
@@ -107,12 +148,25 @@ export async function refreshHunt(deps: { predict: PredictReader; nowMs?: number
       });
     }),
   );
+  // A market whose quote failed this round (transient gRPC / pricer error)
+  // keeps its previous row for up to 12s instead of vanishing from the radar.
+  for (const prev of state?.markets ?? []) {
+    if (
+      prev.expiryMs > now &&
+      now - prev.updatedAtMs < 12_000 &&
+      live.some((m) => m.id === prev.marketId) &&
+      !out.some((m) => m.marketId === prev.marketId)
+    ) {
+      out.push(prev);
+    }
+  }
   state = {
     updatedAtMs: now,
     btcMid: ext.binMid,
     basis,
     mom30s: ext.mom30s,
     markets: out.sort((a, b) => a.expiryMs - b.expiryMs),
+    upcoming: upcoming.sort((a, b) => a.expiryMs - b.expiryMs),
   };
 }
 

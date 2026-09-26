@@ -73,6 +73,30 @@ export function fadeSpikeSide(
 
 const MIN_FAR_PRICE = 0.02;
 
+/**
+ * Why the rule did NOT fire, in plain words (null when it fires). Same
+ * checks, same order as fadeSpikeSide — the dashboard shows this per check.
+ */
+export function fadeSpikeWhyNot(
+  r: Pick<ShadowDecisionRow, 'ttmMs' | 'binVsRef' | 'mom30s' | 'boardUp'>,
+  minMoveUsd: number,
+  maxFarPrice: number,
+): string | null {
+  if (r.ttmMs > 60_000) return 'not in the last minute';
+  if (r.binVsRef == null || r.mom30s == null) return 'no price data';
+  if (Math.abs(r.binVsRef) < minMoveUsd) {
+    return `only $${Math.abs(r.binVsRef).toFixed(0)} from the strike (needs $${minMoveUsd})`;
+  }
+  if (Math.sign(r.mom30s) !== Math.sign(r.binVsRef)) return 'already moving back toward the strike';
+  const far = r.binVsRef > 0 ? 'down' : 'up';
+  const farPrice = far === 'up' ? r.boardUp : 1 - r.boardUp;
+  if (farPrice < MIN_FAR_PRICE) return `far side too cheap (${(farPrice * 100).toFixed(1)}¢, min 2¢)`;
+  if (farPrice > maxFarPrice) {
+    return `far side too dear (${(farPrice * 100).toFixed(1)}¢, max ${(maxFarPrice * 100).toFixed(0)}¢)`;
+  }
+  return null;
+}
+
 /** Predict rejects mints whose premium is under $1 (constants::min_premium). */
 const MIN_PREMIUM_USD = 1;
 const PREMIUM_HEADROOM = 1.12;

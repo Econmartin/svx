@@ -119,6 +119,9 @@ export function FadeHuntRadar() {
         <span className={cn('rounded-full px-2.5 h-6 inline-flex items-center text-[12px] font-medium', mode.cls)}>
           {mode.label}
         </span>
+        {hunt && now - hunt.updatedAtMs > 15_000 && (
+          <span className="text-[12px] text-warn">data delayed {Math.round((now - hunt.updatedAtMs) / 1000)}s</span>
+        )}
         <div className="ml-auto flex items-baseline gap-2 text-[13px] text-muted">
           BTC
           <span className="font-mono text-[17px] font-semibold text-fg">
@@ -135,22 +138,39 @@ export function FadeHuntRadar() {
       )}
 
       <div className="divide-y divide-white/[0.06] border-t border-white/[0.06]">
-        {markets.length === 0 ? (
+        {markets.map((m) => (
+          <Lane
+            key={m.marketId}
+            m={m}
+            now={now}
+            trace={traces.current.get(m.marketId) ?? []}
+            rule={data!.rule}
+            mom30s={hunt?.mom30s ?? null}
+            trade={data!.trades.find((t) => t.oracleId === m.marketId)}
+            checks={(data!.evaluations ?? []).filter((e) => e.marketId === m.marketId)}
+          />
+        ))}
+        {(hunt?.upcoming ?? [])
+          .filter((u) => u.expiryMs > now && !markets.some((m) => m.marketId === u.marketId))
+          .slice(0, 2)
+          .map((u) => (
+            <div key={u.marketId} className="flex items-center gap-3 px-6 py-3 text-[13px] text-muted">
+              <span className="h-1.5 w-1.5 rounded-full bg-muted/50" />
+              Next {u.cadenceSec === 60 ? '1-minute' : u.cadenceSec === 300 ? '5-minute' : ''} window
+              {u.opensAtMs != null && u.opensAtMs > now ? (
+                <>
+                  {' '}opens in <span className="font-mono text-muted-strong">{fmtClock(u.opensAtMs - now)}</span>
+                </>
+              ) : (
+                ' is opening — strike being set'
+              )}
+            </div>
+          ))}
+        {markets.length === 0 && (hunt?.upcoming ?? []).length === 0 && (
           <p className="px-6 py-6 text-[14px] text-muted">
-            Waiting for the next window to open…
+            No window is open right now. Predict occasionally skips a window; the next one appears here
+            automatically.
           </p>
-        ) : (
-          markets.map((m) => (
-            <Lane
-              key={m.marketId}
-              m={m}
-              now={now}
-              trace={traces.current.get(m.marketId) ?? []}
-              rule={data!.rule}
-              mom30s={hunt?.mom30s ?? null}
-              trade={data!.trades.find((t) => t.oracleId === m.marketId)}
-            />
-          ))
         )}
       </div>
     </section>
@@ -164,6 +184,7 @@ function Lane({
   rule,
   mom30s,
   trade,
+  checks,
 }: {
   m: FadeHuntMarket;
   now: number;
@@ -171,6 +192,7 @@ function Lane({
   rule: FadeSpikeState['rule'];
   mom30s: number | null;
   trade?: TradeRecord;
+  checks: NonNullable<FadeSpikeState['evaluations']>;
 }) {
   const ttm = m.expiryMs - now;
   const latest = trace.length ? trace[trace.length - 1]!.v : m.forwardVsRef;
@@ -188,10 +210,22 @@ function Lane({
     },
     { label: `${usd(latest)} vs strike`, ok: Math.abs(latest) >= rule.minMoveUsd },
     { label: 'Moving away', ok: spikingAway },
-    {
-      label: `Far side ${(m.farPrice * 100).toFixed(1)}¢`,
-      ok: m.farPrice >= rule.minFarPrice && m.farPrice <= rule.maxFarPrice,
-    },
+    (() => {
+      // Mirrors the executor: price inside the band AND the smallest clip
+      // that clears Predict's $1 minimum premium fits the per-trade cap.
+      const inBand = m.farPrice >= rule.minFarPrice && m.farPrice <= rule.maxFarPrice;
+      const clip =
+        m.farPrice > 0 && m.farCost != null
+          ? (Math.ceil((1.12 / m.farPrice) * 100) / 100) * m.farCost
+          : null;
+      const fits = clip != null && clip <= rule.maxCostUsd;
+      return {
+        label:
+          `Far side ${(m.farPrice * 100).toFixed(1)}¢` +
+          (inBand && clip != null && !fits ? ` · clip $${clip.toFixed(2)} > $${rule.maxCostUsd}` : ''),
+        ok: inBand && fits,
+      };
+    })(),
   ];
   const armed = conds.every((c) => c.ok);
   const status = trade
@@ -200,7 +234,7 @@ function Lane({
         cls: 'bg-accent text-bg',
       }
     : armed
-      ? { label: 'Armed', cls: 'bg-accent/[0.16] text-accent animate-pulse' }
+      ? { label: 'Armed · fires at the next check', cls: 'bg-accent/[0.16] text-accent animate-pulse' }
       : ttm > rule.lastWindowMs
         ? { label: 'Waiting for last minute', cls: 'bg-white/[0.05] text-muted' }
         : { label: 'Watching', cls: 'bg-white/[0.07] text-muted-strong' };
@@ -250,6 +284,34 @@ function Lane({
               {m.farSide} costs {(m.farCost * 100).toFixed(1)}¢ all-in
             </span>
           )}
+        </div>
+        <div className="space-y-0.5 text-[12px] leading-snug">
+          {['t50s', 't30s'].map((slot) => {
+            const c = checks.find((e) => e.slot === slot);
+            const label = slot === 't50s' ? '50s check' : '30s check';
+            return (
+              <div key={slot} className="flex gap-1.5">
+                <span className="text-muted/80 w-[68px] flex-shrink-0">{label}</span>
+                <span
+                  className={cn(
+                    !c
+                      ? 'text-muted/60'
+                      : c.outcome === 'entered'
+                        ? 'text-accent'
+                        : c.outcome === 'not_filled'
+                          ? 'text-warn'
+                          : 'text-muted-strong',
+                  )}
+                >
+                  {!c
+                    ? ttm > (slot === 't50s' ? 50_000 : 30_000)
+                      ? 'upcoming'
+                      : 'not run'
+                    : c.detail}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

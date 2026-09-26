@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react';
 
-const KEY = 'svx-feed-notice-dismissed-v9';
+const KEY = 'svx-feed-notice-dismissed-v10';
 
 export function FeedNotice() {
   const [visible, setVisible] = useState(false);
@@ -44,8 +44,9 @@ export function FeedNotice() {
             Predict is live on Sui mainnet
           </p>
           <p className="mt-1 text-[12.5px] leading-[1.5] text-muted">
-            SVX reads it through DeepBook&apos;s own SDK, fees included. Mainnet lists 1- and
-            5-minute BTC windows; strategies stay in paper while the shadow tracker scores them.
+            SVX reads it through DeepBook&apos;s own SDK, fees included. Fade spike trades live
+            with small, capped clips; everything else stays in paper while the shadow tracker
+            scores it.
           </p>
         </div>
         <button

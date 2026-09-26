@@ -6,7 +6,7 @@
  */
 
 import express, { type Express, type Request, type Response } from 'express';
-import { huntState } from '../ops/fade-hunt.js';
+import { huntState, recentFadeEvals } from '../ops/fade-hunt.js';
 import { fadeSpikeSettings } from '../strategy/fade-spike.js';
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
 import { scoreCrossVenue } from '../ops/cross-venue.js';
@@ -730,6 +730,7 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       paused: pause.paused,
       pauseReason: pause.reason ?? null,
       hunt: huntState(),
+      evaluations: recentFadeEvals(60),
       trades,
     });
   });

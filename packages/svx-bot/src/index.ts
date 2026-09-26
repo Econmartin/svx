@@ -3000,7 +3000,8 @@ async function runVolArbStep(args: {
  * checkpoint (strategy/switchboard.ts — green on the shadow scoreboard, off
  * when red). Paper while PAPER_TRADING is on; live otherwise, as
  * long as the operator key is loaded and neither the kill switch nor a ledger
- * pause is set. All switched-on strategies share one risk budget.
+ * pause is set. Every switched-on strategy that picks a side trades (once per
+ * market each); only the per-trade size cap and the daily loss stop apply.
  *
  * It also records the fade-spike rule's verdict at the radar's checkpoint so
  * the dashboard can explain every window, traded or not.
@@ -3052,156 +3053,147 @@ export async function runFadeSpikeDecision(
     }
     return;
   }
-  // Most profitable switched-on strategy that picks a side here (one
-  // position per market, so conflicting picks cannot both be bought).
-  let chosen: { entry: SwitchEntry; side: 'up' | 'down' } | null = null;
-  for (const entry of candidates) {
-    const pick = SHADOW_SIGNALS[entry.signal]?.(row) ?? null;
-    if (pick) {
-      chosen = { entry, side: pick };
-      break;
-    }
-  }
-  if (!chosen) {
+  // Every switched-on strategy that picks a side here trades, independently.
+  const picks = candidates
+    .map((entry) => ({ entry, side: SHADOW_SIGNALS[entry.signal]?.(row) ?? null }))
+    .filter((p): p is { entry: SwitchEntry; side: 'up' | 'down' } => p.side != null);
+  if (!picks.length) {
     if (radarSlot) {
       note('no_signal', fadeSpikeWhyNot(row, rule.minMoveUsd, rule.maxFarPrice) ?? 'no signal');
     }
     return;
   }
-  const { entry, side } = chosen;
-  const strategy = strategyTagFor(entry.signal);
-  const price = side === 'up' ? d.boardUp : 1 - d.boardUp;
-  const costPerContract = side === 'up' ? d.costUp : d.costDown;
-  const SKIP_WORDS: Record<string, string> = {
-    no_fee_quote: 'no fee quote for this market',
-    price_out_of_bounds: `side priced ${(price * 100).toFixed(1)}¢, outside Predict's 2–97¢ entry band`,
-    already_open_for_market: 'already holding this market',
-    max_open: 'max open positions reached',
-    daily_loss_limit: 'daily loss limit hit — standing down',
-    max_trades_per_day: 'daily trade cap reached',
-    clip_above_cost_cap: `smallest clip costs more than the $${SWITCHBOARD.maxCostUsd} cap`,
-  };
-  const skip = (reason: string) => {
-    note('skipped', `${entry.key}: ${SKIP_WORDS[reason] ?? reason}`);
-    log.info('svx.auto.skip', { marketId: d.marketId, strategy: entry.key, side, price, reason });
-  };
-  if (costPerContract == null) return skip('no_fee_quote');
-  if (price < 0.02 || price > 0.97) return skip('price_out_of_bounds');
+  for (const p of picks) await tradeOne(p.entry, p.side);
 
-  const nowMs = Date.now();
-  const DAY = 24 * 3600_000;
-  const isAuto = (t: { strategy?: string }) =>
-    (AUTO_STRATEGIES as readonly string[]).includes(t.strategy ?? '');
-  const open = ledger.openTrades().filter(isAuto);
-  if (open.some((t) => t.oracleId === d.marketId)) return skip('already_open_for_market');
-  if (open.length >= SWITCHBOARD.maxOpen) return skip('max_open');
-  const realized24h = AUTO_STRATEGIES.reduce(
-    (a, st) => a + ledger.realizedStrategyPnlSince(st, nowMs - DAY),
-    0,
-  );
-  if (realized24h <= -SWITCHBOARD.dailyLossLimitUsd) return skip('daily_loss_limit');
-  const trades24h = ledger
-    .strategyPnlBreakdown(nowMs - DAY)
-    .filter(isAuto)
-    .reduce((a, r) => a + r.trades24h, 0);
-  if (trades24h >= SWITCHBOARD.maxTradesPerDay) return skip('max_trades_per_day');
-  const quantity = fadeSpikeQuantity(price, costPerContract, SWITCHBOARD.maxCostUsd);
-  if (quantity == null) return skip('clip_above_cost_cap');
+  async function tradeOne(entry: SwitchEntry, side: 'up' | 'down'): Promise<void> {
+    const strategy = strategyTagFor(entry.signal);
+    const price = side === 'up' ? d.boardUp : 1 - d.boardUp;
+    const costPerContract = side === 'up' ? d.costUp : d.costDown;
+    const SKIP_WORDS: Record<string, string> = {
+      no_fee_quote: 'no fee quote for this market',
+      price_out_of_bounds: `side priced ${(price * 100).toFixed(1)}¢, outside Predict's 2–97¢ entry band`,
+      already_open_for_market: 'this strategy already holds this market',
+      daily_loss_limit: 'daily loss limit hit — standing down',
+      clip_above_cost_cap: `smallest clip costs more than the $${SWITCHBOARD.maxCostUsd} cap`,
+    };
+    const skip = (reason: string) => {
+      note('skipped', `${entry.key}: ${SKIP_WORDS[reason] ?? reason}`);
+      log.info('svx.auto.skip', { marketId: d.marketId, strategy: entry.key, side, price, reason });
+    };
+    if (costPerContract == null) return skip('no_fee_quote');
+    if (price < 0.02 || price > 0.97) return skip('price_out_of_bounds');
 
-  let mode: 'paper' | 'live' = 'paper';
-  let qty = quantity;
-  let costUsdc = quantity * costPerContract;
-  let costPrice = price;
-  let txDigest: string | undefined;
-  const blocked = cfg.paperTrading
-    ? 'paper_trading'
-    : !live
-      ? 'no_operator_key'
-      : isKilled()
-        ? 'kill_switch'
-        : ledger.getPause().paused
-          ? 'ledger_paused'
-          : null;
-  if (blocked && blocked !== 'paper_trading' && nowMs - autoLiveBlockLoggedAt > 10 * 60_000) {
-    autoLiveBlockLoggedAt = nowMs;
-    log.warn('svx.auto.live_blocked', { reason: blocked, note: 'recording paper instead' });
-  }
-  if (!blocked && live) {
-    const outcome = await mintLive({
-      sui: live.sui,
-      keypair: live.keypair,
-      owner: live.operatorAddress,
-      order: {
-        underlying: ev.underlying,
-        expiryMs: d.expiryMs,
-        marketId: d.marketId,
-        strike: 'reference',
-        direction: side,
-        quantity,
-      },
-      gates: {
-        maxEntryProbability: Math.min(0.97, price + 0.05),
-        maxFeeDrag: 0.3,
-        costSlippage: 0.03,
-        probabilitySlippage: 0.03,
-        maxCostUsd: SWITCHBOARD.maxCostUsd,
-      },
-    }).catch((e) => ({ kind: 'failed' as const, reason: errMsg(e) }));
-    if (outcome.kind !== 'filled') {
-      note(
-        'not_filled',
-        outcome.kind === 'skipped'
-          ? `${entry.key}: quote moved (${outcome.reason.replace(/_/g, ' ')})`
-          : `${entry.key}: refused on-chain: ${outcome.reason.slice(0, 80)}`,
-      );
-      log.warn('svx.auto.live_not_filled', {
-        marketId: d.marketId,
-        strategy: entry.key,
-        kind: outcome.kind,
-        reason: outcome.reason,
-      });
-      return; // nothing booked: the trade did not happen
+    const nowMs = Date.now();
+    const DAY = 24 * 3600_000;
+    const isAuto = (t: { strategy?: string }) =>
+      (AUTO_STRATEGIES as readonly string[]).includes(t.strategy ?? '');
+    const open = ledger.openTrades().filter(isAuto);
+    if (open.some((t) => t.oracleId === d.marketId && t.signalId === entry.key)) {
+      return skip('already_open_for_market');
     }
-    mode = 'live';
-    txDigest = outcome.digest;
-    if (outcome.fill) {
-      qty = outcome.fill.quantityDusdc;
-      costUsdc = outcome.fill.costUsdc;
-      costPrice = outcome.fill.entryProbability;
-    }
-  }
+    const realized24h = AUTO_STRATEGIES.reduce(
+      (a, st) => a + ledger.realizedStrategyPnlSince(st, nowMs - DAY),
+      0,
+    );
+    if (realized24h <= -SWITCHBOARD.dailyLossLimitUsd) return skip('daily_loss_limit');
+    const quantity = fadeSpikeQuantity(price, costPerContract, SWITCHBOARD.maxCostUsd);
+    if (quantity == null) return skip('clip_above_cost_cap');
 
-  const tradeId = ledger.insertTrade({
-    signalId: entry.key,
-    timestampMs: nowMs,
-    mode,
-    oracleId: d.marketId,
-    underlyingAsset: ev.underlying,
-    expiryMs: d.expiryMs,
-    strike: d.reference,
-    direction: side,
-    quantityDusdc: qty,
-    costPrice,
-    costUsdc,
-    settled: false,
-    msToExpiryAtExec: d.expiryMs - nowMs,
-    predictProbAtExec: price,
-    strategy,
-    ...(txDigest && { txDigest }),
-  });
-  note('entered', `${entry.key}: bought ${side} @ ${(costPrice * 100).toFixed(1)}¢ · ${mode}`);
-  log.info('svx.auto.entered', {
-    tradeId,
-    mode,
-    strategy: entry.key,
-    marketId: d.marketId,
-    side,
-    price: Number(price.toFixed(4)),
-    quantity: qty,
-    costUsdc: Number(costUsdc.toFixed(4)),
-    ttmSec: Math.round((d.expiryMs - nowMs) / 1000),
-    ...(txDigest && { txDigest }),
-  });
+    let mode: 'paper' | 'live' = 'paper';
+    let qty = quantity;
+    let costUsdc = quantity * costPerContract;
+    let costPrice = price;
+    let txDigest: string | undefined;
+    const blocked = cfg.paperTrading
+      ? 'paper_trading'
+      : !live
+        ? 'no_operator_key'
+        : isKilled()
+          ? 'kill_switch'
+          : ledger.getPause().paused
+            ? 'ledger_paused'
+            : null;
+    if (blocked && blocked !== 'paper_trading' && nowMs - autoLiveBlockLoggedAt > 10 * 60_000) {
+      autoLiveBlockLoggedAt = nowMs;
+      log.warn('svx.auto.live_blocked', { reason: blocked, note: 'recording paper instead' });
+    }
+    if (!blocked && live) {
+      const outcome = await mintLive({
+        sui: live.sui,
+        keypair: live.keypair,
+        owner: live.operatorAddress,
+        order: {
+          underlying: ev.underlying,
+          expiryMs: d.expiryMs,
+          marketId: d.marketId,
+          strike: 'reference',
+          direction: side,
+          quantity,
+        },
+        gates: {
+          maxEntryProbability: Math.min(0.97, price + 0.05),
+          maxFeeDrag: 0.3,
+          costSlippage: 0.03,
+          probabilitySlippage: 0.03,
+          maxCostUsd: SWITCHBOARD.maxCostUsd,
+        },
+      }).catch((e) => ({ kind: 'failed' as const, reason: errMsg(e) }));
+      if (outcome.kind !== 'filled') {
+        note(
+          'not_filled',
+          outcome.kind === 'skipped'
+            ? `${entry.key}: quote moved (${outcome.reason.replace(/_/g, ' ')})`
+            : `${entry.key}: refused on-chain: ${outcome.reason.slice(0, 80)}`,
+        );
+        log.warn('svx.auto.live_not_filled', {
+          marketId: d.marketId,
+          strategy: entry.key,
+          kind: outcome.kind,
+          reason: outcome.reason,
+        });
+        return; // nothing booked: the trade did not happen
+      }
+      mode = 'live';
+      txDigest = outcome.digest;
+      if (outcome.fill) {
+        qty = outcome.fill.quantityDusdc;
+        costUsdc = outcome.fill.costUsdc;
+        costPrice = outcome.fill.entryProbability;
+      }
+    }
+
+    const tradeId = ledger.insertTrade({
+      signalId: entry.key,
+      timestampMs: nowMs,
+      mode,
+      oracleId: d.marketId,
+      underlyingAsset: ev.underlying,
+      expiryMs: d.expiryMs,
+      strike: d.reference,
+      direction: side,
+      quantityDusdc: qty,
+      costPrice,
+      costUsdc,
+      settled: false,
+      msToExpiryAtExec: d.expiryMs - nowMs,
+      predictProbAtExec: price,
+      strategy,
+      ...(txDigest && { txDigest }),
+    });
+    note('entered', `${entry.key}: bought ${side} @ ${(costPrice * 100).toFixed(1)}¢ · ${mode}`);
+    log.info('svx.auto.entered', {
+      tradeId,
+      mode,
+      strategy: entry.key,
+      marketId: d.marketId,
+      side,
+      price: Number(price.toFixed(4)),
+      quantity: qty,
+      costUsdc: Number(costUsdc.toFixed(4)),
+      ttmSec: Math.round((d.expiryMs - nowMs) / 1000),
+      ...(txDigest && { txDigest }),
+    });
+  }
 }
 
 /**

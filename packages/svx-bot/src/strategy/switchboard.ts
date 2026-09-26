@@ -20,11 +20,10 @@ import { log } from '../util/log.js';
 
 export const SWITCHBOARD = {
   reevaluateMs: 5 * 60_000,
-  // Shared risk budget for every switched-on strategy.
+  // Per-trade size cap and a daily loss stop; no cap on how many strategies,
+  // positions or trades run — every green strategy trades every signal.
   maxCostUsd: 2.5,
   dailyLossLimitUsd: 15,
-  maxTradesPerDay: 80,
-  maxOpen: 4,
 } as const;
 
 export type SwitchStatus = 'on' | 'off';

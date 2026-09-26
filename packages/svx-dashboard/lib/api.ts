@@ -762,7 +762,7 @@ export interface ShadowSignalsReport {
 
 /** GET /strategy/switchboard — green strategies trade, red ones don't. */
 export interface SwitchboardState {
-  rules: { maxCostUsd: number; dailyLossLimitUsd: number; maxTradesPerDay: number; maxOpen: number };
+  rules: { maxCostUsd: number; dailyLossLimitUsd: number };
   live: boolean;
   paused: boolean;
   strategies: Array<{

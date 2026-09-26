@@ -84,15 +84,15 @@ describe('switchboard executor (paper)', () => {
     expect(openAuto()).toHaveLength(0);
   });
 
-  it('trades any green signal, tagged auto_shadow, and takes one position per market', async () => {
+  it('every green strategy that picks a side trades, each once per market', async () => {
     const board = [entry('mom_1m_follow', 't50s', 'on', 0.02), entry('always_down', 't50s', 'on', 0.01)];
-    await run(decision({ binVsRef: 5 }), board); // not a fade spike; mom_1m_follow picks up
-    await run(decision({ binVsRef: 5 }), board);
+    await run(decision({ binVsRef: 5 }), board); // not a fade spike
+    await run(decision({ binVsRef: 5 }), board); // same market again: no repeats
     const trades = openAuto();
-    expect(trades).toHaveLength(1);
-    expect(trades[0]!.strategy).toBe('auto_shadow');
-    expect(trades[0]!.signalId).toBe('mom_1m_follow@t50s');
-    expect(trades[0]!.direction).toBe('up');
+    expect(trades).toHaveLength(2);
+    expect(trades.map((t) => t.signalId).sort()).toEqual(['always_down@t50s', 'mom_1m_follow@t50s']);
+    expect(trades.every((t) => t.strategy === 'auto_shadow')).toBe(true);
+    expect(trades.find((t) => t.signalId === 'mom_1m_follow@t50s')!.direction).toBe('up');
   });
 
   it('settles a reversal as a win (DOWN wins at or below the strike)', async () => {

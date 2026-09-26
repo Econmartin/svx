@@ -136,7 +136,7 @@ export default function FadeSpikePage() {
           'Most trades lose: it buys 2–30¢ contracts that win roughly one time in six or seven. Judge it on the running total, not single trades.',
           'It buys at one check per window, about 50 seconds before the end: later checks lost money in testing (fees triple through the final minute and there is less time for the move to reverse).',
           'What trades is decided by the switchboard below: every strategy that is green on the shadow scoreboard trades, red ones stop until they turn green again.',
-          'Shared limits: $2.50 per trade, one position per market, 4 open, 80 a day, and a 24-hour stand-down after a $15 loss.',
+          'Limits: $2.50 per trade and a 24-hour stand-down after a $15 loss; no cap on how many strategies or trades run.',
         ]}
       />
 

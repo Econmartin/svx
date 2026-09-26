@@ -57,9 +57,8 @@ export function SwitchboardCard() {
         <CardDescription>
           Every shadow signal at every checkpoint is a strategy. Green on the scoreboard (profit
           per $1 contract above zero) means it trades; red means it stops until it turns green
-          again. Shared limits: ${data?.rules.maxCostUsd ?? 2.5} per trade, {data?.rules.maxOpen ?? 4}{' '}
-          open, {data?.rules.maxTradesPerDay ?? 80} a day, stop for 24h after a $
-          {data?.rules.dailyLossLimitUsd ?? 15} loss.
+          again. Every green strategy trades every signal it sees. Limits: ${data?.rules.maxCostUsd ?? 2.5}{' '}
+          per trade, and a 24-hour stop after a ${data?.rules.dailyLossLimitUsd ?? 15} loss.
         </CardDescription>
       </CardHeader>
       <CardContent>

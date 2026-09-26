@@ -74,14 +74,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   </span>
                 </Link>
                 <span aria-hidden className="hidden md:block h-5 w-px bg-white/[0.08]" />
-                <div className="hidden md:block min-w-0 flex-1">
+                {/* The nav owns its lane: when the links outgrow it they scroll
+                    (with a soft edge fade) instead of sliding under the
+                    network toggle. */}
+                <div className="hidden md:block min-w-0 flex-1 overflow-x-auto scrollbar-none [mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)] pr-6">
                   <NavLinks />
                 </div>
                 <div className="ml-auto flex items-center gap-2 sm:gap-3 flex-shrink-0">
                   <NetworkToggle />
                   <span
                     aria-hidden
-                    className="hidden xl:inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-3 h-7 text-[12px] text-muted whitespace-nowrap"
+                    className="hidden 2xl:inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-3 h-7 text-[12px] text-muted whitespace-nowrap"
                   >
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent/80" />
                     Sui Overflow ’26

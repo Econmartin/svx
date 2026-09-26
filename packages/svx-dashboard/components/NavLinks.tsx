@@ -30,6 +30,7 @@ type NavStatus = 'active' | 'stale' | 'closed' | undefined;
 
 const NAV: ReadonlyArray<readonly [label: string, href: string, status?: NavStatus]> = [
   ['Overview', '/overview'],
+  ['Fade spike', '/fade-spike', 'stale'], // derived live below
   ['Divergence', '/divergence-mint', 'stale'], // derived live below
   ['Poly-arb', '/poly-arb', 'stale'], // derived live below
   ['Positions', '/positions'],
@@ -70,7 +71,11 @@ function useDerivedStatus(): Partial<Record<string, NavStatus>> {
     !!status.polyExecutionEnabled &&
     ((status.lastPolyAttemptAtMs ?? 0) > Date.now() - DAY_MS ||
       (status.realizedPolyPnl24hUsdc ?? 0) !== 0);
+  const fade = (status?.strategyPnl ?? []).filter((r) => r.strategy === 'fade_spike');
+  const fadeActive =
+    !!status && !status.paused && fade.some((r) => r.trades24h > 0 || r.open > 0);
   return {
+    '/fade-spike': fadeActive ? 'active' : 'stale',
     '/divergence-mint': divergenceActive ? 'active' : 'stale',
     '/poly-arb': polyActive ? 'active' : 'stale',
   };
@@ -103,7 +108,7 @@ export function NavLinks() {
             aria-current={isActive ? 'page' : undefined}
             title={dot?.title}
             className={cn(
-              'inline-flex items-center gap-1.5 h-8 px-3 rounded-full transition-[background-color,color] duration-200 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
+              'inline-flex items-center gap-1.5 h-8 px-2.5 xl:px-3 rounded-full transition-[background-color,color] duration-200 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
               isActive
                 ? 'bg-white/[0.1] text-fg font-medium'
                 : 'text-muted hover:text-fg hover:bg-white/[0.05]',

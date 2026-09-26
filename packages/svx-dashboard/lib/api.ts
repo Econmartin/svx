@@ -226,7 +226,7 @@ export interface TradeRecord {
    *  Polymarket certainty-discount buyer), or 'divergence_mint' (Predict
    *  favored-side mint at ≥8pp divergence). Defaults to 'poly_arb' on rows
    *  that pre-date the strategy tag (May 2026). */
-  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest';
+  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest' | 'fade_spike';
   /** High-water mark of the poly leg's P&L fraction (trailing ratchet). */
   polyHighWaterFrac?: number;
 }
@@ -725,6 +725,9 @@ export function createApi(base: string) {
       get<MarginLoopSummary>(
         `/margin-loop?collateral=${q.collateral ?? 100}&ltv=${q.ltv ?? 0.5}&borrowApr=${q.borrowApr ?? 0.1}`,
       ),
+    shadowSignals: (sinceMs?: number) =>
+      get<ShadowSignalsReport>(`/shadow-signals${sinceMs ? `?sinceMs=${sinceMs}` : ''}`),
+    watch: () => get<WatchReport>('/watch'),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
     surfaceHistory: (oracleId: string, limit = 200) =>
       get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),
@@ -738,6 +741,38 @@ export const api = createApi(TESTNET_BASE);
 
 /** Used by every page under `/mainnet/*` (mainnet Polymarket bot). */
 export const apiMainnet = createApi(MAINNET_BASE);
+
+/** GET /shadow-signals — every signal scored against settlements (read-only). */
+export interface ShadowSignalScore {
+  signal: string;
+  slot: string;
+  n: number;
+  hitRate: number;
+  noise: number;
+  avgCost: number;
+  pnlPerContract: number;
+}
+export interface ShadowSignalsReport {
+  network: string;
+  decisions: number;
+  scores: ShadowSignalScore[];
+}
+
+/** GET /watch — running record of watched mainnet wallets. */
+export interface WatchedWallet {
+  owner: string;
+  positions: number;
+  lastTradeMs: number | null;
+  earlyExitRate: number;
+  held: { n: number; wins: number; expectedWins: number; z: number | null };
+  cashPnl: number;
+  spent: number;
+  avgEntryProb: number;
+  avgSecondsToExpiryAtEntry: number | null;
+}
+export interface WatchReport {
+  wallets: WatchedWallet[];
+}
 
 export function formatUsdc(x: number | undefined | null, places = 2): string {
   if (x == null || !isFinite(x)) return '—';

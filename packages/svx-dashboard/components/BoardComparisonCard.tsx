@@ -68,7 +68,7 @@ export function BoardComparisonCard() {
           protocol&apos;s <strong>board quote</strong> (what a trade pays, skew included) beside
           our <strong>model price</strong> (from the on-chain volatility surface); both settle
           against the same outcome.{' '}
-          <code className="font-mono text-[10px]">GET /board-comparison</code>
+          <code className="font-code text-[10px]">GET /board-comparison</code>
         </p>
       </CardHeader>
       <CardContent>
@@ -166,7 +166,7 @@ function Stat({
 }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-[0.16em] text-muted">{label}</div>
+      <div className="text-[13px] tracking-[-0.005em] text-muted">{label}</div>
       <div
         className={`text-xl font-mono font-semibold tabular-nums ${
           tone === 'win' ? 'text-win' : tone === 'loss' ? 'text-loss' : ''

@@ -41,7 +41,7 @@ export default function WalletsPage() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+        <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
           Wallets
         </h1>
         <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
@@ -181,7 +181,7 @@ function SuiCard({ sui }: { sui: WalletsSnapshot['sui'] }) {
         )}
         <Separator />
         <div>
-          <div className="text-xs uppercase tracking-wider text-muted mb-2">
+          <div className="text-[13px] tracking-[-0.005em] text-muted mb-2">
             Open positions ({sui.openPositions.length})
           </div>
           {sui.openPositions.length === 0 ? (
@@ -335,7 +335,7 @@ function PolygonCard({
         <Separator />
         <div>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-xs uppercase tracking-wider text-muted">
+            <div className="text-[13px] tracking-[-0.005em] text-muted">
               Open outcome share positions ({polygon.openPositions.length})
             </div>
             <span className="text-xs text-muted">
@@ -498,7 +498,7 @@ function HyperliquidCard({ hl }: { hl: WalletsSnapshot['hyperliquid'] }) {
 
         <Separator />
         <div>
-          <div className="text-xs uppercase tracking-wider text-muted mb-2">
+          <div className="text-[13px] tracking-[-0.005em] text-muted mb-2">
             On-chain positions (HL clearinghouse)
           </div>
           {!hl.chainPositions || hl.chainPositions.length === 0 ? (
@@ -547,7 +547,7 @@ function HyperliquidCard({ hl }: { hl: WalletsSnapshot['hyperliquid'] }) {
           <>
             <Separator />
             <div>
-              <div className="text-xs uppercase tracking-wider text-muted mb-2">
+              <div className="text-[13px] tracking-[-0.005em] text-muted mb-2">
                 Ledger-tracked hedges ({hl.ledgerHedges.length})
               </div>
               <Table>
@@ -648,7 +648,7 @@ function AddressRow({
 }) {
   return (
     <div className="rounded-md border border-border bg-surface-elevated px-3 py-2">
-      <div className="text-xs uppercase tracking-wider text-muted">{label}</div>
+      <div className="text-[13px] tracking-[-0.005em] text-muted">{label}</div>
       <a
         href={`https://polygonscan.com/address/${address}`}
         target="_blank"
@@ -684,7 +684,7 @@ function KeyValue({
           : 'text-white';
   return (
     <div className="rounded-md border border-border bg-surface-elevated px-3 py-2">
-      <div className="text-xs uppercase tracking-wider text-muted">{label}</div>
+      <div className="text-[13px] tracking-[-0.005em] text-muted">{label}</div>
       <div className={`${small ? 'text-sm' : 'text-lg'} font-mono mt-0.5 tabular-nums ${toneCls}`}>
         {value}
       </div>

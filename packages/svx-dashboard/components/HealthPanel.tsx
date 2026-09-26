@@ -30,14 +30,16 @@ interface Row {
 }
 
 const TONE: Record<Level, { border: string; bg: string; text: string; icon: typeof Pulse }> = {
-  ok: { border: 'border-win/40', bg: 'bg-win/5', text: 'text-win', icon: CheckCircle },
+  // Healthy is the quiet state: neutral tile, green only on the glyph and
+  // label. Colour escalates with severity instead of decorating the norm.
+  ok: { border: 'border-border', bg: 'bg-white/[0.025]', text: 'text-win', icon: CheckCircle },
   warn: {
-    border: 'border-warn/40',
-    bg: 'bg-warn/5',
+    border: 'border-warn/25',
+    bg: 'bg-warn/[0.06]',
     text: 'text-warn',
     icon: Warning,
   },
-  err: { border: 'border-loss/40', bg: 'bg-loss/5', text: 'text-loss', icon: XCircle },
+  err: { border: 'border-loss/25', bg: 'bg-loss/[0.06]', text: 'text-loss', icon: XCircle },
 };
 
 function predictRow(status: BotStatus): Row {
@@ -165,21 +167,21 @@ function HealthCard({ row }: { row: Row }) {
   return (
     <div
       className={cn(
-        'rounded-lg border p-3 transition-colors',
+        'rounded-xl border p-4 transition-colors',
         tone.border,
         tone.bg,
       )}
     >
       <div className="flex items-center justify-between mb-1.5">
-        <span className={cn('text-xs uppercase tracking-wider font-medium', tone.text)}>
+        <span className={cn('text-[13px] tracking-[-0.005em] font-medium', tone.text)}>
           {row.label}
         </span>
         <Icon className={cn('h-4 w-4', tone.text)} />
       </div>
-      <div className="font-mono text-sm">{row.primary}</div>
+      <div className="font-mono text-[15px] font-medium text-fg">{row.primary}</div>
       {row.hint && <div className="text-xs text-muted mt-1">{row.hint}</div>}
       {row.detail && (
-        <div className="text-xs text-muted/70 font-mono mt-1">{row.detail}</div>
+        <div className="text-xs text-muted/70 font-code mt-1">{row.detail}</div>
       )}
     </div>
   );

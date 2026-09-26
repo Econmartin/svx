@@ -12,8 +12,11 @@ module.exports = {
         surface: '#0c1110',
         'surface-elevated': '#121916',
         'surface-hover': '#172220',
-        border: '#1a2520',
-        'border-strong': '#28342e',
+        // Hairlines, not outlines: a translucent white edge reads as depth on
+        // any surface (the way macOS draws window and card edges) instead of
+        // a green-tinted stroke competing with the accent.
+        border: 'rgba(255, 255, 255, 0.075)',
+        'border-strong': 'rgba(255, 255, 255, 0.14)',
         muted: '#7a8579',
         'muted-strong': '#a8b3a5',
         fg: '#e6efe8',
@@ -28,10 +31,26 @@ module.exports = {
         warn: '#ffb648',
       },
       fontFamily: {
-        // Geist Mono for all numerics — taste-skill priority swap (was
-        // Inter + JetBrains Mono, the universal AI default stack).
-        mono: ['Geist Mono', 'ui-monospace', 'JetBrains Mono', 'Menlo', 'monospace'],
+        // `font-mono` marks NUMERIC content across the app. It now renders in
+        // the sans face with tabular figures (see globals.css) — columns still
+        // align, but numbers read like a native finance app rather than a
+        // terminal. Real code/identifiers use `font-code`.
+        mono: ['Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        code: ['Geist Mono', 'ui-monospace', 'JetBrains Mono', 'Menlo', 'monospace'],
         sans: ['Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      },
+      // Softer, more generous corners everywhere the app already asks for
+      // rounding — one change instead of a hundred class edits.
+      borderRadius: {
+        md: '10px',
+        lg: '14px',
+        xl: '18px',
+        '2xl': '22px',
+      },
+      boxShadow: {
+        // Top inner highlight + long soft drop: the card lifts off the page.
+        card: 'inset 0 1px 0 0 rgba(255,255,255,0.045), 0 1px 2px rgba(0,0,0,0.35), 0 12px 32px -16px rgba(0,0,0,0.7)',
+        pop: 'inset 0 1px 0 0 rgba(255,255,255,0.06), 0 24px 60px -20px rgba(0,0,0,0.8)',
       },
       keyframes: {
         shimmer: {

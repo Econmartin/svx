@@ -28,7 +28,7 @@ export function OperatorBanner({ address, context }: OperatorBannerProps) {
         <User className="h-4 w-4 text-accent flex-shrink-0" weight="bold" />
         <span>
           <span className="text-muted">Operator:</span>{' '}
-          <code className="font-mono text-fg/90">{displayed}</code> · {context}
+          <code className="font-code text-fg/90">{displayed}</code> · {context}
         </span>
       </div>
       <a

@@ -85,7 +85,7 @@ export default function PolyArbPage() {
     <div className="space-y-6">
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+          <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
             Cross-venue arb
           </h1>
           <Badge variant={isMainnet ? 'mainnet' : 'testnet'} className="text-[10px]">
@@ -160,7 +160,7 @@ export default function PolyArbPage() {
           </>,
           <>
             Mid-life exits (closed trade rows where{' '}
-            <code className="font-mono text-[10px]">poly_settlement_outcome = early_exit</code>
+            <code className="font-code text-[10px]">poly_settlement_outcome = early_exit</code>
             ) sold the spread back before UMA settled — caught compression instead of
             waiting hours.
           </>,

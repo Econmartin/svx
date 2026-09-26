@@ -1,18 +1,14 @@
 'use client';
 
 /**
- * Site-wide dismissible notice about the frozen Predict SVI feed. Styled
- * after the demo-day presenter's corner chip (bottom-right, accent
- * border). Dismissal persists in localStorage; bump the KEY suffix if the
- * message materially changes and should re-show for returning visitors.
- *
- * Remove this component (and its layout mount) once the upstream feeder
- * is live again.
+ * Site-wide dismissible notice: a compact bottom-right card that never
+ * covers the reading column. Dismissal persists in localStorage; bump the
+ * KEY suffix if the message materially changes and should re-show.
  */
 
 import { useEffect, useState } from 'react';
 
-const KEY = 'svx-feed-notice-dismissed-v8';
+const KEY = 'svx-feed-notice-dismissed-v9';
 
 export function FeedNotice() {
   const [visible, setVisible] = useState(false);
@@ -27,40 +23,39 @@ export function FeedNotice() {
 
   if (!visible) return null;
 
+  const dismiss = () => {
+    try {
+      localStorage.setItem(KEY, '1');
+    } catch {
+      /* ignore */
+    }
+    setVisible(false);
+  };
+
   return (
-    <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-accent/40 bg-bg/95 backdrop-blur px-4 py-3 shadow-lg text-sm">
-      <div className="flex items-center justify-between gap-4 mb-1">
-        <span className="font-mono text-accent">Predict feed status</span>
+    <div
+      role="status"
+      className="fixed bottom-12 right-5 z-50 w-[min(340px,calc(100vw-2.5rem))] rounded-2xl border border-white/[0.09] bg-[#0d1211]/85 backdrop-blur-2xl backdrop-saturate-150 px-4 py-3.5 shadow-pop animate-fade-in"
+    >
+      <div className="flex items-start gap-3">
+        <span aria-hidden className="mt-[5px] inline-block h-2 w-2 flex-shrink-0 rounded-full bg-accent" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold text-fg tracking-[-0.01em]">
+            Predict is live on Sui mainnet
+          </p>
+          <p className="mt-1 text-[12.5px] leading-[1.5] text-muted">
+            SVX reads it through DeepBook&apos;s own SDK, fees included. Mainnet lists 1- and
+            5-minute BTC windows; strategies stay in paper while the shadow tracker scores them.
+          </p>
+        </div>
         <button
           aria-label="Dismiss notice"
-          className="text-muted hover:text-fg text-base leading-none px-1 cursor-pointer"
-          onClick={() => {
-            try {
-              localStorage.setItem(KEY, '1');
-            } catch {
-              /* ignore */
-            }
-            setVisible(false);
-          }}
+          className="-mr-1 -mt-1 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-white/[0.08] hover:text-fg"
+          onClick={dismiss}
         >
-          ×
+          <span aria-hidden className="text-[15px] leading-none">×</span>
         </button>
       </div>
-      <p className="text-muted leading-snug">
-        SVX now reads Predict through DeepBook&apos;s own SDK over gRPC — no server in
-        between, the supported path since their indexer went offline. That opened the full
-        market board: every tenor from one minute to 31 days, with the protocol&apos;s own
-        board quote recorded beside our model price and both settled against the same
-        outcome. See the board-vs-model card on Overview.{' '}
-        <a
-          className="text-accent hover:underline"
-          href="https://github.com/blockscholes/sui-signed-oracle"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          upstream work →
-        </a>
-      </p>
     </div>
   );
 }

@@ -63,13 +63,13 @@ export default function SignalsPage() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+        <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
           Signals
         </h1>
         <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
           Real-time spread evaluations: our SVI model probability vs the venue&apos;s
           tradeable quote — Polymarket&apos;s book in the V1 era, Predict&apos;s own board
-          price on SVX V2 (rows tagged <code className="font-mono text-xs">v2_board</code>).
+          price on SVX V2 (rows tagged <code className="font-code text-xs">v2_board</code>).
         </p>
       </header>
 
@@ -90,7 +90,7 @@ export default function SignalsPage() {
             executed (placed a trade), or failed (venue rejected).{' '}
             <em>Two eras share this stream: V1 rows priced Predict against Polymarket&apos;s
             book (idle since the July 26 redeployment — V2 expiries never align with
-            Poly&apos;s), and <code className="font-mono text-[11px]">v2_board</code> rows
+            Poly&apos;s), and <code className="font-code text-[11px]">v2_board</code> rows
             price our surface against Predict&apos;s own board quote across every listed
             tenor — the exact input a V2 divergence strategy trades on.</em>
           </>
@@ -98,7 +98,7 @@ export default function SignalsPage() {
         hints={[
           <>The <strong>scatter</strong> below plots the venue quote (x) vs our model probability (y). Points on the y=x line are model and venue in agreement; points off the line are where the spread lives.</>,
           <>Use the <strong>tabs</strong> top-right to filter to executed-only when checking what actually fired.</>,
-          <>Failed rows carry a <code className="font-mono text-[10px]">filter_reason</code> like <code className="font-mono text-[10px]">poly_thin_book</code> or <code className="font-mono text-[10px]">poly_maker_not_allowed</code> — useful for debugging mainnet config.</>,
+          <>Failed rows carry a <code className="font-code text-[10px]">filter_reason</code> like <code className="font-code text-[10px]">poly_thin_book</code> or <code className="font-code text-[10px]">poly_maker_not_allowed</code> — useful for debugging mainnet config.</>,
         ]}
       />
 
@@ -126,7 +126,7 @@ export default function SignalsPage() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
           <div className="space-y-1">
             <CardTitle>Signals — last 200</CardTitle>
             <p className="text-xs text-muted">

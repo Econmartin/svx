@@ -31,7 +31,7 @@ export function StatusTicker() {
     : error
       ? 'text-loss'
       : 'text-muted';
-  const stateLabel = status ? (status.paused ? 'PAUSED' : 'LIVE') : error ? 'OFFLINE' : 'CONNECTING';
+  const stateLabel = status ? (status.paused ? 'Paused' : 'Live') : error ? 'Offline' : 'Connecting';
 
   const items: Array<{ label: string; value: string; tone?: 'win' | 'loss' | 'muted' }> = [];
 
@@ -80,9 +80,9 @@ export function StatusTicker() {
       role="status"
       aria-live="polite"
       aria-label="Live bot status"
-      className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/80 bg-bg/95 backdrop-blur supports-[backdrop-filter]:bg-bg/75"
+      className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/[0.06] bg-bg/80 backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-bg/60"
     >
-      <div className="mx-auto max-w-[1600px] px-5 h-8 flex items-center gap-4 text-[11px] font-mono tabular-nums overflow-x-auto whitespace-nowrap">
+      <div className="mx-auto max-w-[1600px] px-6 h-9 flex items-center gap-4 text-[12px] font-mono tabular-nums overflow-x-auto whitespace-nowrap scrollbar-none">
         <div className="flex items-center gap-2 flex-shrink-0">
           <span
             aria-hidden
@@ -90,16 +90,16 @@ export function StatusTicker() {
               status && !status.paused ? 'bg-accent animate-pulse-glow' : status?.paused ? 'bg-loss' : 'bg-muted'
             }`}
           />
-          <span className={`font-semibold tracking-wide ${stateColor}`}>{stateLabel}</span>
+          <span className={`font-semibold ${stateColor}`}>{stateLabel}</span>
           <span aria-hidden className="text-muted/60">·</span>
-          <span className="text-muted uppercase tracking-wider">{network}</span>
+          <span className="text-muted capitalize">{network}</span>
           <span aria-hidden className="text-muted/60">·</span>
           <span className="text-muted">{latencyMs}</span>
         </div>
         <div className="flex items-center gap-5 ml-auto overflow-x-auto">
           {items.map((it) => (
             <span key={it.label} className="flex items-center gap-1.5 flex-shrink-0">
-              <span className="text-muted uppercase tracking-wider text-[10px]">
+              <span className="text-muted text-[12px]">
                 {it.label}
               </span>
               <span

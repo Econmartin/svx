@@ -71,7 +71,7 @@ export default function VolArbPage() {
     <div className="space-y-6">
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+          <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
             IV-RV divergence strategy
           </h1>
           <Badge variant={data.enabled ? 'live' : 'outline'}>

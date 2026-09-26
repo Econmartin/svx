@@ -147,7 +147,7 @@ function CheckRow({
         <div className="flex-1 space-y-1.5">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="font-medium text-fg text-[14px]">{title}</span>
-            <code className="font-mono text-[11px] text-muted">{formula}</code>
+            <code className="font-code text-[11px] text-muted">{formula}</code>
           </div>
           <p className="text-[13px] text-muted-strong/95 leading-relaxed">{summary}</p>
           {children}

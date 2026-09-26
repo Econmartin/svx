@@ -290,7 +290,7 @@ function Pillar({
           {icon}
           <CardTitle className="text-[15px]">{title}</CardTitle>
         </div>
-        <div className="text-[11px] uppercase tracking-wider text-muted font-medium">
+        <div className="text-[12px] text-muted font-medium">
           {kicker}
         </div>
       </CardHeader>
@@ -362,7 +362,7 @@ function CalibrationExhibit({ report }: { report: CalibrationReport | null }) {
       <div className="overflow-x-auto">
         <table className="text-xs font-mono tabular-nums border-separate border-spacing-x-4 border-spacing-y-0.5">
           <thead>
-            <tr className="text-muted uppercase tracking-wider text-[10px]">
+            <tr className="text-muted text-[10px]">
               <th className="text-left font-medium">Quoted band</th>
               <th className="text-right font-medium">n</th>
               <th className="text-right font-medium">Avg quoted</th>

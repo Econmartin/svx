@@ -64,7 +64,7 @@ export default function VaultsPage() {
   const { data, error } = usePolling(fetcher, 60_000);
 
   const title = (
-    <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+    <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
       Vault strategies — simulated on real data
     </h1>
   );
@@ -116,14 +116,14 @@ export default function VaultsPage() {
         hints={[
           <>
             <strong>Execution exists for both:</strong>{' '}
-            <code className="font-mono text-[10px]">svx mint-ladder</code> mints the winning σ/2
-            ladder live via <code className="font-mono text-[10px]">predict::mint_range</code>;{' '}
-            <code className="font-mono text-[10px]">svx supply-plp</code> takes a house-side
-            position via <code className="font-mono text-[10px]">predict::supply</code>.
+            <code className="font-code text-[10px]">svx mint-ladder</code> mints the winning σ/2
+            ladder live via <code className="font-code text-[10px]">predict::mint_range</code>;{' '}
+            <code className="font-code text-[10px]">svx supply-plp</code> takes a house-side
+            position via <code className="font-code text-[10px]">predict::supply</code>.
           </>,
           <>
             <strong>Range caveat:</strong> ranges have no permissionless redeem — the operator
-            key redeems after settlement (<code className="font-mono text-[10px]">redeem_range</code>).
+            key redeems after settlement (<code className="font-code text-[10px]">redeem_range</code>).
           </>,
           <>
             <strong>Why σ/2 wins:</strong> the calibration exhibit (landing page) shows the
@@ -138,7 +138,7 @@ export default function VaultsPage() {
           <CardTitle>Range ladder — strike-width policy shoot-out</CardTitle>
           <p className="text-xs text-muted mt-0.5">
             5 rungs around ATM per settled oracle, priced off the surface the vault would have
-            seen, 2% fee. <code className="font-mono text-[10px]">GET /range-sim</code>.
+            seen, 2% fee. <code className="font-code text-[10px]">GET /range-sim</code>.
           </p>
           <p className="text-xs text-warn mt-1.5">
             <strong>Live replay window:</strong> this table recomputes on the settled oracles the
@@ -215,7 +215,7 @@ export default function VaultsPage() {
           <p className="text-xs text-muted mt-0.5">
             PLP APY realized from on-chain supply/withdraw events; crash insurance priced per
             oracle cycle off recorded surfaces, netted against realized crash payouts.{' '}
-            <code className="font-mono text-[10px]">GET /plp-sim</code>.
+            <code className="font-code text-[10px]">GET /plp-sim</code>.
           </p>
         </CardHeader>
         <CardContent>
@@ -223,17 +223,17 @@ export default function VaultsPage() {
             <>
               <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm font-mono tabular-nums mb-4">
                 <span>
-                  <span className="text-muted text-xs uppercase tracking-wider">PLP realized APY</span>{' '}
+                  <span className="text-muted text-[13px] tracking-[-0.005em]">PLP realized APY</span>{' '}
                   {data.plp.plp.realized_apy != null
                     ? `${(data.plp.plp.realized_apy * 100).toFixed(2)}%`
                     : '—'}
                 </span>
                 <span>
-                  <span className="text-muted text-xs uppercase tracking-wider">share price</span>{' '}
+                  <span className="text-muted text-[13px] tracking-[-0.005em]">share price</span>{' '}
                   {data.plp.plp.share_price_first} → {data.plp.plp.share_price_last}
                 </span>
                 <span>
-                  <span className="text-muted text-xs uppercase tracking-wider">window</span>{' '}
+                  <span className="text-muted text-[13px] tracking-[-0.005em]">window</span>{' '}
                   {data.plp.plp.window_days}d · {data.plp.plp.events} events
                 </span>
               </div>
@@ -290,11 +290,11 @@ export default function VaultsPage() {
             <Badge variant="outline" className="text-[10px]">simulated · live when Predict ships mainnet</Badge>
           </CardTitle>
           <p className="text-xs text-muted mt-0.5">
-            Borrow dUSDC on <code className="font-mono text-[10px]">deepbook_margin</code> against
-            an <code className="font-mono text-[10px]">iron_bank</code> USDsui share, deploy into
+            Borrow dUSDC on <code className="font-code text-[10px]">deepbook_margin</code> against
+            an <code className="font-code text-[10px]">iron_bank</code> USDsui share, deploy into
             the favored-side strategies, repay from settlements. Strategy leg = this bot&apos;s
             real settled trades; borrow APR is an explicit assumption (no public rate feed).{' '}
-            <code className="font-mono text-[10px]">GET /margin-loop</code>.
+            <code className="font-code text-[10px]">GET /margin-loop</code>.
           </p>
         </CardHeader>
         <CardContent>
@@ -302,7 +302,7 @@ export default function VaultsPage() {
             <>
               <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm font-mono tabular-nums">
                 <span>
-                  <span className="text-muted text-xs uppercase tracking-wider">strategy leg</span>{' '}
+                  <span className="text-muted text-[13px] tracking-[-0.005em]">strategy leg</span>{' '}
                   {data.marginLoop.strategy.trades} trades ·{' '}
                   {data.marginLoop.strategy.win_rate != null
                     ? `${(data.marginLoop.strategy.win_rate * 100).toFixed(0)}% win`
@@ -312,17 +312,17 @@ export default function VaultsPage() {
                     : '—'}
                 </span>
                 <span>
-                  <span className="text-muted text-xs uppercase tracking-wider">borrow</span>{' '}
+                  <span className="text-muted text-[13px] tracking-[-0.005em]">borrow</span>{' '}
                   ${data.marginLoop.loop.borrowed_usdc} @ {(data.marginLoop.loop.borrow_apr_assumed * 100).toFixed(0)}% (assumed)
                 </span>
                 <span>
-                  <span className="text-muted text-xs uppercase tracking-wider">utilization</span>{' '}
+                  <span className="text-muted text-[13px] tracking-[-0.005em]">utilization</span>{' '}
                   {data.marginLoop.loop.utilization != null
                     ? `${(data.marginLoop.loop.utilization * 100).toFixed(0)}%`
                     : '—'}
                 </span>
                 <span>
-                  <span className="text-muted text-xs uppercase tracking-wider">levered net APY</span>{' '}
+                  <span className="text-muted text-[13px] tracking-[-0.005em]">levered net APY</span>{' '}
                   <span
                     className={
                       (data.marginLoop.loop.levered_net_apy ?? 0) >= 0 ? 'text-win' : 'text-loss'

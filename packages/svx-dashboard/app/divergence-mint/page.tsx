@@ -67,7 +67,7 @@ export default function DivergenceMintPage() {
   const { data, error } = usePolling(fetcher, 15_000);
 
   const title = (
-    <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+    <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
       Divergence-mint strategy
     </h1>
   );
@@ -139,7 +139,7 @@ export default function DivergenceMintPage() {
         summary={
           <>
             The formulation is the finding. Betting the arb&apos;s Predict leg
-            (<code className="font-mono text-[10px]">predict_direction</code>) or its mirror both
+            (<code className="font-code text-[10px]">predict_direction</code>) or its mirror both
             flip sign between months — which side that leg points at depends on which venue
             happens to be quoting rich. The favorite is the same economic bet in every regime.
             Validated on two disjoint windows of recorded signals (May 2026: n=50, 94% win,
@@ -160,7 +160,7 @@ export default function DivergenceMintPage() {
           </>,
           <>
             <strong>Mainnet-day-one:</strong> settlement, PnL, and{' '}
-            <code className="font-mono text-[10px]">redeem_permissionless</code> ride the same
+            <code className="font-code text-[10px]">redeem_permissionless</code> ride the same
             machinery the arb leg has exercised on testnet since May. The mainnet flip is an
             address swap + config change — no new code path.
           </>,
@@ -202,7 +202,7 @@ export default function DivergenceMintPage() {
           <CardHeader>
             <CardTitle>Live replay — this bot&apos;s own ledger</CardTitle>
             <p className="text-xs text-muted mt-0.5">
-              <code className="font-mono text-[10px]">
+              <code className="font-code text-[10px]">
                 GET /backtest?threshold=0.08&side=favored&dedupe=true&fee=0.02
               </code>{' '}
               — recomputed server-side from every recorded signal, on every page load.
@@ -253,7 +253,7 @@ export default function DivergenceMintPage() {
                 {data.harvestBacktest.roi != null
                   ? `${data.harvestBacktest.roi >= 0 ? '+' : ''}${(data.harvestBacktest.roi * 100).toFixed(1)}% ROI`
                   : '—'}{' '}
-                — <code className="font-mono text-[10px]">&maxThreshold=0.08&maxCost=0.9</code>.
+                — <code className="font-code text-[10px]">&maxThreshold=0.08&maxCost=0.9</code>.
               </p>
             )}
             {bt && (
@@ -261,7 +261,7 @@ export default function DivergenceMintPage() {
                 Signal retention bounds the window (~12 days). The May-2026 archive windows
                 (mint band: n=50, 94% win, +11.9% ROI · harvest band: n=64, 90.6%, +14.2%) are
                 documented with method + caveats in{' '}
-                <code className="font-mono text-[10px]">docs/backtest-report.md</code>.
+                <code className="font-code text-[10px]">docs/backtest-report.md</code>.
               </p>
             )}
           </CardContent>
@@ -311,7 +311,7 @@ export default function DivergenceMintPage() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wider text-muted">{label}</dt>
+      <dt className="text-[13px] tracking-[-0.005em] text-muted">{label}</dt>
       <dd className="mt-0.5 font-mono text-sm tabular-nums truncate">{value}</dd>
     </div>
   );

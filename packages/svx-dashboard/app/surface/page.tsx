@@ -57,7 +57,7 @@ export default function SurfacePage() {
     <div className="space-y-6">
       <header className="flex items-end justify-between flex-wrap gap-4">
         <div className="space-y-2">
-          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+          <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
             Volatility surface
           </h1>
           <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
@@ -88,15 +88,15 @@ export default function SurfacePage() {
           <>
             DeepBook Predict prices every binary option from a single live{' '}
             <strong>SVI volatility surface</strong>. The chart below plots that surface for the
-            selected oracle expiry: total variance <code className="font-mono text-[10px]">w(k)</code>{' '}
-            and implied vol per log-strike <code className="font-mono text-[10px]">k = ln(K/F)</code>.
+            selected oracle expiry: total variance <code className="font-code text-[10px]">w(k)</code>{' '}
+            and implied vol per log-strike <code className="font-code text-[10px]">k = ln(K/F)</code>.
             This is the pricing brain — every signal the bot fires starts here.
           </>
         }
         hints={[
           <>Pick a different expiry above to flip between the active oracles. Shorter expiries usually show steeper smiles.</>,
           <>The shape of the smile matters: a clear skew tilts the directional bias gate on the IV-RV strategy and Margin-Lever; a flat smile means neutral.</>,
-          <>If the SVI parameters age past <code className="font-mono text-[10px]">maxSviStalenessSec</code>, the bot refuses to trade off that oracle (visible as <code className="font-mono text-[10px]">filter_reason: svi_stale</code> on Signals).</>,
+          <>If the SVI parameters age past <code className="font-code text-[10px]">maxSviStalenessSec</code>, the bot refuses to trade off that oracle (visible as <code className="font-code text-[10px]">filter_reason: svi_stale</code> on Signals).</>,
         ]}
       />
 
@@ -257,7 +257,7 @@ export default function SurfacePage() {
                   <p className="text-xs text-muted">
                     All implementation in
                     <code className="px-1 mx-1 bg-bg rounded font-mono">packages/svx-bot/src/pricing/{`{svi,bs}`}.ts</code>,
-                    validated against Python <code className="font-mono">math.erf</code> reference vectors.
+                    validated against Python <code className="font-code">math.erf</code> reference vectors.
                   </p>
                 </div>
               )}
@@ -282,10 +282,10 @@ export default function SurfacePage() {
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm font-mono tabular-nums">
-                  <span><span className="text-muted text-xs uppercase tracking-wider">scans</span>{' '}{butterfly.stats.scans.toLocaleString()}</span>
-                  <span><span className="text-muted text-xs uppercase tracking-wider">violations</span>{' '}{butterfly.stats.violations}</span>
-                  <span><span className="text-muted text-xs uppercase tracking-wider">tradeable (&gt;5pp)</span>{' '}{butterfly.stats.tradeable}</span>
-                  <span><span className="text-muted text-xs uppercase tracking-wider">best margin</span>{' '}{butterfly.stats.bestMarginFrac != null ? `${(butterfly.stats.bestMarginFrac * 100).toFixed(2)}pp` : '—'}</span>
+                  <span><span className="text-muted text-[13px] tracking-[-0.005em]">scans</span>{' '}{butterfly.stats.scans.toLocaleString()}</span>
+                  <span><span className="text-muted text-[13px] tracking-[-0.005em]">violations</span>{' '}{butterfly.stats.violations}</span>
+                  <span><span className="text-muted text-[13px] tracking-[-0.005em]">tradeable (&gt;5pp)</span>{' '}{butterfly.stats.tradeable}</span>
+                  <span><span className="text-muted text-[13px] tracking-[-0.005em]">best margin</span>{' '}{butterfly.stats.bestMarginFrac != null ? `${(butterfly.stats.bestMarginFrac * 100).toFixed(2)}pp` : '—'}</span>
                 </div>
                 {butterfly.recent.length > 0 && (
                   <div className="mt-3 text-xs text-muted space-y-1">
@@ -313,7 +313,7 @@ export default function SurfacePage() {
               <CardTitle>Calibration history</CardTitle>
               <p className="text-xs text-muted mt-0.5 leading-relaxed">
                 Per-parameter drift of the live SVI surface. The bot
-                snapshots <code className="font-mono text-[10px]">w(k)</code>'s
+                snapshots <code className="font-code text-[10px]">w(k)</code>'s
                 five parameters every time it polls; this is the rolling
                 replay. Big jumps in <strong>m</strong> usually track BTC
                 spot; spikes in <strong>b</strong>/<strong>σ</strong> mean
@@ -340,7 +340,7 @@ export default function SurfacePage() {
 function SurfaceStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-border bg-surface px-3 py-2">
-      <div className="text-xs uppercase tracking-wider text-muted">{label}</div>
+      <div className="text-[13px] tracking-[-0.005em] text-muted">{label}</div>
       <div className="mt-1 font-mono text-sm truncate">{value}</div>
     </div>
   );
@@ -349,10 +349,10 @@ function SurfaceStat({ label, value }: { label: string; value: string }) {
 function MathRow({ label, formula }: { label: string; formula: string }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
-      <span className="text-xs uppercase tracking-wider text-muted shrink-0 w-32">
+      <span className="text-[13px] tracking-[-0.005em] text-muted shrink-0 w-32">
         {label}
       </span>
-      <code className="font-mono text-sm text-white">{formula}</code>
+      <code className="font-code text-sm text-white">{formula}</code>
     </div>
   );
 }

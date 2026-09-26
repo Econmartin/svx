@@ -53,7 +53,7 @@ export function V2CalibrationCard() {
           Our second-generation stack (SVX V2) measures Predict&apos;s own quoted probability, sampled 15–120s before each market&apos;s
           expiry at 9 strikes, resolved against on-chain settlement. No Polymarket, no model
           of ours in the loop. Markets settle every ~3 minutes; the sample grows all day.{' '}
-          <code className="font-mono text-[10px]">GET /calibration-v2</code>
+          <code className="font-code text-[10px]">GET /calibration-v2</code>
         </p>
       </CardHeader>
       <CardContent>
@@ -68,13 +68,13 @@ export function V2CalibrationCard() {
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 mb-4">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.16em] text-muted">
+                <div className="text-[13px] tracking-[-0.005em] text-muted">
                   Settled probes
                 </div>
                 <div className="text-xl font-mono font-semibold tabular-nums">{data.n}</div>
               </div>
               <div>
-                <div className="text-[10px] uppercase tracking-[0.16em] text-muted">
+                <div className="text-[13px] tracking-[-0.005em] text-muted">
                   Avg quoted (favored)
                 </div>
                 <div className="text-xl font-mono font-semibold tabular-nums">
@@ -82,7 +82,7 @@ export function V2CalibrationCard() {
                 </div>
               </div>
               <div>
-                <div className="text-[10px] uppercase tracking-[0.16em] text-muted">
+                <div className="text-[13px] tracking-[-0.005em] text-muted">
                   Gap (all time)
                 </div>
                 <div
@@ -94,7 +94,7 @@ export function V2CalibrationCard() {
                 </div>
               </div>
               <div>
-                <div className="text-[10px] uppercase tracking-[0.16em] text-muted">
+                <div className="text-[13px] tracking-[-0.005em] text-muted">
                   Gap (24h)
                 </div>
                 <div

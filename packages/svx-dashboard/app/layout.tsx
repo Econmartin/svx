@@ -47,12 +47,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Skip to content
           </a>
 
-          <header className="sticky top-0 z-40 border-b border-border/80 bg-bg/85 backdrop-blur supports-[backdrop-filter]:bg-bg/65">
+          <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-bg/80 backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-bg/60">
             {/* Two-row header on mobile (brand + toggles on top, scrollable
                 nav below); single-row from md up. Keeps each row well within
                 the viewport instead of clipping the nav off-screen. */}
             <div className="max-w-[1600px] mx-auto">
-              <div className="px-4 sm:px-5 h-14 flex items-center gap-3 md:gap-5">
+              <div className="px-4 sm:px-6 h-16 flex items-center gap-3 md:gap-5">
                 <Link
                   href="/"
                   aria-label="SVX home"
@@ -60,23 +60,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 >
                   <span
                     aria-hidden
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-accent/12 border border-accent/30 text-accent font-mono font-bold text-sm shadow-[0_0_22px_-6px_rgba(30,255,138,0.7)] group-hover:bg-accent/20 group-hover:border-accent/50 transition-colors"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-[9px] bg-gradient-to-b from-[#3dff9c] to-[#10d974] text-bg font-bold text-[15px] tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_1px_2px_rgba(0,0,0,0.4)] transition-transform duration-200 group-hover:scale-[1.04]"
                   >
                     S
                   </span>
                   <span className="flex items-baseline gap-1.5 leading-none">
-                    <span className="font-mono font-semibold tracking-tight text-[15px] text-fg">
+                    <span className="font-semibold tracking-[-0.02em] text-[16px] text-fg">
                       SVX
                     </span>
-                    <span
-                      aria-hidden
-                      className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium"
-                    >
-                      vol-arb
+                    <span aria-hidden className="text-[13px] text-muted font-normal tracking-[-0.01em]">
+                      Vol-arb
                     </span>
                   </span>
                 </Link>
-                <span aria-hidden className="hidden md:block h-5 w-px bg-border/80" />
+                <span aria-hidden className="hidden md:block h-5 w-px bg-white/[0.08]" />
                 <div className="hidden md:block min-w-0 flex-1">
                   <NavLinks />
                 </div>
@@ -84,9 +81,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <NetworkToggle />
                   <span
                     aria-hidden
-                    className="hidden xl:inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-surface/60 px-2.5 h-7 text-[10px] text-muted font-mono whitespace-nowrap uppercase tracking-[0.14em]"
+                    className="hidden xl:inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-3 h-7 text-[12px] text-muted whitespace-nowrap"
                   >
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent/70" />
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent/80" />
                     Sui Overflow ’26
                   </span>
                 </div>
@@ -102,7 +99,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
           <main
             id="main"
-            className="relative z-10 px-5 sm:px-6 py-6 pb-16 max-w-[1400px] mx-auto animate-fade-in"
+            className="relative z-10 px-5 sm:px-8 pt-10 pb-24 max-w-[1320px] mx-auto animate-fade-in"
           >
             {children}
           </main>

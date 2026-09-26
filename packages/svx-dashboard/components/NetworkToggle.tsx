@@ -19,11 +19,11 @@ export function NetworkToggle() {
       onValueChange={(v) => setNetwork(v as 'testnet' | 'mainnet')}
     >
       <ToggleGroupItem value="testnet">
-        <Flask className="h-3.5 w-3.5" />
+        <Flask className="hidden sm:block h-3.5 w-3.5" weight="bold" />
         testnet
       </ToggleGroupItem>
       <ToggleGroupItem value="mainnet">
-        <Money className="h-3.5 w-3.5" />
+        <Money className="hidden sm:block h-3.5 w-3.5" weight="bold" />
         mainnet
       </ToggleGroupItem>
     </ToggleGroup>

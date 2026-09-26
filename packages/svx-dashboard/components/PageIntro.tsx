@@ -27,17 +27,17 @@ export function PageIntro({ summary, hints, detail }: PageIntroProps) {
   return (
     <section
       aria-label="Page overview"
-      className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-x-8 gap-y-4 border-y border-border/70 py-5"
+      className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-x-10 gap-y-5 pt-1 pb-2"
     >
-      <div className="max-w-3xl space-y-3">
-        <p className="text-[15px] leading-relaxed text-fg/90">{summary}</p>
+      <div className="max-w-[68ch] space-y-4">
+        <p className="text-[17px] leading-[1.55] text-fg/80 tracking-[-0.014em]">{summary}</p>
         {hints && hints.length > 0 && (
-          <ul className="text-[12.5px] text-muted-strong/90 leading-relaxed space-y-1.5 pl-0">
+          <ul className="text-[14px] text-muted-strong/80 leading-relaxed space-y-2 pl-0">
             {hints.map((h, i) => (
               <li key={i} className="flex gap-2.5">
                 <span
                   aria-hidden
-                  className="mt-[7px] inline-block h-1 w-1 rounded-full bg-accent/70 flex-shrink-0"
+                  className="mt-[9px] inline-block h-1 w-1 rounded-full bg-muted/70 flex-shrink-0"
                 />
                 <span>{h}</span>
               </li>
@@ -46,7 +46,7 @@ export function PageIntro({ summary, hints, detail }: PageIntroProps) {
         )}
       </div>
       {detail && (
-        <aside className="md:max-w-xs text-xs text-muted font-mono leading-relaxed">
+        <aside className="md:max-w-xs text-[13px] text-muted leading-relaxed">
           {detail}
         </aside>
       )}

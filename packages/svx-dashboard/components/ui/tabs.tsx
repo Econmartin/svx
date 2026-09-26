@@ -23,7 +23,7 @@ export function Tabs({
 }) {
   return (
     <TabsContext.Provider value={{ value, onValueChange }}>
-      <div className={className}>{children}</div>
+      <div className={cn('min-w-0 max-w-full', className)}>{children}</div>
     </TabsContext.Provider>
   );
 }
@@ -39,7 +39,7 @@ export function TabsList({
     <div
       role="tablist"
       className={cn(
-        'inline-flex h-8 items-center gap-0.5 rounded-md border border-border bg-surface/70 p-0.5 text-muted',
+        'inline-flex h-9 max-w-full items-center gap-0.5 overflow-x-auto scrollbar-none rounded-full bg-white/[0.06] p-[3px] text-muted',
         className,
       )}
     >
@@ -66,10 +66,10 @@ export function TabsTrigger({
       aria-selected={active}
       onClick={() => ctx.onValueChange(value)}
       className={cn(
-        'inline-flex items-center justify-center whitespace-nowrap rounded-[5px] px-3 h-7 text-[12.5px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex items-center justify-center whitespace-nowrap rounded-full px-3.5 h-[30px] text-[13px] font-medium transition-[background-color,color,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:pointer-events-none disabled:opacity-50',
         active
-          ? 'bg-accent/15 text-accent'
-          : 'text-muted hover:text-fg hover:bg-surface-elevated/60',
+          ? 'bg-white/[0.12] text-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_1px_3px_rgba(0,0,0,0.4)]'
+          : 'text-muted hover:text-fg',
         className,
       )}
     >

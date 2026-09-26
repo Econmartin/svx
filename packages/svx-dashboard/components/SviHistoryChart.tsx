@@ -81,7 +81,7 @@ function Sparkline({
   return (
     <div className="rounded-lg border border-border bg-surface/60 p-3 space-y-1">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs uppercase tracking-wider text-muted font-medium">{label}</span>
+        <span className="text-[13px] tracking-[-0.005em] text-muted font-medium">{label}</span>
         <span className="font-mono text-sm tabular-nums text-fg">
           {last.toFixed(decimals)}
         </span>

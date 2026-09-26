@@ -7,7 +7,7 @@ export default function AboutPage() {
     <div className="max-w-4xl mx-auto space-y-6">
       <header className="space-y-3">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+          <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
             About SVX
           </h1>
           <Badge variant="outline">Sui Overflow 2026</Badge>
@@ -259,7 +259,7 @@ export default function AboutPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-xs uppercase tracking-wider text-muted border-b border-border">
+                <tr className="text-left text-[13px] tracking-[-0.005em] text-muted border-b border-border">
                   <th className="py-2 pr-3 font-medium">Spec requirement</th>
                   <th className="py-2 font-medium">What SVX built</th>
                 </tr>
@@ -777,7 +777,7 @@ function Venue({
     <Card className={`border-l-4 ${accentCls}`}>
       <CardHeader className="pb-1.5 flex flex-row items-baseline gap-3 space-y-0">
         <div className="text-base font-semibold tracking-tight">{name}</div>
-        <div className="text-[11px] text-muted uppercase tracking-wider font-medium">
+        <div className="text-[11px] text-muted font-medium">
           {subtitle}
         </div>
       </CardHeader>
@@ -868,7 +868,7 @@ function RepoNode({
         indent ? 'sm:pl-4' : ''
       }`}
     >
-      <code className="font-mono text-[12px] text-fg/85 whitespace-pre-wrap break-all">
+      <code className="font-code text-[12px] text-fg/85 whitespace-pre-wrap break-all">
         {path.trimStart()}
       </code>
       <span className="text-[12.5px] text-muted leading-snug">{body}</span>

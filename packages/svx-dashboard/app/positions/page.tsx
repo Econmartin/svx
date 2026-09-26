@@ -76,7 +76,7 @@ export default function PositionsPage() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+        <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
           Positions
         </h1>
         <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
@@ -99,14 +99,14 @@ export default function PositionsPage() {
             <>
               Each row is one Predict mint on Sui testnet. Open rows wait for oracle settlement;
               closed rows show <strong>realized PnL</strong> after auto-redemption via{' '}
-              <code className="font-mono text-[10px]">predict::redeem_permissionless</code>.
+              <code className="font-code text-[10px]">predict::redeem_permissionless</code>.
             </>
           )
         }
         hints={
           isMainnet
             ? [
-                <>Mid-life exits show <code className="font-mono text-[10px]">poly_settlement_outcome = early_exit</code> — the spread compressed in our favor and we sold before waiting for UMA.</>,
+                <>Mid-life exits show <code className="font-code text-[10px]">poly_settlement_outcome = early_exit</code> — the spread compressed in our favor and we sold before waiting for UMA.</>,
                 <>Combined PnL = Polymarket leg + HL hedge leg, summed. If the hedge worked, total variance is lower than poly-only.</>,
                 <>PnL distribution below tells you scale-up safety — tight = predictable, fat tails = risky to size up.</>,
               ]

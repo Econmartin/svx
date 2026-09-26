@@ -28,7 +28,7 @@ export default function MarginLeverPage() {
   if (error) {
     return (
       <div className="space-y-4">
-        <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+        <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
           Margin-Lever
         </h1>
         <Card>
@@ -43,7 +43,7 @@ export default function MarginLeverPage() {
   if (!data) {
     return (
       <div className="space-y-4">
-        <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+        <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
           Margin-Lever
         </h1>
         <Card>
@@ -61,7 +61,7 @@ export default function MarginLeverPage() {
     <div className="space-y-6">
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+          <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
             Margin-Lever strategy
           </h1>
           <Badge variant="outline" className="text-[10px]">paper · v1</Badge>
@@ -84,8 +84,8 @@ export default function MarginLeverPage() {
           )}
         </div>
         <p className="text-muted text-[13.5px] max-w-3xl leading-relaxed">
-          Borrow dUSDC on <code className="font-mono text-[10px]">deepbook_margin</code> against an{' '}
-          <code className="font-mono text-[10px]">iron_bank</code> USDsui share, deploy into a
+          Borrow dUSDC on <code className="font-code text-[10px]">deepbook_margin</code> against an{' '}
+          <code className="font-code text-[10px]">iron_bank</code> USDsui share, deploy into a
           directional BTC spot view driven by Predict's SVI bias, close on
           signal flip or time-stop. Lives on Sui mainnet rails (vs Predict
           testnet for the pricing brain).
@@ -98,15 +98,15 @@ export default function MarginLeverPage() {
         summary={
           <>
             Three-protocol composition on Sui mainnet. The strategy reads
-            Predict's <code className="font-mono text-[10px]">P(↑)</code>{' '}
+            Predict's <code className="font-code text-[10px]">P(↑)</code>{' '}
             from the shortest-expiry BTC oracle, opens a paper long/short
             when{' '}
-            <code className="font-mono text-[10px]">|P(↑) − 50%|</code>{' '}
+            <code className="font-code text-[10px]">|P(↑) − 50%|</code>{' '}
             exceeds the open threshold, and closes on bias decay or
             time-stop. PTBs for both{' '}
-            <code className="font-mono text-[10px]">deepbook_margin::*</code>{' '}
+            <code className="font-code text-[10px]">deepbook_margin::*</code>{' '}
             and{' '}
-            <code className="font-mono text-[10px]">iron_bank::*</code>{' '}
+            <code className="font-code text-[10px]">iron_bank::*</code>{' '}
             are constructed and ledgered, never submitted — flipping to
             live requires the operator to fund USDsui collateral first.
           </>
@@ -182,8 +182,8 @@ export default function MarginLeverPage() {
             <CardTitle>Thresholds &amp; caps</CardTitle>
             <p className="text-xs text-muted mt-0.5">
               All non-secret knobs live in{' '}
-              <code className="font-mono text-[10px]">tunables.ts</code>{' '}
-              under the <code className="font-mono text-[10px]">marginLever*</code> namespace.
+              <code className="font-code text-[10px]">tunables.ts</code>{' '}
+              under the <code className="font-code text-[10px]">marginLever*</code> namespace.
             </p>
           </CardHeader>
           <CardContent>
@@ -296,7 +296,7 @@ export default function MarginLeverPage() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wider text-muted">{label}</dt>
+      <dt className="text-[13px] tracking-[-0.005em] text-muted">{label}</dt>
       <dd className="mt-0.5 font-mono text-sm tabular-nums truncate">{value}</dd>
     </div>
   );
@@ -312,7 +312,7 @@ function DecisionTable({ decisions }: { decisions: MarginLeverDecision[] }) {
     return (
       <div className="text-muted text-sm py-6 text-center">
         No decisions yet — strategy boots cold; first tick lands within{' '}
-        <code className="font-mono text-[10px]">marginLeverTickMs</code>.
+        <code className="font-code text-[10px]">marginLeverTickMs</code>.
       </div>
     );
   }

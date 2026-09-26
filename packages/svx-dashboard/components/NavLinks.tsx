@@ -83,15 +83,15 @@ const DOT: Record<Exclude<NavStatus, undefined>, { cls: string; title: string }>
 };
 
 /**
- * Top-nav links with an active-route highlight rendered as a vibrant green
- * pill — matches the modern crypto-trader reference (Hyperliquid / BlockTrade)
- * rather than the underline-on-text style.
+ * Top-nav links. The active route is a quiet frosted pill (the way native
+ * segmented navigation reads); green is reserved for status and data, so
+ * the accent keeps meaning something.
  */
 export function NavLinks() {
   const pathname = usePathname();
   const derived = useDerivedStatus();
   return (
-    <nav aria-label="Primary" className="flex items-center gap-0.5 text-[13px]">
+    <nav aria-label="Primary" className="flex items-center gap-0.5 text-[13.5px] tracking-[-0.01em]">
       {NAV.map(([label, href, status]) => {
         const isActive = pathname === href || pathname?.startsWith(`${href}/`);
         const effective = derived[href] ?? status;
@@ -103,10 +103,10 @@ export function NavLinks() {
             aria-current={isActive ? 'page' : undefined}
             title={dot?.title}
             className={cn(
-              'inline-flex items-center gap-1.5 h-8 px-3 rounded-md transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/70',
+              'inline-flex items-center gap-1.5 h-8 px-3 rounded-full transition-[background-color,color] duration-200 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
               isActive
-                ? 'bg-accent text-bg font-semibold shadow-[0_0_22px_-4px_rgba(30,255,138,0.55)]'
-                : 'text-muted hover:text-fg hover:bg-surface-elevated/80',
+                ? 'bg-white/[0.1] text-fg font-medium'
+                : 'text-muted hover:text-fg hover:bg-white/[0.05]',
             )}
           >
             {dot && (
@@ -114,9 +114,7 @@ export function NavLinks() {
                 aria-hidden
                 className={cn(
                   'inline-block w-1.5 h-1.5 rounded-full shrink-0',
-                  // On the active pill the background is accent-green; keep
-                  // the dot legible by dimming it to the pill's text color.
-                  isActive ? 'bg-bg/70' : dot.cls,
+                  dot.cls,
                 )}
               />
             )}

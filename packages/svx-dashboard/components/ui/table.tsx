@@ -58,7 +58,7 @@ export function TableHead({
     <th
       scope={scope}
       className={cn(
-        'h-9 px-3 text-left align-middle text-[10.5px] font-medium uppercase tracking-[0.1em] text-muted whitespace-nowrap',
+        'h-9 px-3 text-left align-middle text-[12px] font-medium text-muted whitespace-nowrap',
         className,
       )}
       {...props}

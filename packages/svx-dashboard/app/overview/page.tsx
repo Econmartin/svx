@@ -70,7 +70,7 @@ export default function OverviewPage() {
     <div className="space-y-6">
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="text-[26px] sm:text-[28px] leading-tight font-semibold tracking-tight">
+          <h1 className="text-[30px] sm:text-[36px] leading-[1.08] font-semibold tracking-[-0.028em]">
             Overview
           </h1>
           <Badge variant={isMainnet ? 'mainnet' : 'testnet'} className="text-[10px]">
@@ -162,7 +162,7 @@ export default function OverviewPage() {
             <StrategyStats closed={closedForChart} isMainnet={isMainnet} />
             {isMainnet && (status?.hlFeesUsdc || status?.hlFundingUsdc) ? (
               <div className="mt-3 rounded border border-border bg-surface-elevated/50 px-4 py-2.5 text-xs leading-relaxed">
-                <span className="text-muted uppercase tracking-wider text-[10px] mr-2">
+                <span className="text-muted text-[10px] mr-2">
                   HL cost drag
                 </span>
                 <span className="font-mono tabular-nums">
@@ -521,7 +521,7 @@ function RecentSignals({ signals }: { signals: import('@/lib/api').SignalRecord[
       {signals.map((s) => (
         <div
           key={s.id}
-          className="flex items-center gap-2 text-xs px-2 py-1.5 rounded hover:bg-surface-elevated transition-colors"
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] px-2.5 py-2 rounded-lg hover:bg-white/[0.04] transition-colors"
         >
           <span className="text-muted tabular-nums whitespace-nowrap">
             {new Date(s.timestampMs).toLocaleTimeString()}

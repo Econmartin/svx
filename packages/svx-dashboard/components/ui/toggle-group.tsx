@@ -26,7 +26,7 @@ export function ToggleGroup({
       <div
         role="group"
         className={cn(
-          'inline-flex items-center gap-0.5 rounded-md border border-border bg-surface/70 p-0.5 h-8',
+          'inline-flex items-center gap-0.5 rounded-full bg-white/[0.06] p-[3px] h-9',
           className,
         )}
       >
@@ -58,10 +58,10 @@ export function ToggleGroupItem({
       suppressHydrationWarning
       onClick={() => ctx.onValueChange(value)}
       className={cn(
-        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[5px] px-2.5 h-7 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 sm:px-3 h-[30px] text-[13px] font-medium capitalize transition-[background-color,color,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:pointer-events-none disabled:opacity-50',
         active
-          ? 'bg-accent/15 text-accent'
-          : 'text-muted hover:text-fg hover:bg-surface-elevated/60',
+          ? 'bg-white/[0.12] text-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_1px_3px_rgba(0,0,0,0.4)]'
+          : 'text-muted hover:text-fg',
         className,
       )}
     >

@@ -69,8 +69,10 @@ export const SWITCHBOARD = {
   /** Per strategy line (e.g. fade_spike@t50s): stop it for the day at −$15.
    *  Long-shot clips are exempt — they are judged by the live check. */
   lineDailyLossLimitUsd: 15,
-  /** Whole-bank backstop over every switchboard line, long shots included. */
-  accountDailyLossLimitUsd: 30,
+  /** Whole-bank backstop over every switchboard line, long shots included.
+   *  User-raised 2026-09-27 from $30 (a fade-spike day had tripped it while
+   *  harvest and vol_model were up). */
+  accountDailyLossLimitUsd: 60,
 } as const;
 
 /** Is a clip at this all-in cost per contract a long shot? */

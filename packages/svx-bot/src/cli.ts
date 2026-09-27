@@ -34,6 +34,7 @@ import { submitTx } from './exec/submit.js';
 import { PredictClient } from './pricing/predict.js';
 import { buildLadder } from './strategy/range-ladder.js';
 import { log } from './util/log.js';
+import { PREDICT_BASELINE_KEY } from './ops/bank-gauge.js';
 
 async function main(): Promise<void> {
   const [, , cmd, ...rest] = process.argv;
@@ -218,10 +219,14 @@ function rebaseline(): void {
   const ledger = new LedgerStore(path.join(path.resolve(cfg.dataDir), 'svx.sqlite'));
   const prior = ledger.getMeta('poly_reconcile_baseline');
   ledger.deleteMeta('poly_reconcile_baseline');
+  // The Predict account's bank-gauge baseline (ops/bank-gauge.ts) too.
+  const priorPredict = ledger.getMeta(PREDICT_BASELINE_KEY);
+  ledger.deleteMeta(PREDICT_BASELINE_KEY);
   console.log(
     JSON.stringify({
       msg: 'svx.rebaseline',
       priorBaseline: prior ? JSON.parse(prior) : null,
+      priorPredictBaseline: priorPredict ? JSON.parse(priorPredict) : null,
       hint: 'baseline cleared — the bot snapshots a fresh one on its next poly balance refresh (~60s after start)',
     }),
   );
@@ -521,8 +526,8 @@ Commands:
                     (the latter is set by the daily-loss / consecutive-loss
                     circuit breakers) + circuit-breaker watermark.
   rebaseline        Reset the wallet-vs-ledger reconciliation baseline. Run
-                    after depositing/withdrawing pUSD so the drift alarm
-                    doesn't read the funding event as a booking bug.
+                    after depositing/withdrawing pUSD or USDC so the drift
+                    checks don't read the funding event as a booking bug.
   status            Print current bot status from the ledger.
   report            Print PnL summary.
   mint-ladder       Mint a range ladder (sigma/2 x 5 rungs, the simulation

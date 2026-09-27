@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LedgerStore, type ShadowDecisionInput } from '../src/ledger/store.js';
-import { enabledAt, evaluateSwitchboard } from '../src/strategy/switchboard.js';
+import { backfillEntryEdges, enabledAt, evaluateSwitchboard } from '../src/strategy/switchboard.js';
 
 const d = (i: number, over: Partial<ShadowDecisionInput> = {}): ShadowDecisionInput => ({
   network: 'mainnet',
@@ -77,6 +77,31 @@ describe('switchboard: green on, red off', () => {
     expect(status('always_up@t50s', 20)).toBe('on'); // avg +1.75c: stays on
     // Never been on and only +0.5c: below the +2c bar, so it stays off.
     expect(status('mom_1m_follow@t50s', 20)).toBe('off');
+  });
+
+  it('backfills old live trades with the score they had when placed, not today\'s', () => {
+    ledger.insertShadowDecision(d(1)); // expires 1_000_001: a win → +40¢
+    settle(1, true);
+    ledger.insertShadowDecision(d(2)); // expires 1_000_002: a loss → today −10¢
+    settle(2, false);
+    ledger.insertTrade({
+      signalId: 'always_up@t50s',
+      timestampMs: 1_000_001, // placed after the win settled, before the loss
+      mode: 'live',
+      oracleId: '0xlive',
+      underlyingAsset: 'BTC',
+      expiryMs: 1_060_000,
+      strike: 84_000,
+      direction: 'up',
+      quantityDusdc: 5,
+      costPrice: 0.6,
+      costUsdc: 3,
+      settled: false,
+      strategy: 'auto_shadow',
+    });
+    expect(backfillEntryEdges(ledger, 'mainnet')).toBe(1);
+    expect(ledger.livePredictTradesSince(0)[0]!.edgeAtExec).toBeCloseTo(0.4);
+    expect(backfillEntryEdges(ledger, 'mainnet')).toBe(0); // one-shot
   });
 
   it('has no cap on how many strategies run, and scopes them to their checkpoint', () => {

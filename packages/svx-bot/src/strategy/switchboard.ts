@@ -19,7 +19,7 @@
  * switched-on strategy shares one risk budget (below).
  */
 
-import type { LedgerStore } from '../ledger/store.js';
+import type { EdgeProbeRow, LedgerStore, ShadowDecisionRow } from '../ledger/store.js';
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
 import {
   edgeSwitchScores,
@@ -27,6 +27,7 @@ import {
   type VolRegimePayload,
 } from '../ops/edge-trackers.js';
 import { sequenceScore } from '../ops/edge-trackers.js';
+import type { ShadowSignalScore } from '../ops/shadow-signals.js';
 import { log } from '../util/log.js';
 
 export const SWITCHBOARD = {
@@ -110,6 +111,88 @@ export function strategyTagFor(
   return signal.startsWith('fade_spike') ? 'fade_spike' : 'auto_shadow';
 }
 
+/** Everything the switchboard scores, as raw settled rows. */
+interface SwitchInputs {
+  shadow: ShadowDecisionRow[];
+  jumps: Array<EdgeProbeRow<JumpPayload>>;
+  vols: Array<EdgeProbeRow<VolRegimePayload>>;
+  harvest: ReturnType<LedgerStore['settledStrategyTradesSince']>;
+}
+
+function switchInputs(ledger: LedgerStore, network: string): SwitchInputs {
+  const liveStart = ledger.firstLivePredictTradeMs();
+  return {
+    shadow: ledger.settledShadowDecisions(network, 0),
+    jumps: ledger.settledEdgeProbes<JumpPayload>(network, 'jump', 0),
+    vols: ledger.settledEdgeProbes<VolRegimePayload>(network, 'vol_regime', 0),
+    harvest:
+      liveStart == null ? [] : ledger.settledStrategyTradesSince('calibration_harvest', liveStart),
+  };
+}
+
+function scoreAll(inp: SwitchInputs): ShadowSignalScore[] {
+  const scores: ShadowSignalScore[] = [
+    ...scoreShadowSignals(inp.shadow).filter((s) => s.slot !== 'all'),
+    // Edge trackers (ops/edge-trackers.ts): the Binance-jump and vol-model
+    // strategies, on the same on/off rule.
+    ...edgeSwitchScores(inp.jumps, inp.vols),
+  ];
+  const harvest = sequenceScore(
+    'harvest_v2',
+    'harvest',
+    inp.harvest
+      .filter((t) => t.quantity > 0)
+      .map((t) => ({ cost: t.costUsdc / t.quantity, win: t.payoutUsdc > 0 })),
+  );
+  if (harvest) scores.push(harvest);
+  return scores;
+}
+
+/**
+ * The switchboard's profit per contract for `key` as it stood at `atMs`,
+ * rebuilt from only the rows settled by then. Used to stamp the expected
+ * edge on live trades placed before trades carried it (bank gauge).
+ */
+export function scoreAsOf(inp: SwitchInputs, key: string, atMs: number): number | null {
+  const s = scoreAll({
+    shadow: inp.shadow.filter((r) => (r.expiryMs ?? Infinity) <= atMs),
+    jumps: inp.jumps.filter((r) => r.expiryMs <= atMs),
+    vols: inp.vols.filter((r) => r.expiryMs <= atMs),
+    harvest: inp.harvest.filter((t) => (t.settledAtMs ?? Infinity) <= atMs),
+  }).find((x) => `${x.signal}@${x.slot}` === key);
+  return s ? s.pnlPerContract : null;
+}
+
+/**
+ * One-shot: stamp live switchboard trades that predate `edgeAtExec` with the
+ * score their strategy had when they were placed.
+ */
+export function backfillEntryEdges(ledger: LedgerStore, network: string): number {
+  const MARKER = 'bank_gauge_edge_backfill_v1';
+  if (ledger.getMeta(MARKER) !== undefined) return 0;
+  const inp = switchInputs(ledger, network);
+  let n = 0;
+  for (const t of ledger.livePredictTradesSince(0)) {
+    if (t.edgeAtExec != null) continue;
+    const key =
+      t.strategy === 'calibration_harvest'
+        ? t.signalId === 'harvest_v2'
+          ? HARVEST_KEY
+          : null
+        : t.signalId.includes('@') && strategyTagFor(t.signalId.split('@')[0]!) === t.strategy
+          ? t.signalId
+          : null;
+    if (!key) continue;
+    const edge = scoreAsOf(inp, key, t.timestampMs);
+    if (edge == null) continue;
+    ledger.setTradeEdge(t.id, edge);
+    n++;
+  }
+  ledger.setMeta(MARKER, String(Date.now()));
+  log.info('svx.switchboard.edge_backfill', { stamped: n });
+  return n;
+}
+
 /** Re-score and update switch states (at most every reevaluateMs). */
 export function evaluateSwitchboard(
   ledger: LedgerStore,
@@ -125,29 +208,7 @@ export function evaluateSwitchboard(
   } catch {
     /* start fresh */
   }
-  const scores: ReturnType<typeof scoreShadowSignals> = [
-    ...scoreShadowSignals(ledger.settledShadowDecisions(network, 0)).filter(
-      (s) => s.slot !== 'all',
-    ),
-    // Edge trackers (ops/edge-trackers.ts): the Binance-jump and vol-model
-    // strategies, on the same on/off rule.
-    ...edgeSwitchScores(
-      ledger.settledEdgeProbes<JumpPayload>(network, 'jump', 0),
-      ledger.settledEdgeProbes<VolRegimePayload>(network, 'vol_regime', 0),
-    ),
-  ];
-  const liveStart = ledger.firstLivePredictTradeMs();
-  if (liveStart != null) {
-    const harvest = sequenceScore(
-      'harvest_v2',
-      'harvest',
-      ledger
-        .settledStrategyTradesSince('calibration_harvest', liveStart)
-        .filter((t) => t.quantity > 0)
-        .map((t) => ({ cost: t.costUsdc / t.quantity, win: t.payoutUsdc > 0 })),
-    );
-    if (harvest) scores.push(harvest);
-  }
+  const scores = scoreAll(switchInputs(ledger, network));
   const entries: SwitchEntry[] = scores.map((s) => {
     const key = `${s.signal}@${s.slot}`;
     const before = prev.get(key);

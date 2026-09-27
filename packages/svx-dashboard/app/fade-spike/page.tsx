@@ -29,6 +29,7 @@ import { StatRow } from '@/components/StatRow';
 import { PageIntro } from '@/components/PageIntro';
 import { FadeHuntRadar } from '@/components/FadeHuntRadar';
 import { SwitchboardCard } from '@/components/SwitchboardCard';
+import { BankGaugeCard } from '@/components/BankGaugeCard';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Table,
@@ -194,6 +195,8 @@ export default function FadeSpikePage() {
       <FadeHuntRadar />
 
       <SwitchboardCard />
+
+      <BankGaugeCard />
 
       <PageIntro
         summary={

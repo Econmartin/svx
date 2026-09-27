@@ -850,15 +850,19 @@ export class LedgerStore {
   settledStrategyTradesSince(
     strategy: string,
     sinceMs: number,
-  ): Array<{ tsMs: number; quantity: number; costUsdc: number; payoutUsdc: number }> {
+  ): Array<{ tsMs: number; settledAtMs: number | null; quantity: number; costUsdc: number; payoutUsdc: number }> {
     return this.db
-      .prepare<[string, number], { ts_ms: number; quantity_dusdc: number; cost_usdc: number; payout_usdc: number | null }>(
-        `SELECT ts_ms, quantity_dusdc, cost_usdc, payout_usdc FROM trades
+      .prepare<
+        [string, number],
+        { ts_ms: number; settled_at_ms: number | null; quantity_dusdc: number; cost_usdc: number; payout_usdc: number | null }
+      >(
+        `SELECT ts_ms, settled_at_ms, quantity_dusdc, cost_usdc, payout_usdc FROM trades
          WHERE strategy = ? AND settled = 1 AND ts_ms >= ? ORDER BY ts_ms ASC`,
       )
       .all(strategy, sinceMs)
       .map((r) => ({
         tsMs: r.ts_ms,
+        settledAtMs: r.settled_at_ms,
         quantity: r.quantity_dusdc,
         costUsdc: r.cost_usdc,
         payoutUsdc: r.payout_usdc ?? 0,
@@ -1710,6 +1714,7 @@ export class LedgerStore {
       .map((r) => ({
         slot: String(r.slot),
         ttmMs: Number(r.ttm_ms),
+        expiryMs: Number(r.expiry_ms),
         boardUp: Number(r.board_up),
         costUp: r.cost_up as number | null,
         costDown: r.cost_down as number | null,
@@ -2406,6 +2411,16 @@ export class LedgerStore {
     );
   }
 
+  /** Every live trade from `sinceMs`, oldest first (bank gauge). */
+  livePredictTradesSince(sinceMs: number): TradeRecord[] {
+    return this.tradeRows(`WHERE mode = 'live' AND ts_ms >= ? ORDER BY ts_ms ASC`, [sinceMs]);
+  }
+
+  /** Stamp a trade's expected profit per contract at entry. */
+  setTradeEdge(tradeId: string, edge: number): void {
+    this.db.prepare(`UPDATE trades SET edge_at_exec = ? WHERE id = ?`).run(edge, tradeId);
+  }
+
   markRedeemed(tradeId: string, redeemTxDigest: string): void {
     this.db
       .prepare(`UPDATE trades SET redeem_tx_digest = ? WHERE id = ?`)
@@ -2842,6 +2857,8 @@ export interface ShadowDecisionInput {
 export interface ShadowDecisionRow {
   slot: string;
   ttmMs: number;
+  /** When the market settled — the row is known from then on. */
+  expiryMs?: number;
   boardUp: number;
   costUp: number | null;
   costDown: number | null;

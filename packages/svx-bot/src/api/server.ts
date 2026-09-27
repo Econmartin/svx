@@ -9,7 +9,8 @@ import express, { type Express, type Request, type Response } from 'express';
 import { unclaimedSummary } from '../exec/claim-settled.js';
 import { huntState, recentFadeEvals } from '../ops/fade-hunt.js';
 import { fadeSpikeSettings } from '../strategy/fade-spike.js';
-import { SWITCHBOARD, evaluateSwitchboard } from '../strategy/switchboard.js';
+import { SWITCHBOARD, backfillEntryEdges, evaluateSwitchboard } from '../strategy/switchboard.js';
+import { bankGauge } from '../ops/bank-gauge.js';
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
 import { scoreCrossVenue } from '../ops/cross-venue.js';
 import { reportWatchedWallets } from '../ops/wallet-watch.js';
@@ -815,6 +816,21 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       paused: pause.paused,
       strategies: evaluateSwitchboard(deps.ledger, suiNetwork()),
     });
+  });
+
+  /**
+   * Bank gauge: ledger PnL since live trading began vs what the switched-on
+   * strategies' scores expected, with a normal-swing band, plus account-vs-
+   * ledger drift (ops/bank-gauge.ts).
+   *
+   *   GET /strategy/bank-gauge
+   */
+  app.get('/strategy/bank-gauge', (_req, res) => {
+    const balance = deps.state.v2Wrapper
+      ? deps.state.navUsdc + (deps.state.managerBalanceUsdc ?? 0) + deps.state.v2Wrapper.balanceUsdc
+      : null;
+    backfillEntryEdges(deps.ledger, suiNetwork()); // one-shot; no-op after
+    res.json(bankGauge(deps.ledger, evaluateSwitchboard(deps.ledger, suiNetwork()), balance));
   });
 
   app.get('/strategy/margin-lever/state', (_req, res) => {

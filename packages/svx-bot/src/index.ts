@@ -3240,6 +3240,9 @@ export async function runFadeSpikeDecision(
       settled: false,
       msToExpiryAtExec: d.expiryMs - nowMs,
       predictProbAtExec: price,
+      // The switchboard's profit per contract at entry: the bank gauge's
+      // "expected" for this trade (ops/bank-gauge.ts).
+      edgeAtExec: entry.pnlPerContract,
       strategy,
       ...(txDigest && { txDigest }),
     });
@@ -3378,6 +3381,7 @@ async function runEdgeTrade(
     settled: false,
     msToExpiryAtExec: a.expiryMs - nowMs,
     predictProbAtExec: a.price,
+    edgeAtExec: entry.pnlPerContract,
     strategy: strategyTagFor(a.signal),
     ...(txDigest && { txDigest }),
   });
@@ -3495,14 +3499,14 @@ async function runHarvestV2Step(deps: {
   // score since live trading began is green, harvest mints live with the
   // switchboard's clip sizing, caps and shared daily stop; otherwise it keeps
   // paper-trading so the score keeps moving.
+  const harvestEntry = evaluateSwitchboard(ledger, suiNetwork()).find((e) => e.key === HARVEST_KEY);
+  const harvestEdge = harvestEntry?.pnlPerContract ?? null;
   const switchLive =
     !cfg.paperTrading &&
     !!live &&
     !isKilled() &&
     !ledger.getPause().paused &&
-    evaluateSwitchboard(ledger, suiNetwork()).some(
-      (e) => e.key === HARVEST_KEY && e.status === 'on',
-    ) &&
+    harvestEntry?.status === 'on' &&
     switchboardRealized24h(ledger, nowMs) > -SWITCHBOARD.dailyLossLimitUsd;
   const active = await predict.listActiveOracles();
   for (const o of active) {
@@ -3677,6 +3681,7 @@ async function runHarvestV2Step(deps: {
       settled: false,
       msToExpiryAtExec: ttm,
       predictProbAtExec: decision.costPrice,
+      ...(harvestEdge != null && { edgeAtExec: harvestEdge }),
       strategy: 'calibration_harvest',
       ...(txDigest && { txDigest }),
     });

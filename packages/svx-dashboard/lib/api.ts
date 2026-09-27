@@ -747,6 +747,7 @@ export function createApi(base: string) {
     watch: () => get<WatchReport>('/watch'),
     fadeSpikeState: () => get<FadeSpikeState>('/strategy/fade-spike/state'),
     switchboard: () => get<SwitchboardState>('/strategy/switchboard'),
+    bankGauge: () => get<BankGauge>('/strategy/bank-gauge'),
     surface: (oracleId: string) => get<SurfaceResponse>(`/surface/${oracleId}`),
     surfaceHistory: (oracleId: string, limit = 200) =>
       get<SurfaceHistoryResponse>(`/surface/${oracleId}/history?limit=${limit}`),
@@ -803,6 +804,30 @@ export interface SwitchboardState {
     status: 'on' | 'off';
     sinceMs: number;
   }>;
+}
+
+/** GET /strategy/bank-gauge — ledger vs what the strategies expected, and
+ *  account-vs-ledger drift (svx-bot ops/bank-gauge.ts). */
+export interface BankGauge {
+  liveStartMs: number | null;
+  ledger: { pnlUsdc: number; settled: number; wins: number; open: number; openCostUsdc: number };
+  expected: {
+    pnlUsdc: number;
+    actualUsdc: number;
+    luckUsdc: number;
+    sigmaUsdc: number;
+    z: number | null;
+    trades: number;
+  };
+  unscored: { trades: number; pnlUsdc: number };
+  byStrategy: Array<{ key: string; trades: number; actualUsdc: number; expectedUsdc: number }>;
+  series: Array<{ atMs: number; actual: number; expected: number; sigma: number }>;
+  bank: {
+    balanceUsdc: number | null;
+    sinceBaselineUsdc: number | null;
+    driftUsdc: number | null;
+    baselineAtMs: number | null;
+  };
 }
 
 /** GET /strategy/fade-spike/state — live radar state (read-only). */

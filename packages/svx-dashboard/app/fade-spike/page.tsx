@@ -46,6 +46,8 @@ interface PageData {
   watch: WatchedWallet[];
 }
 
+/** Ledger tags of every strategy the switchboard can trade. */
+const SWITCHBOARD_TAGS = ['fade_spike', 'auto_shadow', 'edge_jump', 'edge_vol'];
 const SHADOW = ['fade_spike', 'fade_spike_any_time', 'fade_spike_40', 'cheap_far_side'];
 const SHADOW_LABEL: Record<string, string> = {
   fade_spike: 'Fade spike (≥ $20 move)',
@@ -70,14 +72,13 @@ export default function FadeSpikePage() {
       client.shadowSignals().catch(() => null),
       client.watch().catch(() => null),
     ]);
-    // Everything the switchboard trades: fade spike plus any other green signal.
-    const isFade = (t: TradeRecord) => t.strategy === 'fade_spike' || t.strategy === 'auto_shadow';
     return {
-      rows: (status.strategyPnl ?? []).filter(
-        (r) => r.strategy === 'fade_spike' || r.strategy === 'auto_shadow',
-      ),
-      open: open.filter(isFade),
-      closed: closed.filter(isFade),
+      // Headline totals: what the switchboard trades (fade spike, other green
+      // shadow signals, the edge trackers).
+      rows: (status.strategyPnl ?? []).filter((r) => SWITCHBOARD_TAGS.includes(r.strategy)),
+      // The trade log shows every trade we have made, whatever opened it.
+      open,
+      closed,
       shadow: (shadow?.scores ?? []).filter((s) => SHADOW.includes(s.signal)),
       watch: watch?.wallets ?? [],
     };
@@ -218,7 +219,11 @@ export default function FadeSpikePage() {
                         {(t.signalId ?? '').replace(/_/g, ' ').replace('@t', ' · ')}
                       </TableCell>
                       <TableCell className="capitalize">{t.direction}</TableCell>
-                      <TableCell className="font-mono">${t.strike.toFixed(2)}</TableCell>
+                      <TableCell className="font-mono">
+                        {t.direction === 'range' && t.rangeUpper != null
+                          ? `$${t.strike.toFixed(0)}–$${t.rangeUpper.toFixed(0)}`
+                          : `$${t.strike.toFixed(2)}`}
+                      </TableCell>
                       <TableCell className="font-mono">{(t.costPrice * 100).toFixed(1)}¢</TableCell>
                       <TableCell className="font-mono">${t.quantityDusdc.toFixed(2)}</TableCell>
                       <TableCell className="font-mono">${t.costUsdc.toFixed(2)}</TableCell>

@@ -13,7 +13,14 @@ import { usePolling } from '@/lib/usePolling';
 import { formatUsdc, v2LivePnl } from '@/lib/api';
 
 /** Strategies the mainnet bot can run live on Predict today. */
-const CURRENT_PREDICT = ['fade_spike', 'auto_shadow', 'calibration_harvest', 'divergence_mint'];
+const CURRENT_PREDICT = [
+  'fade_spike',
+  'auto_shadow',
+  'edge_jump',
+  'edge_vol',
+  'calibration_harvest',
+  'divergence_mint',
+];
 
 export function StatusTicker() {
   const client = useApiClient();

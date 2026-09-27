@@ -478,16 +478,24 @@ function PredictBetLabel({
   costPrice,
   mode,
 }: {
-  direction: 'up' | 'down';
+  direction: 'up' | 'down' | 'range';
   quantityDusdc: number;
   costPrice: number;
   mode: 'live' | 'paper';
 }) {
-  const dirLabel = direction === 'up' ? 'UP' : 'DOWN';
+  const dirLabel = direction === 'up' ? 'UP' : direction === 'down' ? 'DOWN' : 'RANGE';
   return (
     <div className="leading-tight">
       <div className="whitespace-nowrap">
-        <span className={direction === 'up' ? 'text-win font-semibold' : 'text-loss font-semibold'}>
+        <span
+          className={
+            direction === 'up'
+              ? 'text-win font-semibold'
+              : direction === 'down'
+                ? 'text-loss font-semibold'
+                : 'text-accent font-semibold'
+          }
+        >
           {dirLabel}
         </span>
         <span className="text-muted"> · </span>
@@ -579,7 +587,12 @@ interface Moneyness {
 /** Predict binary: direction=up → wins if spot > strike; down → wins if spot ≤ strike. */
 function predictMoneyness(t: TradeRecord, spot: number | null): Moneyness {
   if (spot == null || t.strike <= 0) return { status: 'unknown', label: 'no spot' };
-  const winning = t.direction === 'up' ? spot > t.strike : spot <= t.strike;
+  const winning =
+    t.direction === 'range'
+      ? spot > t.strike && spot <= (t.rangeUpper ?? -Infinity)
+      : t.direction === 'up'
+        ? spot > t.strike
+        : spot <= t.strike;
   const diff = spot - t.strike;
   const delta = `${diff >= 0 ? '+' : ''}$${Math.abs(diff).toFixed(0)} vs strike`;
   return {

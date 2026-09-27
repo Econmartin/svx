@@ -174,7 +174,9 @@ export interface TradeRecord {
   underlyingAsset: string;
   expiryMs: number;
   strike: number;
-  direction: 'up' | 'down';
+  /** 'range' pays when settlement lands in (strike, rangeUpper]. */
+  direction: 'up' | 'down' | 'range';
+  rangeUpper?: number;
   quantityDusdc: number;
   costPrice: number;
   costUsdc: number;
@@ -228,7 +230,16 @@ export interface TradeRecord {
    *  Polymarket certainty-discount buyer), or 'divergence_mint' (Predict
    *  favored-side mint at ≥8pp divergence). Defaults to 'poly_arb' on rows
    *  that pre-date the strategy tag (May 2026). */
-  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest' | 'fade_spike' | 'auto_shadow';
+  strategy?:
+    | 'poly_arb'
+    | 'vol_arb'
+    | 'convergence'
+    | 'divergence_mint'
+    | 'calibration_harvest'
+    | 'fade_spike'
+    | 'auto_shadow'
+    | 'edge_jump'
+    | 'edge_vol';
   /** High-water mark of the poly leg's P&L fraction (trailing ratchet). */
   polyHighWaterFrac?: number;
 }

@@ -1576,6 +1576,8 @@ export class LedgerStore {
     if (!cols.includes('bin_vs_ref')) {
       this.db.exec(`ALTER TABLE shadow_decisions ADD COLUMN bin_vs_ref REAL`);
     }
+    // 2026-09-27: Binance log return over the last 5s — did the spike stall?
+    if (!cols.includes('mom_5s')) this.db.exec(`ALTER TABLE shadow_decisions ADD COLUMN mom_5s REAL`);
   }
 
 
@@ -1585,8 +1587,8 @@ export class LedgerStore {
         `INSERT OR IGNORE INTO shadow_decisions (id, network, market_id, slot, expiry_ms,
            recorded_at_ms, ttm_ms, reference, forward, board_up, cost_up, cost_down,
            bin_mid, bin_implied_up, mom_1m, mom_5m, mom_15m, book_imb, taker_buy_ratio, funding,
-           hl_mid, hl_implied_up, mom_30s, bin_vs_ref)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           hl_mid, hl_implied_up, mom_30s, bin_vs_ref, mom_5s)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         randomUUID(),
@@ -1613,6 +1615,7 @@ export class LedgerStore {
         d.hlImpliedUp ?? null,
         d.mom30s ?? null,
         d.binVsRef ?? null,
+        d.mom5s ?? null,
       );
     return res.changes > 0;
   }
@@ -1673,6 +1676,7 @@ export class LedgerStore {
         hlImpliedUp: (r.hl_implied_up as number | null) ?? null,
         mom30s: (r.mom_30s as number | null) ?? null,
         binVsRef: (r.bin_vs_ref as number | null) ?? null,
+        mom5s: (r.mom_5s as number | null) ?? null,
         outcomeUp: Number(r.outcome_up) === 1,
       }));
   }
@@ -2784,6 +2788,8 @@ export interface ShadowDecisionInput {
   hlImpliedUp?: number | null;
   mom30s?: number | null;
   binVsRef?: number | null;
+  /** Binance log return over the last 5 seconds. */
+  mom5s?: number | null;
 }
 
 export interface ShadowDecisionRow {
@@ -2802,6 +2808,8 @@ export interface ShadowDecisionRow {
   hlImpliedUp?: number | null;
   mom30s?: number | null;
   binVsRef?: number | null;
+  /** Binance log return over the last 5 seconds. */
+  mom5s?: number | null;
   outcomeUp: boolean;
 }
 

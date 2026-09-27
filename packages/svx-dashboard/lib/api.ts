@@ -775,7 +775,12 @@ export interface ShadowSignalsReport {
 
 /** GET /strategy/switchboard — green strategies trade, red ones don't. */
 export interface SwitchboardState {
-  rules: { maxCostUsd: number; dailyLossLimitUsd: number };
+  rules: {
+    maxCostUsd: number;
+    dailyLossLimitUsd: number;
+    maxLongshotCostUsd?: number;
+    longshotMaxCostPerContract?: number;
+  };
   live: boolean;
   paused: boolean;
   strategies: Array<{
@@ -817,6 +822,8 @@ export interface FadeSpikeState {
     lastWindowMs: number;
     noTradeWindowMs: number;
     maxCostUsd: number;
+    maxLongshotCostUsd?: number;
+    longshotMaxCostPerContract?: number;
     tradeSlots?: string[];
     checkWindowsMs?: Record<string, [number, number]>;
   };

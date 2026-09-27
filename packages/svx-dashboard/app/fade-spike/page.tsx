@@ -48,11 +48,22 @@ interface PageData {
 
 /** Ledger tags of every strategy the switchboard can trade. */
 const SWITCHBOARD_TAGS = ['fade_spike', 'auto_shadow', 'edge_jump', 'edge_vol'];
-const SHADOW = ['fade_spike', 'fade_spike_any_time', 'fade_spike_40', 'cheap_far_side'];
+const SHADOW = [
+  'fade_spike',
+  'fade_spike_cheap',
+  'fade_spike_stalled',
+  'longshot_12c',
+  'fade_spike_any_time',
+  'fade_spike_40',
+  'cheap_far_side',
+];
 const SHADOW_LABEL: Record<string, string> = {
   fade_spike: 'Fade spike (≥ $20 move)',
   fade_spike_any_time: 'Timing study: same rule, any checkpoint',
   fade_spike_40: 'Fade spike (≥ $40 move)',
+  fade_spike_cheap: 'Fade spike, far side ≤ 12¢ all-in',
+  fade_spike_stalled: 'Fade spike ≤ 12¢, spike stalled (last 5s flat)',
+  longshot_12c: 'Any long-shot ≤ 12¢ all-in',
   cheap_far_side: 'Control: cheap far side, no spike',
 };
 

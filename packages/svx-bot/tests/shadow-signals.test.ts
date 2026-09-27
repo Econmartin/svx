@@ -157,3 +157,72 @@ describe('scoreShadowSignals recent form', () => {
   });
 });
 
+
+import { SHADOW_SIGNALS } from '../src/ops/shadow-signals.js';
+import { clipCapUsd, SWITCHBOARD } from '../src/strategy/switchboard.js';
+import type { ShadowDecisionRow } from '../src/ledger/store.js';
+
+describe('long-shot signals (2026-09-27)', () => {
+  // BTC ran $50 above the strike over the last 30s; DOWN is the cheap far side.
+  const row = (over: Partial<ShadowDecisionRow> = {}): ShadowDecisionRow => ({
+    slot: 't50s',
+    ttmMs: 50_000,
+    boardUp: 0.96,
+    costUp: 0.99,
+    costDown: 0.09,
+    binImpliedUp: 0.96,
+    mom1m: null,
+    mom5m: null,
+    mom15m: null,
+    bookImb: null,
+    takerBuyRatio: null,
+    funding: null,
+    mom30s: 0.0005,
+    binVsRef: 50,
+    mom5s: 0.00001,
+    outcomeUp: false,
+    ...over,
+  });
+
+  it('longshot_12c buys whichever side is at most 12¢ all-in, above the 2¢ floor', () => {
+    expect(SHADOW_SIGNALS.longshot_12c!(row())).toBe('down');
+    expect(SHADOW_SIGNALS.longshot_12c!(row({ costDown: 0.15 }))).toBeNull();
+    expect(SHADOW_SIGNALS.longshot_12c!(row({ boardUp: 0.99 }))).toBeNull(); // DOWN priced 1¢
+  });
+
+  it('fade_spike_cheap needs the fade rule AND a cheap far side', () => {
+    expect(SHADOW_SIGNALS.fade_spike_cheap!(row())).toBe('down');
+    expect(SHADOW_SIGNALS.fade_spike_cheap!(row({ costDown: 0.2 }))).toBeNull();
+    expect(SHADOW_SIGNALS.fade_spike_cheap!(row({ binVsRef: 10 }))).toBeNull(); // no spike
+  });
+
+  it('fade_spike_stalled also needs the last 5s flat, and abstains without the data', () => {
+    expect(SHADOW_SIGNALS.fade_spike_stalled!(row())).toBe('down');
+    expect(SHADOW_SIGNALS.fade_spike_stalled!(row({ mom5s: 0.0002 }))).toBeNull(); // still running (~$17)
+    expect(SHADOW_SIGNALS.fade_spike_stalled!(row({ mom5s: null }))).toBeNull();
+  });
+
+  it('caps long-shot clips at $4 and everything else at $2.50', () => {
+    expect(clipCapUsd(0.06)).toBe(SWITCHBOARD.maxLongshotCostUsd);
+    expect(clipCapUsd(0.12)).toBe(4);
+    expect(clipCapUsd(0.121)).toBe(2.5);
+  });
+});
+
+describe('mom_5s column', () => {
+  let tmp: string;
+  let ledger: LedgerStore;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svx-shadow5-'));
+    ledger = new LedgerStore(path.join(tmp, 'svx.sqlite'));
+  });
+  afterEach(() => {
+    ledger.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+  it('round-trips the 5s move', () => {
+    ledger.insertShadowDecision({ ...base, mom5s: 0.00004 });
+    ledger.resolveShadowMarket('0xm1', 84_100, 1_000_500);
+    expect(ledger.settledShadowDecisions('mainnet')[0]!.mom5s).toBeCloseTo(0.00004);
+  });
+});

@@ -67,6 +67,8 @@ export interface ExternalSignals {
   hlMid: number | null;
   /** Binance log return over the last 30 seconds (1s candles). */
   mom30s: number | null;
+  /** …and over the last 5 seconds: has a spike stalled? */
+  mom5s: number | null;
 }
 
 let extCache: { atMs: number; v: ExternalSignals } | null = null;
@@ -102,6 +104,7 @@ export async function fetchExternalSignals(nowMs = Date.now()): Promise<External
     funding: null,
     hlMid: null,
     mom30s: null,
+    mom5s: null,
   };
   if (depth?.bids?.length && depth.asks?.length) {
     const bid = Number(depth.bids[0]![0]);
@@ -130,6 +133,8 @@ export async function fetchExternalSignals(nowMs = Date.now()): Promise<External
     const first = Number(secs[0]![4]);
     const last = Number(secs[secs.length - 1]![4]);
     if (first > 0 && last > 0) v.mom30s = Math.log(last / first);
+    const five = Number(secs[secs.length - 6]![4]);
+    if (five > 0 && last > 0) v.mom5s = Math.log(last / five);
   }
   const hl = Number(hlMids?.BTC);
   if (Number.isFinite(hl) && hl > 0) v.hlMid = hl;
@@ -236,6 +241,7 @@ export async function recordShadowDecisions(deps: {
       hlMid: ext.hlMid,
       hlImpliedUp,
       mom30s: ext.mom30s,
+      mom5s: ext.mom5s,
       binVsRef,
     };
     const ok = ledger.insertShadowDecision(decision);
@@ -316,7 +322,35 @@ export const SHADOW_SIGNALS: Record<string, (r: ShadowDecisionRow) => Pick> = {
     const farPrice = far === 'up' ? r.boardUp : 1 - r.boardUp;
     return farPrice <= 0.3 ? far : null;
   },
+  // Long-shots (2026-09-27 tape study, 4,180 up/down fills): contracts under
+  // 12¢ all-in were the only profitable up/down bucket — under 8¢ won 18%
+  // at a 6¢ cost, 8–12¢ won 14% at 10¢ — and the winners clustered 20–60s
+  // before expiry, $20–90 past the strike after a move against them.
+  // Mechanical versions, so the scoreboard shows whether a rule captures it:
+  // any side at ≤12¢ all-in, then the fade rule limited to such sides, then
+  // that plus "the spike has stalled" (Binance within ±$5 over the last 5s).
+  longshot_12c: (r) => cheapSide(r, 0.12),
+  fade_spike_cheap: (r) => {
+    const side = fadeSpike(r, 20, 0.3);
+    return side && cheapSide(r, 0.12) === side ? side : null;
+  },
+  fade_spike_stalled: (r) => {
+    const side = fadeSpike(r, 20, 0.3);
+    if (!side || cheapSide(r, 0.12) !== side || r.mom5s == null) return null;
+    return Math.abs(r.mom5s) <= STALL_LOG_MOVE ? side : null;
+  },
 };
+
+/** ≈ $5 on BTC near $85k, as a log return. */
+const STALL_LOG_MOVE = 6e-5;
+
+/** The side whose all-in cost is at most `maxCost` (and at least Predict's
+ *  2¢ entry floor), if either is. */
+function cheapSide(r: ShadowDecisionRow, maxCost: number): Pick {
+  const up = r.boardUp >= 0.02 && r.costUp != null && r.costUp <= maxCost;
+  const down = 1 - r.boardUp >= 0.02 && r.costDown != null && r.costDown <= maxCost;
+  return up ? 'up' : down ? 'down' : null;
+}
 
 function fadeSpike(r: ShadowDecisionRow, minUsd: number, maxPrice: number): Pick {
   return fadeSpikeSide(r, minUsd, maxPrice);

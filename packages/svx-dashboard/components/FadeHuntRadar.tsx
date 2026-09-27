@@ -197,6 +197,9 @@ const SIGNAL_NAMES: Record<string, string> = {
   fade_spike: 'Fade spike',
   fade_spike_any_time: 'Fade spike (timing study)',
   fade_spike_40: 'Fade spike ≥$40',
+  fade_spike_cheap: 'Fade spike ≤12¢',
+  fade_spike_stalled: 'Fade spike ≤12¢, stalled',
+  longshot_12c: 'Long-shot ≤12¢',
   cheap_far_side: 'Cheap far side',
   vol_model: 'Vol model',
   binance_jump: 'Binance jump',
@@ -265,14 +268,19 @@ function Lane({
   const inBand = m.farPrice >= rule.minFarPrice && m.farPrice <= rule.maxFarPrice;
   const clip =
     m.farPrice > 0 && m.farCost != null ? (Math.ceil((1.12 / m.farPrice) * 100) / 100) * m.farCost : null;
+  // Long-shots (≤ 12¢ all-in) get the bigger per-trade cap.
+  const cap =
+    m.farCost != null && m.farCost <= (rule.longshotMaxCostPerContract ?? 0)
+      ? (rule.maxLongshotCostUsd ?? rule.maxCostUsd)
+      : rule.maxCostUsd;
   const fadeConds = [
     { label: `${usd(latest)} vs strike`, ok: Math.abs(latest) >= rule.minMoveUsd },
     { label: 'moving away', ok: spikingAway },
     {
       label:
         `far side ${(m.farPrice * 100).toFixed(1)}¢` +
-        (inBand && clip != null && clip > rule.maxCostUsd ? ` · clip $${clip.toFixed(2)}` : ''),
-      ok: inBand && clip != null && clip <= rule.maxCostUsd,
+        (inBand && clip != null && clip > cap ? ` · clip $${clip.toFixed(2)}` : ''),
+      ok: inBand && clip != null && clip <= cap,
     },
   ];
   const fadeReady = fadeConds.every((c) => c.ok);

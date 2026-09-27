@@ -50,6 +50,7 @@ import { SHADOW_SIGNALS, type ShadowDecisionEvent } from './ops/shadow-signals.j
 import type { ShadowDecisionRow } from './ledger/store.js';
 import {
   SWITCHBOARD,
+  clipCapUsd,
   enabledAt,
   evaluateSwitchboard,
   strategyTagFor,
@@ -3082,6 +3083,7 @@ export async function runFadeSpikeDecision(
     hlImpliedUp: d.hlImpliedUp ?? null,
     mom30s: d.mom30s ?? null,
     binVsRef: d.binVsRef ?? null,
+    mom5s: d.mom5s ?? null,
     outcomeUp: false, // unknown yet; signals never read it
   };
   const note = (outcome: string, detail: string, key?: string) =>
@@ -3124,7 +3126,7 @@ export async function runFadeSpikeDecision(
       price_out_of_bounds: `side priced ${(price * 100).toFixed(1)}¢, outside Predict's 2–97¢ entry band`,
       already_open_for_market: 'this strategy already holds this market',
       daily_loss_limit: 'daily loss limit hit — standing down',
-      clip_above_cost_cap: `smallest clip costs more than the $${SWITCHBOARD.maxCostUsd} cap`,
+      clip_above_cost_cap: `smallest clip costs more than the $${clipCapUsd(costPerContract ?? 1)} cap`,
     };
     const skip = (reason: string) => {
       note('skipped', `${entry.key}: ${SKIP_WORDS[reason] ?? reason}`, entry.key);
@@ -3146,7 +3148,7 @@ export async function runFadeSpikeDecision(
       0,
     );
     if (realized24h <= -SWITCHBOARD.dailyLossLimitUsd) return skip('daily_loss_limit');
-    const quantity = fadeSpikeQuantity(price, costPerContract, SWITCHBOARD.maxCostUsd);
+    const quantity = fadeSpikeQuantity(price, costPerContract, clipCapUsd(costPerContract));
     if (quantity == null) return skip('clip_above_cost_cap');
 
     let mode: 'paper' | 'live' = 'paper';
@@ -3176,11 +3178,8 @@ export async function runFadeSpikeDecision(
       const priceNow = fresh ? (side === 'up' ? fresh.up : fresh.down) : price;
       if (priceNow < 0.02 || priceNow > 0.97) return skip('price_out_of_bounds');
       const feePerContract = Math.max(0, costPerContract - price);
-      const liveQuantity = fadeSpikeQuantity(
-        priceNow,
-        priceNow + feePerContract,
-        SWITCHBOARD.maxCostUsd,
-      );
+      const liveCap = clipCapUsd(priceNow + feePerContract);
+      const liveQuantity = fadeSpikeQuantity(priceNow, priceNow + feePerContract, liveCap);
       if (liveQuantity == null) return skip('clip_above_cost_cap');
       const outcome = await mintLive({
         sui: live.sui,
@@ -3199,7 +3198,7 @@ export async function runFadeSpikeDecision(
           maxFeeDrag: 0.3,
           costSlippage: 0.03,
           probabilitySlippage: 0.03,
-          maxCostUsd: SWITCHBOARD.maxCostUsd,
+          maxCostUsd: liveCap,
         },
       }).catch((e) => ({ kind: 'failed' as const, reason: errMsg(e) }));
       if (outcome.kind !== 'filled') {
@@ -3308,7 +3307,8 @@ async function runEdgeTrade(
     0,
   );
   if (realized24h <= -SWITCHBOARD.dailyLossLimitUsd) return skip('daily_loss_limit');
-  const quantity = fadeSpikeQuantity(a.price, a.costPerContract, SWITCHBOARD.maxCostUsd);
+  const cap = clipCapUsd(a.costPerContract);
+  const quantity = fadeSpikeQuantity(a.price, a.costPerContract, cap);
   if (quantity == null) return skip('clip_above_cost_cap');
 
   let mode: 'paper' | 'live' = 'paper';
@@ -3340,7 +3340,7 @@ async function runEdgeTrade(
         maxFeeDrag: 0.4,
         costSlippage: 0.03,
         probabilitySlippage: 0.03,
-        maxCostUsd: SWITCHBOARD.maxCostUsd,
+        maxCostUsd: cap,
       },
     }).catch((e) => ({ kind: 'failed' as const, reason: errMsg(e) }));
     if (outcome.kind !== 'filled') {

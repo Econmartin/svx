@@ -77,6 +77,13 @@ describe('switchboard executor (paper)', () => {
     expect(t!.costUsdc).toBeCloseTo(9.34 * 0.2, 6);
   });
 
+  it('buys a 2¢ long-shot under the $4 long-shot cap (the $2.50 cap would skip it)', async () => {
+    await run(decision({ boardUp: 0.98, costDown: 0.06 }), [entry('fade_spike', 't50s', 'on')]);
+    const [t] = openAuto();
+    expect(t!.quantityDusdc).toBeCloseTo(56, 6); // ceil(1.12 / 0.02)
+    expect(t!.costUsdc).toBeCloseTo(56 * 0.06, 6); // $3.36: over $2.50, under $4
+  });
+
   it('does not trade a red strategy', async () => {
     await run(decision(), [entry('fade_spike', 't50s', 'off')]);
     expect(openAuto()).toHaveLength(0);

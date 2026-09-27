@@ -37,8 +37,21 @@ export const SWITCHBOARD = {
   // Per-trade size cap and a daily loss stop; no cap on how many strategies,
   // positions or trades run — every green strategy trades every signal.
   maxCostUsd: 2.5,
+  // Long-shots (all-in ≤ 12¢ per contract) get a bigger cap: Predict's $1
+  // minimum premium means a 2¢ contract needs ~56 contracts ≈ $3.40 all-in,
+  // so under $2.50 the cheapest far sides — the best bucket on the launch
+  // tape — could never be bought. User-approved 2026-09-27.
+  maxLongshotCostUsd: 4,
+  longshotMaxCostPerContract: 0.12,
   dailyLossLimitUsd: 15,
 } as const;
+
+/** Per-trade cap for a clip at this all-in cost per contract. */
+export function clipCapUsd(costPerContract: number): number {
+  return costPerContract <= SWITCHBOARD.longshotMaxCostPerContract
+    ? SWITCHBOARD.maxLongshotCostUsd
+    : SWITCHBOARD.maxCostUsd;
+}
 
 export type SwitchStatus = 'on' | 'off';
 

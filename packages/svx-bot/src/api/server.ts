@@ -754,6 +754,8 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
         lastWindowMs: 60_000,
         noTradeWindowMs: 10_000,
         maxCostUsd: SWITCHBOARD.maxCostUsd,
+        maxLongshotCostUsd: SWITCHBOARD.maxLongshotCostUsd,
+        longshotMaxCostPerContract: SWITCHBOARD.longshotMaxCostPerContract,
         // The radar follows the switched-on fade checkpoint, else ~50s.
         tradeSlots: fadeOn.length ? fadeOn.map((e) => e.slot) : ['t50s'],
         checkWindowsMs: {

@@ -433,6 +433,15 @@ export async function quoteMint(
   return { cost: q.cost, entryProbability: q.entryProbability, quantity: q.quantity };
 }
 
+/**
+ * Probability cap for a mint, at most 9 decimals: the SDK refuses more, and
+ * quote + slippage in floating point (0.372955096 + 0.05 =
+ * 0.42295509600000003) failed live mints on 2026-09-27.
+ */
+export function mintProbabilityCap(p: number): number {
+  return Math.floor(Math.min(0.99, p) * 1e9 + 1e-6) / 1e9;
+}
+
 /** Mint with BOTH slippage caps set — the SDK's defaults are uncapped. */
 export async function buildMintTx(
   owner: string,
@@ -446,7 +455,7 @@ export async function buildMintTx(
       quantity: o.quantity,
       // Raw amounts are 1e6 integers — round the ceiling UP to 6 dp.
       maxCost: Math.ceil(caps.maxCost * 1e6) / 1e6,
-      maxProbability: Math.min(0.99, caps.maxProbability),
+      maxProbability: mintProbabilityCap(caps.maxProbability),
     },
   );
 }

@@ -110,6 +110,14 @@ interface ApiDeps {
 export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void } {
   const app = express();
   app.use(cors());
+  // A JSON API: never index it, and ask crawlers not to fetch it at all.
+  app.use((_req, res, next) => {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    next();
+  });
+  app.get('/robots.txt', (_req, res) => {
+    res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+  });
   app.use(express.json());
 
   app.get('/health', (_req, res) => {

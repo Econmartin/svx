@@ -94,6 +94,7 @@ export function SwitchboardCard() {
                     <TableCell>
                       <RecentForm
                         recent={s.recent ?? []}
+                        captured={s.recentCaptured ?? []}
                         streak={s.streak ?? 0}
                         recentPnl={s.recentPnl}
                         overall={s.pnlPerContract}
@@ -135,11 +136,14 @@ export function SwitchboardCard() {
  */
 function RecentForm({
   recent,
+  captured,
   streak,
   recentPnl,
   overall,
 }: {
   recent: number[];
+  /** 1 where we traded that result live: drawn with a ring. */
+  captured: number[];
   streak: number;
   recentPnl?: number;
   overall: number;
@@ -156,11 +160,19 @@ function RecentForm({
     streak <= -2 ? `${-streak} losses in a row` : streak >= 2 ? `${streak} wins in a row` : null;
   return (
     <div className="flex items-center gap-2 justify-end">
-      <span className="inline-flex items-center gap-[3px]" aria-label={`last ${recent.length} results`}>
+      <span
+        className="inline-flex items-center gap-[4px]"
+        aria-label={`last ${recent.length} results, ${captured.filter(Boolean).length} traded live`}
+        title={`Ringed: we traded it live (${captured.filter(Boolean).length} of the last ${recent.length})`}
+      >
         {recent.map((w, i) => (
           <span
             key={i}
-            className={cn('h-2 w-2 rounded-full', w ? 'bg-win' : 'bg-loss', i < recent.length - 5 && 'opacity-60')}
+            className={cn(
+              'h-2 w-2 rounded-full',
+              w ? 'bg-win' : 'bg-loss',
+              captured[i] ? 'ring-2 ring-fg ring-offset-1 ring-offset-transparent' : i < recent.length - 5 && 'opacity-60',
+            )}
           />
         ))}
       </span>

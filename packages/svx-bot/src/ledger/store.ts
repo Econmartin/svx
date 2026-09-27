@@ -850,19 +850,34 @@ export class LedgerStore {
   settledStrategyTradesSince(
     strategy: string,
     sinceMs: number,
-  ): Array<{ tsMs: number; settledAtMs: number | null; quantity: number; costUsdc: number; payoutUsdc: number }> {
+  ): Array<{
+    tsMs: number;
+    settledAtMs: number | null;
+    oracleId: string;
+    quantity: number;
+    costUsdc: number;
+    payoutUsdc: number;
+  }> {
     return this.db
       .prepare<
         [string, number],
-        { ts_ms: number; settled_at_ms: number | null; quantity_dusdc: number; cost_usdc: number; payout_usdc: number | null }
+        {
+          ts_ms: number;
+          settled_at_ms: number | null;
+          oracle_id: string;
+          quantity_dusdc: number;
+          cost_usdc: number;
+          payout_usdc: number | null;
+        }
       >(
-        `SELECT ts_ms, settled_at_ms, quantity_dusdc, cost_usdc, payout_usdc FROM trades
+        `SELECT ts_ms, settled_at_ms, oracle_id, quantity_dusdc, cost_usdc, payout_usdc FROM trades
          WHERE strategy = ? AND settled = 1 AND ts_ms >= ? ORDER BY ts_ms ASC`,
       )
       .all(strategy, sinceMs)
       .map((r) => ({
         tsMs: r.ts_ms,
         settledAtMs: r.settled_at_ms,
+        oracleId: r.oracle_id,
         quantity: r.quantity_dusdc,
         costUsdc: r.cost_usdc,
         payoutUsdc: r.payout_usdc ?? 0,
@@ -1715,6 +1730,7 @@ export class LedgerStore {
         slot: String(r.slot),
         ttmMs: Number(r.ttm_ms),
         expiryMs: Number(r.expiry_ms),
+        marketId: String(r.market_id),
         boardUp: Number(r.board_up),
         costUp: r.cost_up as number | null,
         costDown: r.cost_down as number | null,
@@ -2859,6 +2875,7 @@ export interface ShadowDecisionRow {
   ttmMs: number;
   /** When the market settled — the row is known from then on. */
   expiryMs?: number;
+  marketId?: string;
   boardUp: number;
   costUp: number | null;
   costDown: number | null;

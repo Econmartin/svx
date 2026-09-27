@@ -797,6 +797,8 @@ export interface SwitchboardState {
     pnlPerContract: number;
     /** Last up-to-10 shadow results, oldest first (1 won, 0 lost). */
     recent?: number[];
+    /** Per `recent` result: 1 when we traded it live. */
+    recentCaptured?: number[];
     /** +n wins / −n losses in a row, most recent. */
     streak?: number;
     /** Average profit per contract over the last up-to-20 decisions. */

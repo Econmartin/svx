@@ -104,6 +104,30 @@ describe('switchboard: green on, red off', () => {
     expect(backfillEntryEdges(ledger, 'mainnet')).toBe(0); // one-shot
   });
 
+  it('rings shadow results we traded live on the same market', () => {
+    for (const i of [1, 2]) {
+      ledger.insertShadowDecision(d(i));
+      settle(i, true);
+    }
+    ledger.insertTrade({
+      signalId: 'always_up@t50s',
+      timestampMs: 500,
+      mode: 'live',
+      oracleId: '0xm2',
+      underlyingAsset: 'BTC',
+      expiryMs: 1_000_002,
+      strike: 84_000,
+      direction: 'up',
+      quantityDusdc: 5,
+      costPrice: 0.6,
+      costUsdc: 3,
+      settled: false,
+      strategy: 'auto_shadow',
+    });
+    const e = evaluateSwitchboard(ledger, 'mainnet', 10, true).find((x) => x.key === 'always_up@t50s')!;
+    expect(e.recentCaptured).toEqual([0, 1]);
+  });
+
   it('has no cap on how many strategies run, and scopes them to their checkpoint', () => {
     ledger.insertShadowDecision(d(1, { mom1m: 0.01, mom5m: 0.01, mom15m: 0.01 }));
     settle(1, true);
@@ -147,6 +171,16 @@ describe('harvest v2 on the switchboard', () => {
     });
     ledger.settleTradesForOracle(oracleId, won ? 101 : 99, tsMs + 60_000);
   };
+
+  it('rings the results we actually traded live', () => {
+    const now = Date.now();
+    trade('fade_spike', 'live', now - 5 * 3600_000, false); // live trading starts here
+    trade('calibration_harvest', 'paper', now - 4 * 3600_000, true);
+    trade('calibration_harvest', 'live', now - 3 * 3600_000, true);
+    const e = evaluateSwitchboard(ledger, 'mainnet', now, true).find((x) => x.key === HARVEST_KEY)!;
+    expect(e.recent).toEqual([1, 1]);
+    expect(e.recentCaptured).toEqual([0, 1]);
+  });
 
   it('scores harvest only from its trades since the first live switchboard trade', () => {
     const now = Date.now();

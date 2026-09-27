@@ -605,7 +605,7 @@ export const inTradeBand = (prob: number) => prob >= 0.02 && prob <= 0.97;
 export function sequenceScore(
   signal: string,
   slot: string,
-  seq: Array<{ cost: number; win: boolean }>,
+  seq: Array<{ cost: number; win: boolean; market?: string }>,
 ): ShadowSignalScore | null {
   const n = seq.length;
   if (!n) return null;
@@ -627,6 +627,7 @@ export function sequenceScore(
     pnlPerContract: mean,
     pnlStdErr: Math.sqrt(variance / n),
     recent: tail.slice(-10).map((x) => (x.win ? 1 : 0)),
+    recentMarkets: tail.slice(-10).map((x) => x.market ?? ''),
     streak: last ? streak : -streak,
     recentPnl: tail.reduce((a, x) => a + (x.win ? 1 : 0) - x.cost, 0) / tail.length,
   };
@@ -643,7 +644,7 @@ export function edgeSwitchScores(
 ): ShadowSignalScore[] {
   const out: ShadowSignalScore[] = [];
   const seen = new Set<string>();
-  const jumpSeq: Array<{ cost: number; win: boolean }> = [];
+  const jumpSeq: Array<{ cost: number; win: boolean; market: string }> = [];
   for (const r of jumps) {
     if (seen.has(r.marketId)) continue;
     seen.add(r.marketId);
@@ -653,7 +654,7 @@ export function edgeSwitchScores(
     const prob = p.side === 'up' ? q.up : 1 - q.up;
     if (!inTradeBand(prob)) continue;
     const win = p.side === 'up' ? r.settlementPrice > p.reference : r.settlementPrice <= p.reference;
-    jumpSeq.push({ cost: q.cost, win });
+    jumpSeq.push({ cost: q.cost, win, market: r.marketId });
   }
   const j = sequenceScore('binance_jump', 'jump', jumpSeq);
   if (j) out.push(j);
@@ -664,7 +665,7 @@ export function edgeSwitchScores(
         const best = volModelPick(r.payload, r.ttmMs, VOL_MODEL_MIN_EDGE);
         if (!best || !inTradeBand(best.candidate.prob)) return [];
         const c = best.candidate;
-        return [{ cost: c.cost, win: pays(c.lower, c.upper, r.settlementPrice) }];
+        return [{ cost: c.cost, win: pays(c.lower, c.upper, r.settlementPrice), market: r.marketId }];
       });
     const v = sequenceScore('vol_model', s.slot, seq);
     if (v) out.push(v);

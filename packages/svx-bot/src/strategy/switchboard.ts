@@ -84,6 +84,8 @@ export interface SwitchEntry {
   pnlPerContract: number;
   /** Last up-to-10 shadow results, oldest first (1 won, 0 lost). */
   recent: number[];
+  /** Per `recent` result: 1 when we traded it live, 0 when we did not. */
+  recentCaptured?: number[];
   /** +n wins / −n losses in a row, most recent. */
   streak: number;
   /** Average profit per contract over the last up-to-20 decisions. */
@@ -142,7 +144,7 @@ function scoreAll(inp: SwitchInputs): ShadowSignalScore[] {
     'harvest',
     inp.harvest
       .filter((t) => t.quantity > 0)
-      .map((t) => ({ cost: t.costUsdc / t.quantity, win: t.payoutUsdc > 0 })),
+      .map((t) => ({ cost: t.costUsdc / t.quantity, win: t.payoutUsdc > 0, market: t.oracleId })),
   );
   if (harvest) scores.push(harvest);
   return scores;
@@ -209,6 +211,14 @@ export function evaluateSwitchboard(
     /* start fresh */
   }
   const scores = scoreAll(switchInputs(ledger, network));
+  // Which (strategy, market) pairs we actually traded live — the rings on
+  // the switchboard's result dots.
+  const liveStart = ledger.firstLivePredictTradeMs();
+  const traded = new Set(
+    liveStart == null
+      ? []
+      : ledger.livePredictTradesSince(liveStart).map((t) => `${t.signalId}|${t.oracleId}`),
+  );
   const entries: SwitchEntry[] = scores.map((s) => {
     const key = `${s.signal}@${s.slot}`;
     const before = prev.get(key);
@@ -235,6 +245,9 @@ export function evaluateSwitchboard(
       n: s.n,
       pnlPerContract: s.pnlPerContract,
       recent: s.recent,
+      recentCaptured: (s.recentMarkets ?? []).map((m) =>
+        traded.has(`${s.signal === 'harvest_v2' ? 'harvest_v2' : key}|${m}`) ? 1 : 0,
+      ),
       streak: s.streak,
       recentPnl: s.recentPnl,
       status,

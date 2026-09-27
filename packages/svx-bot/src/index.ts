@@ -3572,11 +3572,11 @@ async function runHarvestV2Step(deps: {
     let costUsdc = feeEst?.cost ?? quantityDusdc * decision.costPrice;
     let mode: 'paper' | 'live' = 'paper';
     let txDigest: string | undefined;
-    // Switchboard-live clip: the smallest clip over Predict's $1 minimum
-    // premium, under the per-trade cap (same sizing as every green strategy).
+    // Switchboard-live clip: the same 5-contract clip the paper score is
+    // built from, trimmed if needed to the $5 harvest cap.
     const perContract = costUsdc / quantityDusdc;
     const switchQty = switchLive
-      ? fadeSpikeQuantity(decision.costPrice, perContract, clipCapUsd(perContract))
+      ? Math.min(quantityDusdc, Math.floor((SWITCHBOARD.maxHarvestCostUsd / perContract) * 100) / 100)
       : null;
     if (!cfg.paperTrading && live && (cfg.predictV2LiveEnabled || switchQty != null)) {
       if (switchQty != null) quantityDusdc = switchQty;
@@ -3603,7 +3603,7 @@ async function runHarvestV2Step(deps: {
                   maxFeeDrag: 0.3,
                   costSlippage: 0.03,
                   probabilitySlippage: 0.03,
-                  maxCostUsd: clipCapUsd(perContract),
+                  maxCostUsd: SWITCHBOARD.maxHarvestCostUsd,
                 }
               : {
                   ...DEFAULT_LIVE_MINT_GATES,

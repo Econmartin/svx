@@ -44,6 +44,10 @@ export const SWITCHBOARD = {
   // tape — could never be bought. User-approved 2026-09-27.
   maxLongshotCostUsd: 4,
   longshotMaxCostPerContract: 0.12,
+  // Harvest v2 buys its usual 5-contract clip (~$4.30 at ~86¢ all-in), the
+  // same size as the paper trades its score comes from. User-approved
+  // 2026-09-27: up to $5 per harvest trade.
+  maxHarvestCostUsd: 5,
   dailyLossLimitUsd: 15,
 } as const;
 

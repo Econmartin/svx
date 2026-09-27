@@ -782,6 +782,7 @@ export interface SwitchboardState {
   rules: {
     maxCostUsd: number;
     dailyLossLimitUsd: number;
+    maxHarvestCostUsd?: number;
     maxLongshotCostUsd?: number;
     longshotMaxCostPerContract?: number;
   };

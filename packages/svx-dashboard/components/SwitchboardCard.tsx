@@ -58,7 +58,7 @@ export function SwitchboardCard() {
         <CardDescription>
           Every shadow signal at every checkpoint is a strategy. It switches on once its profit per $1 contract (after fees) is above +2¢, and off when it falls to zero or below; in between it keeps its current state. Every green strategy trades every signal it sees. Limits: ${data?.rules.maxCostUsd ?? 2.5} per trade
           {data?.rules.maxLongshotCostUsd != null &&
-            ` ($${data.rules.maxLongshotCostUsd} for long-shots at ${Math.round((data.rules.longshotMaxCostPerContract ?? 0.12) * 100)}¢ or less all-in)`}
+            ` ($${data.rules.maxLongshotCostUsd} for long-shots at ${Math.round((data.rules.longshotMaxCostPerContract ?? 0.12) * 100)}¢ or less all-in${data.rules.maxHarvestCostUsd != null ? `, $${data.rules.maxHarvestCostUsd} for harvest v2` : ''})`}
           , and a 24-hour stop after a ${data?.rules.dailyLossLimitUsd ?? 15} loss.
         </CardDescription>
       </CardHeader>

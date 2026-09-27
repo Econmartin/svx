@@ -605,7 +605,8 @@ export const inTradeBand = (prob: number) => prob >= 0.02 && prob <= 0.97;
 export function sequenceScore(
   signal: string,
   slot: string,
-  seq: Array<{ cost: number; win: boolean; market?: string }>,
+  seq: Array<{ cost: number; win: boolean; market?: string; atMs?: number }>,
+  timelineSinceMs?: number,
 ): ShadowSignalScore | null {
   const n = seq.length;
   if (!n) return null;
@@ -628,6 +629,11 @@ export function sequenceScore(
     pnlStdErr: Math.sqrt(variance / n),
     recent: tail.slice(-10).map((x) => (x.win ? 1 : 0)),
     recentMarkets: tail.slice(-10).map((x) => x.market ?? ''),
+    ...(timelineSinceMs != null && {
+      timeline: seq
+        .filter((x) => x.atMs != null && x.atMs >= timelineSinceMs)
+        .map((x) => ({ atMs: x.atMs!, won: x.win, market: x.market ?? '' })),
+    }),
     streak: last ? streak : -streak,
     recentPnl: tail.reduce((a, x) => a + (x.win ? 1 : 0) - x.cost, 0) / tail.length,
   };
@@ -641,10 +647,11 @@ export function sequenceScore(
 export function edgeSwitchScores(
   jumps: Array<EdgeProbeRow<JumpPayload>>,
   vols: Array<EdgeProbeRow<VolRegimePayload>>,
+  timelineSinceMs?: number,
 ): ShadowSignalScore[] {
   const out: ShadowSignalScore[] = [];
   const seen = new Set<string>();
-  const jumpSeq: Array<{ cost: number; win: boolean; market: string }> = [];
+  const jumpSeq: Array<{ cost: number; win: boolean; market: string; atMs: number }> = [];
   for (const r of jumps) {
     if (seen.has(r.marketId)) continue;
     seen.add(r.marketId);
@@ -654,9 +661,9 @@ export function edgeSwitchScores(
     const prob = p.side === 'up' ? q.up : 1 - q.up;
     if (!inTradeBand(prob)) continue;
     const win = p.side === 'up' ? r.settlementPrice > p.reference : r.settlementPrice <= p.reference;
-    jumpSeq.push({ cost: q.cost, win, market: r.marketId });
+    jumpSeq.push({ cost: q.cost, win, market: r.marketId, atMs: r.expiryMs });
   }
-  const j = sequenceScore('binance_jump', 'jump', jumpSeq);
+  const j = sequenceScore('binance_jump', 'jump', jumpSeq, timelineSinceMs);
   if (j) out.push(j);
   for (const s of VOL_SLOTS) {
     const seq = vols
@@ -665,9 +672,11 @@ export function edgeSwitchScores(
         const best = volModelPick(r.payload, r.ttmMs, VOL_MODEL_MIN_EDGE);
         if (!best || !inTradeBand(best.candidate.prob)) return [];
         const c = best.candidate;
-        return [{ cost: c.cost, win: pays(c.lower, c.upper, r.settlementPrice), market: r.marketId }];
+        return [
+          { cost: c.cost, win: pays(c.lower, c.upper, r.settlementPrice), market: r.marketId, atMs: r.expiryMs },
+        ];
       });
-    const v = sequenceScore('vol_model', s.slot, seq);
+    const v = sequenceScore('vol_model', s.slot, seq, timelineSinceMs);
     if (v) out.push(v);
   }
   return out;

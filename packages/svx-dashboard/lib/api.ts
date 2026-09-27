@@ -799,6 +799,9 @@ export interface SwitchboardState {
     recent?: number[];
     /** Per `recent` result: 1 when we traded it live. */
     recentCaptured?: number[];
+    /** Last 24h in six 4-hour bands, oldest first: wins/losses we did not
+     *  trade (w, l) and did trade live (tw, tl). */
+    bands?: Array<{ w: number; l: number; tw: number; tl: number }>;
     /** +n wins / −n losses in a row, most recent. */
     streak?: number;
     /** Average profit per contract over the last up-to-20 decisions. */

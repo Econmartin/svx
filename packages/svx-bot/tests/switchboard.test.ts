@@ -182,6 +182,19 @@ describe('harvest v2 on the switchboard', () => {
     expect(e.recentCaptured).toEqual([0, 1]);
   });
 
+  it('bins the last 24h into 4-hour bands, traded vs not', () => {
+    const now = Date.now();
+    trade('fade_spike', 'live', now - 30 * 3600_000, false); // live start; outside the bands
+    trade('calibration_harvest', 'paper', now - 23 * 3600_000, true); // band 0, missed win
+    trade('calibration_harvest', 'live', now - 3 * 3600_000, false); // band 5, traded loss
+    trade('calibration_harvest', 'live', now - 2 * 3600_000, true); // band 5, traded win
+    const e = evaluateSwitchboard(ledger, 'mainnet', now, true).find((x) => x.key === HARVEST_KEY)!;
+    expect(e.bands).toHaveLength(6);
+    expect(e.bands![0]).toEqual({ w: 1, l: 0, tw: 0, tl: 0 });
+    expect(e.bands![5]).toEqual({ w: 0, l: 0, tw: 1, tl: 1 });
+    expect(e.bands!.slice(1, 5).every((b) => b.w + b.l + b.tw + b.tl === 0)).toBe(true);
+  });
+
   it('scores harvest only from its trades since the first live switchboard trade', () => {
     const now = Date.now();
     trade('calibration_harvest', 'paper', now - 10 * 3600_000, false); // before live start: ignored

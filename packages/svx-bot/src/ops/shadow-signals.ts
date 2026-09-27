@@ -372,6 +372,9 @@ export interface ShadowSignalScore {
   recent: number[];
   /** The market of each `recent` result, when known. */
   recentMarkets?: string[];
+  /** Every result known at or after the caller's `timelineSinceMs`, time
+   *  order (when the market settled, won, market). */
+  timeline?: Array<{ atMs: number; won: boolean; market: string }>;
   /** Current run at the end: +n = n wins in a row, −n = n losses in a row. */
   streak: number;
   /** Average profit per contract over the last up-to-20 decisions. */
@@ -387,7 +390,10 @@ function streakOf(seq: Array<{ won: boolean }>): number {
   return last ? n : -n;
 }
 
-export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore[] {
+export function scoreShadowSignals(
+  rows: ShadowDecisionRow[],
+  timelineSinceMs?: number,
+): ShadowSignalScore[] {
   const out: ShadowSignalScore[] = [];
   const slots = ['all', ...new Set(rows.map((r) => r.slot))];
   for (const [name, fn] of Object.entries(SHADOW_SIGNALS)) {
@@ -397,6 +403,7 @@ export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore
       let cost = 0;
       let sumSq = 0; // of per-decision pnl, for the standard error
       const tail: Array<{ won: boolean; pnl: number; market?: string }> = []; // last 20, time order
+      const timeline: NonNullable<ShadowSignalScore['timeline']> = [];
       for (const r of rows) {
         if (slot !== 'all' && r.slot !== slot) continue;
         const pick = fn(r);
@@ -409,6 +416,9 @@ export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore
         const pnl = (won ? 1 : 0) - c;
         sumSq += pnl * pnl;
         tail.push({ won, pnl, market: r.marketId });
+        if (timelineSinceMs != null && r.expiryMs != null && r.expiryMs >= timelineSinceMs) {
+          timeline.push({ atMs: r.expiryMs, won, market: r.marketId ?? '' });
+        }
         if (tail.length > 20) tail.shift();
       }
       if (!n) continue;
@@ -426,6 +436,7 @@ export function scoreShadowSignals(rows: ShadowDecisionRow[]): ShadowSignalScore
         pnlStdErr: Math.sqrt(variance / n),
         recent: tail.slice(-10).map((x) => (x.won ? 1 : 0)),
         recentMarkets: tail.slice(-10).map((x) => x.market ?? ''),
+        ...(timelineSinceMs != null && { timeline }),
         streak: streakOf(tail),
         recentPnl: tail.reduce((a, x) => a + x.pnl, 0) / tail.length,
       });

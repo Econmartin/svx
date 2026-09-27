@@ -107,8 +107,8 @@ export function BankGaugeCard() {
             value={drift == null ? '—' : Math.abs(drift) < 0.5 ? 'Matches' : `${usd(drift)} off`}
             tone={drift == null ? undefined : Math.abs(drift) < 0.5 ? 'win' : 'loss'}
             hint={
-              g.bank.baselineAtMs
-                ? `checked since ${formatRelative(g.bank.baselineAtMs)}${g.bank.balanceUsdc != null ? ` · $${g.bank.balanceUsdc.toFixed(2)} now` : ''}`
+              g.bank.checkedAtMs && g.bank.baselineAtMs
+                ? `account $${g.bank.balanceUsdc?.toFixed(2)} · tracked since ${formatRelative(g.bank.baselineAtMs)}`
                 : 'starts at the next balance read'
             }
           />

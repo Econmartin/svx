@@ -7,8 +7,12 @@
  *   Ledger    Σ (payout − cost) over settled live trades — what we booked.
  *   Expected  Σ contracts × the strategy's profit per contract at entry —
  *             what the switchboard scores said those same trades were worth.
- *   Bank      the account balance moved against the ledger since a baseline
- *             snapshot (drift ≈ 0 means the ledger is telling the truth).
+ *   Bank      the Predict account balance moved against the ledger since a
+ *             baseline snapshot (drift ≈ 0 means the ledger is telling the
+ *             truth). Snapshotted when the bot reads the balance, and drift
+ *             is the smallest over the last few reads: a trade landing
+ *             between a balance read and its ledger row is a blip, a real
+ *             leak shows on every read.
  *
  * Ledger − Expected is luck. Each $1 contract is a coin that pays 1 with
  * probability p (≈ cost + expected edge), so its outcome has variance
@@ -21,7 +25,7 @@ import type { LedgerStore } from '../ledger/store.js';
 import type { TradeRecord } from 'svx-shared/types';
 import { HARVEST_KEY, strategyTagFor, type SwitchEntry } from '../strategy/switchboard.js';
 
-export const PREDICT_BASELINE_KEY = 'predict_reconcile_baseline';
+export const PREDICT_BASELINE_KEY = 'predict_account_baseline';
 
 interface Baseline {
   balanceUsdc: number;
@@ -57,6 +61,7 @@ export interface BankGauge {
     /** Balance move the ledger does not explain; ≈0 when truthful. */
     driftUsdc: number | null;
     baselineAtMs: number | null;
+    checkedAtMs: number | null;
   };
 }
 
@@ -87,12 +92,46 @@ export function predictLedgerOffsetUsdc(trades: TradeRecord[]): number {
   return offset;
 }
 
-export function bankGauge(
-  ledger: LedgerStore,
-  board: SwitchEntry[],
-  balanceUsdc: number | null,
-  nowMs = Date.now(),
-): BankGauge {
+const SNAPSHOTS_KEPT = 5;
+let snapshots: Array<{ atMs: number; balanceUsdc: number; sinceBaselineUsdc: number; driftUsdc: number }> = [];
+let baselineAtMs: number | null = null;
+
+/**
+ * Pair a fresh account balance read with the ledger as it stands right now.
+ * The first read after a (re)baseline becomes the baseline.
+ */
+export function recordBankSnapshot(ledger: LedgerStore, balanceUsdc: number, nowMs = Date.now()): void {
+  const offset = predictLedgerOffsetUsdc(ledger.livePredictTradesSince(0));
+  let baseline: Baseline | null = null;
+  try {
+    const raw = ledger.getMeta(PREDICT_BASELINE_KEY);
+    baseline = raw ? (JSON.parse(raw) as Baseline) : null;
+  } catch {
+    baseline = null;
+  }
+  if (!baseline || baseline.atMs !== baselineAtMs) snapshots = [];
+  if (!baseline) {
+    baseline = { balanceUsdc, offsetUsdc: offset, atMs: nowMs };
+    ledger.setMeta(PREDICT_BASELINE_KEY, JSON.stringify(baseline));
+  }
+  baselineAtMs = baseline.atMs;
+  const since = balanceUsdc - baseline.balanceUsdc;
+  snapshots.push({
+    atMs: nowMs,
+    balanceUsdc,
+    sinceBaselineUsdc: since,
+    driftUsdc: since - (offset - baseline.offsetUsdc),
+  });
+  if (snapshots.length > SNAPSHOTS_KEPT) snapshots = snapshots.slice(-SNAPSHOTS_KEPT);
+}
+
+/** Test hook. */
+export function resetBankSnapshots(): void {
+  snapshots = [];
+  baselineAtMs = null;
+}
+
+export function bankGauge(ledger: LedgerStore, board: SwitchEntry[]): BankGauge {
   const liveStartMs = ledger.firstLivePredictTradeMs();
   const allLive = ledger.livePredictTradesSince(0);
   const sinceStart = liveStartMs == null ? [] : allLive.filter((t) => t.timestampMs >= liveStartMs);
@@ -139,21 +178,11 @@ export function bankGauge(
   }
   const sigma = Math.sqrt(variance);
 
-  // Account-vs-ledger drift, against a snapshot taken the first time both
-  // are known. `svx rebaseline` clears it after a deposit or withdrawal.
-  const offset = predictLedgerOffsetUsdc(allLive);
-  let baseline: Baseline | null = null;
-  try {
-    const raw = ledger.getMeta(PREDICT_BASELINE_KEY);
-    baseline = raw ? (JSON.parse(raw) as Baseline) : null;
-  } catch {
-    baseline = null;
-  }
-  if (!baseline && balanceUsdc != null && balanceUsdc > 0) {
-    baseline = { balanceUsdc, offsetUsdc: offset, atMs: nowMs };
-    ledger.setMeta(PREDICT_BASELINE_KEY, JSON.stringify(baseline));
-  }
-  const sinceBaseline = baseline && balanceUsdc != null ? balanceUsdc - baseline.balanceUsdc : null;
+  const last = snapshots[snapshots.length - 1];
+  // Persistent drift: the smallest over the recent reads.
+  const drift = snapshots.length
+    ? snapshots.reduce((m, x) => (Math.abs(x.driftUsdc) < Math.abs(m) ? x.driftUsdc : m), Infinity)
+    : null;
 
   return {
     liveStartMs,
@@ -183,11 +212,11 @@ export function bankGauge(
       .sort((a, b) => b.trades - a.trades),
     series,
     bank: {
-      balanceUsdc: balanceUsdc == null ? null : round(balanceUsdc),
-      sinceBaselineUsdc: sinceBaseline == null ? null : round(sinceBaseline),
-      driftUsdc:
-        baseline && sinceBaseline != null ? round(sinceBaseline - (offset - baseline.offsetUsdc)) : null,
-      baselineAtMs: baseline?.atMs ?? null,
+      balanceUsdc: last ? round(last.balanceUsdc) : null,
+      sinceBaselineUsdc: last ? round(last.sinceBaselineUsdc) : null,
+      driftUsdc: drift == null ? null : round(drift),
+      baselineAtMs,
+      checkedAtMs: last?.atMs ?? null,
     },
   };
 }

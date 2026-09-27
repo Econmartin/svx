@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { LedgerStore } from '../src/ledger/store.js';
-import { PREDICT_BASELINE_KEY, bankGauge } from '../src/ops/bank-gauge.js';
+import { PREDICT_BASELINE_KEY, bankGauge, recordBankSnapshot, resetBankSnapshots } from '../src/ops/bank-gauge.js';
 import type { SwitchEntry } from '../src/strategy/switchboard.js';
 
 let ledger: LedgerStore;
 beforeEach(() => {
   ledger = new LedgerStore(':memory:');
+  resetBankSnapshots();
 });
 
 const T0 = 1_000_000;
@@ -58,7 +59,7 @@ describe('bank gauge', () => {
     // A live trade no switchboard strategy placed: unscored.
     settle(clip({ signalId: 's', strategy: 'vol_arb' }), false);
 
-    const g = bankGauge(ledger, board, null, T0 + 200_000);
+    const g = bankGauge(ledger, board);
     // +1.5, −3.5, +1, −3.5
     expect(g.ledger.pnlUsdc).toBeCloseTo(-4.5);
     expect(g.ledger.settled).toBe(4);
@@ -75,23 +76,28 @@ describe('bank gauge', () => {
     expect(g.byStrategy.find((r) => r.key === 'harvest_v2@harvest')?.trades).toBe(1);
   });
 
-  it('flags account moves the ledger does not explain', () => {
-    const g0 = bankGauge(ledger, board, 100, T0);
-    expect(g0.bank.driftUsdc).toBe(0);
+  it('flags account moves the ledger does not explain, not timing blips', () => {
+    const drift = (bal: number) => {
+      recordBankSnapshot(ledger, bal, T0);
+      return bankGauge(ledger, board).bank.driftUsdc;
+    };
+    expect(drift(100)).toBe(0);
     expect(ledger.getMeta(PREDICT_BASELINE_KEY)).toBeDefined();
 
     // Buy a clip ($3.50 leaves the account), it wins, payout claimed.
     const o = clip({ signalId: 'fade_spike@t50s', strategy: 'fade_spike', edge: 0.1 });
-    expect(bankGauge(ledger, board, 96.5, T0).bank.driftUsdc).toBe(0);
+    // A read that raced the ledger row is a blip — earlier reads were clean.
+    expect(drift(100)).toBe(0);
+    expect(drift(96.5)).toBe(0);
     settle(o, true);
     // Won but not claimed yet: account still at 96.5, no drift.
-    expect(bankGauge(ledger, board, 96.5, T0).bank.driftUsdc).toBe(0);
-    const id = ledger.livePredictTradesSince(0)[0]!.id;
-    ledger.markRedeemed(id, '0xclaim');
-    expect(bankGauge(ledger, board, 101.5, T0).bank.driftUsdc).toBe(0);
-    // $2 vanished that the ledger can't account for.
-    const g = bankGauge(ledger, board, 99.5, T0);
-    expect(g.bank.driftUsdc).toBe(-2);
-    expect(g.bank.sinceBaselineUsdc).toBe(-0.5);
+    expect(drift(96.5)).toBe(0);
+    ledger.markRedeemed(ledger.livePredictTradesSince(0)[0]!.id, '0xclaim');
+    expect(drift(101.5)).toBe(0);
+    // $2 vanished that the ledger can't account for: shows once every
+    // recent read carries it.
+    for (let i = 0; i < 4; i++) drift(99.5);
+    expect(drift(99.5)).toBe(-2);
+    expect(bankGauge(ledger, board).bank.sinceBaselineUsdc).toBe(-0.5);
   });
 });

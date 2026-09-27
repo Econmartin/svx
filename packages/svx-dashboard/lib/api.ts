@@ -827,6 +827,7 @@ export interface BankGauge {
     sinceBaselineUsdc: number | null;
     driftUsdc: number | null;
     baselineAtMs: number | null;
+    checkedAtMs: number | null;
   };
 }
 

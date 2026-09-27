@@ -48,6 +48,7 @@ import {
 } from './ops/cross-venue.js';
 import { SHADOW_SIGNALS, type ShadowDecisionEvent } from './ops/shadow-signals.js';
 import type { ShadowDecisionRow } from './ledger/store.js';
+import { recordBankSnapshot } from './ops/bank-gauge.js';
 import {
   SWITCHBOARD,
   HARVEST_KEY,
@@ -591,6 +592,8 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
               balanceUsdc: bal,
               updatedAtMs: Date.now(),
             };
+            // Bank gauge: this read paired with the ledger right now.
+            recordBankSnapshot(ledger, bal);
           }
         }
         if (live && Date.now() - state.lastManagerBalanceAtMs > 300_000) {

@@ -826,11 +826,8 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
    *   GET /strategy/bank-gauge
    */
   app.get('/strategy/bank-gauge', (_req, res) => {
-    const balance = deps.state.v2Wrapper
-      ? deps.state.navUsdc + (deps.state.managerBalanceUsdc ?? 0) + deps.state.v2Wrapper.balanceUsdc
-      : null;
     backfillEntryEdges(deps.ledger, suiNetwork()); // one-shot; no-op after
-    res.json(bankGauge(deps.ledger, evaluateSwitchboard(deps.ledger, suiNetwork()), balance));
+    res.json(bankGauge(deps.ledger, evaluateSwitchboard(deps.ledger, suiNetwork())));
   });
 
   app.get('/strategy/margin-lever/state', (_req, res) => {

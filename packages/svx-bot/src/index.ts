@@ -65,6 +65,17 @@ import { isKilled } from './ops/kill.js';
 import { recordFadeEval, refreshHunt } from './ops/fade-hunt.js';
 import { claimSettledPositions } from './exec/claim-settled.js';
 import { pollWatchedWallets } from './ops/wallet-watch.js';
+import {
+  edgeTrackersEnabled,
+  inTradeBand,
+  recordVolRegime,
+  resolveEdgeProbes,
+  startJumpTracker,
+  volModelPick,
+  VOL_MODEL_MIN_EDGE,
+  type JumpEvent,
+  type VolRegimeEvent,
+} from './ops/edge-trackers.js';
 
 /** Wallet-watch cadence (the 10s calibration tick is too chatty for it). */
 let lastWatchPollMs = 0;
@@ -549,6 +560,15 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
   // telemetry (no execution) — this is what re-validates the favorites
   // edge on V2 before predictV2LiveEnabled ever flips.
   let calibV2Timer: NodeJS.Timeout | undefined;
+  // Edge trackers (read-only): the jump tracker keeps its own Binance socket;
+  // the vol-regime probes ride the 10s recorder tick below.
+  let stopJumpTracker: (() => void) | undefined;
+  if (!opts.onceOnly && cfg.predictV2 && edgeTrackersEnabled()) {
+    stopJumpTracker = startJumpTracker({
+      ledger,
+      onJump: (e) => void runJumpTrades(e, { ledger, cfg, live }),
+    });
+  }
   if (!opts.onceOnly && cfg.predictV2) {
     let calibInFlight = false;
     calibV2Timer = setInterval(() => {
@@ -669,6 +689,17 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
               ledger,
             }).catch((e) => log.warn('svx.claim.sweep_error', { err: errMsg(e) }));
           }
+          if (edgeTrackersEnabled()) {
+            await recordVolRegime({
+              ledger,
+              onRecorded: (e) => runVolModelTrade(e, { ledger, cfg, live }),
+            }).catch((e) =>
+              log.warn('svx.edge.vol_record_error', { err: errMsg(e) }),
+            );
+            await resolveEdgeProbes({ predict, ledger }).catch((e) =>
+              log.warn('svx.edge.resolve_error', { err: errMsg(e) }),
+            );
+          }
           if (Date.now() - lastWatchPollMs >= 30_000) {
             lastWatchPollMs = Date.now();
             await pollWatchedWallets({ ledger }).catch((e) =>
@@ -775,6 +806,7 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
       if (volArbTimer) clearInterval(volArbTimer);
       if (marginLeverTimer) clearInterval(marginLeverTimer);
       if (calibV2Timer) clearInterval(calibV2Timer);
+      stopJumpTracker?.();
       stopApi?.();
       ledger.close();
       return;
@@ -3019,7 +3051,7 @@ async function runVolArbStep(args: {
  * It also records the fade-spike rule's verdict at the radar's checkpoint so
  * the dashboard can explain every window, traded or not.
  */
-const AUTO_STRATEGIES = ['fade_spike', 'auto_shadow'] as const;
+const AUTO_STRATEGIES = ['fade_spike', 'auto_shadow', 'edge_jump', 'edge_vol'] as const;
 let autoLiveBlockLoggedAt = 0;
 export async function runFadeSpikeDecision(
   ev: ShadowDecisionEvent,
@@ -3221,6 +3253,183 @@ export async function runFadeSpikeDecision(
       ...(txDigest && { txDigest }),
     });
   }
+}
+
+/**
+ * Edge-tracker executors (ops/edge-trackers.ts). Same rule and budget as the
+ * shadow strategies: trade only while the switchboard shows the strategy ON,
+ * once per market, smallest clip under the $2.50 cap, shared −$15/24h stop.
+ */
+interface EdgeTradeArgs {
+  key: string;
+  signal: 'binance_jump' | 'vol_model';
+  marketId: string;
+  expiryMs: number;
+  /** Binary at the reference strike, or a range (lower, upper]. */
+  order:
+    | { kind: 'binary'; direction: 'up' | 'down'; reference: number }
+    | { kind: 'range'; lower: number; upper: number };
+  /** Chain probability that the order pays. */
+  price: number;
+  costPerContract: number;
+}
+
+async function runEdgeTrade(
+  a: EdgeTradeArgs,
+  deps: { ledger: LedgerStore; cfg: SvxConfig; live?: LiveContext; switchboard?: SwitchEntry[] },
+): Promise<void> {
+  const { ledger, cfg, live } = deps;
+  const entries = deps.switchboard ?? evaluateSwitchboard(ledger, suiNetwork());
+  const entry = entries.find((e) => e.key === a.key && e.status === 'on');
+  if (!entry) return;
+  const skip = (reason: string) =>
+    log.info('svx.edge.skip', { marketId: a.marketId, strategy: a.key, price: a.price, reason });
+  if (!inTradeBand(a.price)) return skip('price_out_of_bounds');
+  const nowMs = Date.now();
+  const isAuto = (t: { strategy?: string }) =>
+    (AUTO_STRATEGIES as readonly string[]).includes(t.strategy ?? '');
+  if (ledger.openTrades().filter(isAuto).some((t) => t.oracleId === a.marketId && t.signalId === a.key)) {
+    return skip('already_open_for_market');
+  }
+  const realized24h = AUTO_STRATEGIES.reduce(
+    (acc, st) => acc + ledger.realizedStrategyPnlSince(st, nowMs - 24 * 3600_000),
+    0,
+  );
+  if (realized24h <= -SWITCHBOARD.dailyLossLimitUsd) return skip('daily_loss_limit');
+  const quantity = fadeSpikeQuantity(a.price, a.costPerContract, SWITCHBOARD.maxCostUsd);
+  if (quantity == null) return skip('clip_above_cost_cap');
+
+  let mode: 'paper' | 'live' = 'paper';
+  let qty = quantity;
+  let costUsdc = quantity * a.costPerContract;
+  let costPrice = a.price;
+  let txDigest: string | undefined;
+  const blocked = cfg.paperTrading
+    ? 'paper_trading'
+    : !live
+      ? 'no_operator_key'
+      : isKilled()
+        ? 'kill_switch'
+        : ledger.getPause().paused
+          ? 'ledger_paused'
+          : null;
+  if (!blocked && live) {
+    const base = { underlying: 'BTC', expiryMs: a.expiryMs, marketId: a.marketId, quantity };
+    const outcome = await mintLive({
+      sui: live.sui,
+      keypair: live.keypair,
+      owner: live.operatorAddress,
+      order:
+        a.order.kind === 'range'
+          ? { ...base, direction: 'range', lower: a.order.lower, upper: a.order.upper }
+          : { ...base, direction: a.order.direction, strike: 'reference' },
+      gates: {
+        maxEntryProbability: Math.min(0.97, a.price + 0.05),
+        maxFeeDrag: 0.4,
+        costSlippage: 0.03,
+        probabilitySlippage: 0.03,
+        maxCostUsd: SWITCHBOARD.maxCostUsd,
+      },
+    }).catch((e) => ({ kind: 'failed' as const, reason: errMsg(e) }));
+    if (outcome.kind !== 'filled') {
+      log.warn('svx.edge.live_not_filled', {
+        marketId: a.marketId,
+        strategy: a.key,
+        kind: outcome.kind,
+        reason: outcome.reason,
+      });
+      return;
+    }
+    mode = 'live';
+    txDigest = outcome.digest;
+    if (outcome.fill) {
+      qty = outcome.fill.quantityDusdc;
+      costUsdc = outcome.fill.costUsdc;
+      costPrice = outcome.fill.entryProbability;
+    }
+  }
+  const tradeId = ledger.insertTrade({
+    signalId: a.key,
+    timestampMs: nowMs,
+    mode,
+    oracleId: a.marketId,
+    underlyingAsset: 'BTC',
+    expiryMs: a.expiryMs,
+    ...(a.order.kind === 'range'
+      ? { strike: a.order.lower, direction: 'range' as const, rangeUpper: a.order.upper }
+      : { strike: a.order.reference, direction: a.order.direction }),
+    quantityDusdc: qty,
+    costPrice,
+    costUsdc,
+    settled: false,
+    msToExpiryAtExec: a.expiryMs - nowMs,
+    predictProbAtExec: a.price,
+    strategy: strategyTagFor(a.signal),
+    ...(txDigest && { txDigest }),
+  });
+  log.info('svx.edge.entered', {
+    tradeId,
+    mode,
+    strategy: a.key,
+    marketId: a.marketId,
+    order: a.order,
+    price: Number(a.price.toFixed(4)),
+    quantity: qty,
+    costUsdc: Number(costUsdc.toFixed(4)),
+    ttmSec: Math.round((a.expiryMs - nowMs) / 1000),
+    ...(txDigest && { txDigest }),
+  });
+}
+
+/** Binance jump: buy the jump side in every live market, off the first quote. */
+export async function runJumpTrades(
+  e: JumpEvent,
+  deps: { ledger: LedgerStore; cfg: SvxConfig; live?: LiveContext; switchboard?: SwitchEntry[] },
+): Promise<void> {
+  await Promise.all(
+    e.markets.map(({ market, q1 }) =>
+      q1.cost == null
+        ? undefined
+        : runEdgeTrade(
+            {
+              key: 'binance_jump@jump',
+              signal: 'binance_jump',
+              marketId: market.id,
+              expiryMs: market.expiryMs,
+              order: { kind: 'binary', direction: e.side, reference: market.referencePrice! },
+              price: e.side === 'up' ? q1.up : 1 - q1.up,
+              costPerContract: q1.cost,
+            },
+            deps,
+          ),
+    ),
+  ).catch((err) => log.warn('svx.edge.jump_exec_error', { err: errMsg(err) }));
+}
+
+/** Vol model: buy the model trader's pick for this checkpoint. */
+export async function runVolModelTrade(
+  e: VolRegimeEvent,
+  deps: { ledger: LedgerStore; cfg: SvxConfig; live?: LiveContext; switchboard?: SwitchEntry[] },
+): Promise<void> {
+  const best = volModelPick(e.payload, e.ttmMs, VOL_MODEL_MIN_EDGE);
+  if (!best) return;
+  const c = best.candidate;
+  const order: EdgeTradeArgs['order'] =
+    c.lower != null && c.upper != null
+      ? { kind: 'range', lower: c.lower, upper: c.upper }
+      : { kind: 'binary', direction: c.upper == null ? 'up' : 'down', reference: e.payload.reference };
+  await runEdgeTrade(
+    {
+      key: `vol_model@${e.slot}`,
+      signal: 'vol_model',
+      marketId: e.market.id,
+      expiryMs: e.market.expiryMs,
+      order,
+      price: c.prob,
+      costPerContract: c.cost,
+    },
+    deps,
+  );
 }
 
 /**
@@ -3687,7 +3896,7 @@ async function reconcileSettlements(
       // V2 winners are collected by the claim sweep (exec/claim-settled.ts),
       // which marks the row with the real claim digest once it executes.
       // (Pre-launch testnet auto-credited winners; mainnet does not.)
-      if (predictV2) continue;
+      if (predictV2 || t.direction === 'range') continue;
       try {
         const tx = buildRedeemTx({
           oracleId: t.oracleId,

@@ -21,6 +21,11 @@
 
 import type { LedgerStore } from '../ledger/store.js';
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
+import {
+  edgeSwitchScores,
+  type JumpPayload,
+  type VolRegimePayload,
+} from '../ops/edge-trackers.js';
 import { log } from '../util/log.js';
 
 export const SWITCHBOARD = {
@@ -58,7 +63,11 @@ const META_KEY = 'switchboard_v1';
 let cache: { atMs: number; entries: SwitchEntry[] } | null = null;
 
 /** Ledger strategy tag for a signal (fade variants keep their own page). */
-export function strategyTagFor(signal: string): 'fade_spike' | 'auto_shadow' {
+export function strategyTagFor(
+  signal: string,
+): 'fade_spike' | 'auto_shadow' | 'edge_jump' | 'edge_vol' {
+  if (signal === 'binance_jump') return 'edge_jump';
+  if (signal === 'vol_model') return 'edge_vol';
   return signal.startsWith('fade_spike') ? 'fade_spike' : 'auto_shadow';
 }
 
@@ -77,9 +86,17 @@ export function evaluateSwitchboard(
   } catch {
     /* start fresh */
   }
-  const scores = scoreShadowSignals(ledger.settledShadowDecisions(network, 0)).filter(
-    (s) => s.slot !== 'all',
-  );
+  const scores = [
+    ...scoreShadowSignals(ledger.settledShadowDecisions(network, 0)).filter(
+      (s) => s.slot !== 'all',
+    ),
+    // Edge trackers (ops/edge-trackers.ts): the Binance-jump and vol-model
+    // strategies, on the same on/off rule.
+    ...edgeSwitchScores(
+      ledger.settledEdgeProbes<JumpPayload>(network, 'jump', 0),
+      ledger.settledEdgeProbes<VolRegimePayload>(network, 'vol_regime', 0),
+    ),
+  ];
   const entries: SwitchEntry[] = scores.map((s) => {
     const key = `${s.signal}@${s.slot}`;
     const before = prev.get(key);

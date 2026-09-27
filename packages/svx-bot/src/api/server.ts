@@ -13,6 +13,7 @@ import { SWITCHBOARD, evaluateSwitchboard } from '../strategy/switchboard.js';
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
 import { scoreCrossVenue } from '../ops/cross-venue.js';
 import { reportWatchedWallets } from '../ops/wallet-watch.js';
+import { scoreJumps, scoreVolRegime, type JumpPayload, type VolRegimePayload } from '../ops/edge-trackers.js';
 import { suiNetwork } from '../exec/sui-client.js';
 import cors from 'cors';
 import type { LedgerStore } from '../ledger/store.js';
@@ -496,6 +497,25 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     const network = suiNetwork();
     const rows = deps.ledger.settledShadowDecisions(network, sinceMs);
     res.json({ network, decisions: rows.length, scores: scoreShadowSignals(rows) });
+  });
+
+  /**
+   * Edge trackers (read-only): Binance 2s jumps scored at the chain's exact
+   * quote right after the jump (q1) and at ≈ +0.6s / +1.2s (q2, q3) when a
+   * mint would land; and up/down/window quotes bucketed by realized-vs-chain vol.
+   *
+   *   GET /edge-trackers?sinceMs=<epoch-ms>
+   */
+  app.get('/edge-trackers', (req, res) => {
+    const sinceMs = clampFloat(req.query.sinceMs, 0, Number.MAX_SAFE_INTEGER, 0);
+    const network = suiNetwork();
+    res.json({
+      network,
+      jump: scoreJumps(deps.ledger.settledEdgeProbes<JumpPayload>(network, 'jump', sinceMs)),
+      volRegime: scoreVolRegime(
+        deps.ledger.settledEdgeProbes<VolRegimePayload>(network, 'vol_regime', sinceMs),
+      ),
+    });
   });
 
   /**

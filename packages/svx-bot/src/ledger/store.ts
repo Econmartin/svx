@@ -285,6 +285,29 @@ CREATE TABLE IF NOT EXISTS cross_venue_pairs (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_cvp_market_slot ON cross_venue_pairs(market_id, slot);
 
+/* Edge probes: read-only trackers for the two edges the 2026-09-27 study
+   left open — Binance jumps the chain has not priced yet ('jump'), and the
+   chain's slow volatility vs recent realized volatility ('vol_regime').
+   Each row holds exact chain quotes in a JSON payload and resolves against
+   the market settlement. The switchboard never reads this table, so
+   nothing here can trade. */
+CREATE TABLE IF NOT EXISTS edge_probes (
+  id TEXT PRIMARY KEY,
+  network TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  market_id TEXT NOT NULL,
+  slot TEXT NOT NULL,
+  expiry_ms INTEGER NOT NULL,
+  recorded_at_ms INTEGER NOT NULL,
+  ttm_ms INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  settlement_price REAL,
+  settled_at_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_edge_probes_market ON edge_probes(market_id, kind, slot);
+CREATE INDEX IF NOT EXISTS ix_edge_probes_unsettled
+  ON edge_probes(expiry_ms) WHERE settlement_price IS NULL;
+
 /* Watched wallets: every mint and early exit by a small set of mainnet
    wallets whose results luck does not explain, keyed by the event's owner
    (they trade through session keys, so the tx sender is not the wallet).
@@ -347,6 +370,7 @@ export class LedgerStore {
       if (!cols.includes(name)) this.db.exec(`ALTER TABLE trades ADD COLUMN ${name} ${type}`);
     };
     ensureColumn('redeem_tx_digest', 'TEXT');
+    ensureColumn('range_upper', 'REAL');
     ensureColumn('settlement_price', 'REAL');
     ensureColumn('settled_at_ms', 'INTEGER');
     ensureColumn('ms_to_expiry_at_exec', 'INTEGER');
@@ -488,7 +512,7 @@ export class LedgerStore {
       predictIvAtExec?: number;
       edgeAtExec?: number;
       /** Strategy tag. Defaults to 'poly_arb' for backwards compatibility. */
-      strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest' | 'fade_spike' | 'auto_shadow';
+      strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest' | 'fade_spike' | 'auto_shadow' | 'edge_jump' | 'edge_vol';
     },
   ): string {
     const id = t.id ?? randomUUID();
@@ -499,13 +523,13 @@ export class LedgerStore {
          ms_to_expiry_at_exec, predict_prob_at_exec, poly_ask_at_exec, predict_iv_at_exec, edge_at_exec,
          poly_network, poly_token_id, poly_condition_id, poly_side, poly_outcome,
          poly_order_id, poly_filled_shares, poly_fill_price, poly_cost_usdc, poly_tx_hash, poly_status,
-         strategy)
+         strategy, range_upper)
          VALUES (@id, @sigId, @ts, @mode, @oracleId, @underlying, @expiry, @strike,
          @dir, @qty, @cp, @cost, @txd, @settled, @payout, @pnl,
          @msToE, @ppe, @pae, @pive, @edge,
          @polyNet, @polyTok, @polyCond, @polySide, @polyOut,
          @polyOrd, @polyShr, @polyPx, @polyUsd, @polyTx, @polyStat,
-         @strategy)`,
+         @strategy, @rangeUpper)`,
       )
       .run({
         id,
@@ -541,6 +565,7 @@ export class LedgerStore {
         polyTx: t.polyTxHash ?? null,
         polyStat: t.polyStatus ?? null,
         strategy: t.strategy ?? 'poly_arb',
+        rangeUpper: t.rangeUpper ?? null,
       });
     return id;
   }
@@ -563,8 +588,11 @@ export class LedgerStore {
   /** Mark all unsettled trades for an oracle as settled, computing payouts. */
   settleTradesForOracle(oracleId: string, settlementPrice: number, nowMs: number): number {
     const trades = this.db
-      .prepare<[string], { id: string; direction: string; strike: number; quantity_dusdc: number; cost_usdc: number }>(
-        `SELECT id, direction, strike, quantity_dusdc, cost_usdc FROM trades WHERE oracle_id = ? AND settled = 0`,
+      .prepare<
+        [string],
+        { id: string; direction: string; strike: number; range_upper: number | null; quantity_dusdc: number; cost_usdc: number }
+      >(
+        `SELECT id, direction, strike, range_upper, quantity_dusdc, cost_usdc FROM trades WHERE oracle_id = ? AND settled = 0`,
       )
       .all(oracleId);
     const upd = this.db.prepare(
@@ -575,7 +603,13 @@ export class LedgerStore {
     const tx = this.db.transaction((items: typeof trades) => {
       let count = 0;
       for (const t of items) {
-        const won = t.direction === 'up' ? settlementPrice > t.strike : settlementPrice <= t.strike;
+        // Chain convention: UP (strike, +inf], DOWN (-inf, strike], RANGE (strike, upper].
+        const won =
+          t.direction === 'range'
+            ? settlementPrice > t.strike && settlementPrice <= (t.range_upper ?? -Infinity)
+            : t.direction === 'up'
+              ? settlementPrice > t.strike
+              : settlementPrice <= t.strike;
         const payout = won ? t.quantity_dusdc : 0;
         const pnl = payout - t.cost_usdc;
         upd.run({ payout, pnl, sprice: settlementPrice, sat: nowMs, id: t.id });
@@ -1771,6 +1805,87 @@ export class LedgerStore {
       .run(olderThanMs).changes;
   }
 
+  // ── Edge probes ───────────────────────────────────────────────────────────
+
+  insertEdgeProbe(p: EdgeProbeInput): boolean {
+    return (
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO edge_probes (id, network, kind, market_id, slot, expiry_ms,
+             recorded_at_ms, ttm_ms, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          p.id,
+          p.network,
+          p.kind,
+          p.marketId,
+          p.slot,
+          p.expiryMs,
+          p.recordedAtMs,
+          p.ttmMs,
+          JSON.stringify(p.payload),
+        ).changes > 0
+    );
+  }
+
+  hasEdgeProbe(marketId: string, kind: string, slot: string): boolean {
+    const row = this.db
+      .prepare<[string, string, string], { c: number }>(
+        `SELECT COUNT(*) AS c FROM edge_probes WHERE market_id = ? AND kind = ? AND slot = ?`,
+      )
+      .get(marketId, kind, slot);
+    return (row?.c ?? 0) > 0;
+  }
+
+  unsettledEdgeProbeMarkets(nowMs: number, limit = 50): string[] {
+    return this.db
+      .prepare<[number, number], { market_id: string }>(
+        `SELECT DISTINCT market_id FROM edge_probes
+         WHERE settlement_price IS NULL AND expiry_ms < ?
+         ORDER BY expiry_ms ASC LIMIT ?`,
+      )
+      .all(nowMs, limit)
+      .map((r) => r.market_id);
+  }
+
+  resolveEdgeProbeMarket(marketId: string, settlementPrice: number, settledAtMs: number): number {
+    return this.db
+      .prepare(
+        `UPDATE edge_probes SET settlement_price = ?, settled_at_ms = ?
+         WHERE market_id = ? AND settlement_price IS NULL`,
+      )
+      .run(settlementPrice, settledAtMs, marketId).changes;
+  }
+
+  settledEdgeProbes<T>(network: string, kind: string, sinceMs = 0): Array<EdgeProbeRow<T>> {
+    return this.db
+      .prepare<[string, string, number], Record<string, number | string>>(
+        `SELECT * FROM edge_probes
+         WHERE network = ? AND kind = ? AND settlement_price IS NOT NULL AND recorded_at_ms >= ?
+         ORDER BY recorded_at_ms ASC`,
+      )
+      .all(network, kind, sinceMs)
+      .map((r) => ({
+        marketId: String(r.market_id),
+        slot: String(r.slot),
+        expiryMs: Number(r.expiry_ms),
+        recordedAtMs: Number(r.recorded_at_ms),
+        ttmMs: Number(r.ttm_ms),
+        settlementPrice: Number(r.settlement_price),
+        payload: JSON.parse(String(r.payload)) as T,
+      }));
+  }
+
+  /** Unresolved rows older than the cutoff (markets that never settle), and everything past 30 days. */
+  pruneEdgeProbes(olderThanMs: number, nowMs = Date.now()): number {
+    return this.db
+      .prepare(
+        `DELETE FROM edge_probes
+         WHERE (settlement_price IS NULL AND expiry_ms < ?) OR recorded_at_ms < ?`,
+      )
+      .run(olderThanMs, nowMs - 30 * 86_400_000).changes;
+  }
+
   // ── Watched wallets ───────────────────────────────────────────────────────
 
   insertWatchedPosition(p: {
@@ -2532,7 +2647,7 @@ export class LedgerStore {
           underlying: string;
           expiry_ms: number;
           strike: number;
-          direction: 'up' | 'down';
+          direction: 'up' | 'down' | 'range';
           quantity_dusdc: number;
           cost_price: number;
           cost_usdc: number;
@@ -2578,6 +2693,7 @@ export class LedgerStore {
           hl_closed_at_ms: number | null;
           strategy: string | null;
           poly_high_water_frac: number | null;
+          range_upper: number | null;
         }
       >(`SELECT * FROM trades ${suffix}`)
       .all(...params);
@@ -2591,6 +2707,7 @@ export class LedgerStore {
       expiryMs: r.expiry_ms,
       strike: r.strike,
       direction: r.direction,
+      ...(r.range_upper != null && { rangeUpper: r.range_upper }),
       quantityDusdc: r.quantity_dusdc,
       costPrice: r.cost_price,
       costUsdc: r.cost_usdc,
@@ -2722,6 +2839,28 @@ export interface CrossVenuePairRow {
   pmFeeExponent: number | null;
   predOutcomeUp: boolean;
   pmOutcomeUp: boolean;
+}
+
+export interface EdgeProbeInput {
+  id: string;
+  network: string;
+  kind: 'jump' | 'vol_regime';
+  marketId: string;
+  slot: string;
+  expiryMs: number;
+  recordedAtMs: number;
+  ttmMs: number;
+  payload: unknown;
+}
+
+export interface EdgeProbeRow<T> {
+  marketId: string;
+  slot: string;
+  expiryMs: number;
+  recordedAtMs: number;
+  ttmMs: number;
+  settlementPrice: number;
+  payload: T;
 }
 
 export interface WatchedPositionRow {

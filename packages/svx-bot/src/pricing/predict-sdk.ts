@@ -303,6 +303,55 @@ export function estimateMintCost(args: {
 // ── account + trading (owner-scoped; the SDK builds, we sign) ────────────────
 
 /** The owner's canonical Predict account wrapper id — derived, no chain read. */
+/**
+ * All-in cost of any order by its boundary UP probabilities — a binary has
+ * one finite boundary, a range two (and pays the fee on each). `null` for an
+ * infinite side. Same exact fee math as {@link estimateMintCost}; null when
+ * the chain would refuse the order (entry band, min premium, cost > payout).
+ */
+export function estimateBoundaryCost(args: {
+  fees: FeePolicy;
+  expiryMs: number;
+  nowMs: number;
+  lowerUp: number | null;
+  higherUp: number | null;
+  quantity: number;
+}): { costPerContract: number; probability: number } | null {
+  const raw = (p: number | null) => (p == null ? null : probabilityToRaw(Number(p.toFixed(9))));
+  try {
+    const r = sdkCost.mintCost({
+      fees: args.fees,
+      expiryMs: args.expiryMs,
+      nowMs: args.nowMs,
+      quantity: args.quantity,
+      probabilities: { lowerUp: raw(args.lowerUp), higherUp: raw(args.higherUp) },
+    } as never) as { costPerContract: number };
+    return {
+      costPerContract: r.costPerContract,
+      probability: (args.lowerUp ?? 1) - (args.higherUp ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** A market's fee policy straight off its object (cached: it is snapshotted at creation). */
+const feePolicyCache = new Map<string, FeePolicy>();
+export async function marketFeePolicy(marketId: string): Promise<FeePolicy | null> {
+  const hit = feePolicyCache.get(marketId);
+  if (hit) return hit;
+  const obj = await makeSuiClient()
+    .getObject({ objectId: marketId, include: { json: true } })
+    .catch(() => null);
+  const json = obj?.object?.json as Record<string, unknown> | undefined;
+  const fees = json ? feePolicyFromMarketJson(json) : null;
+  if (fees) {
+    if (feePolicyCache.size > 500) feePolicyCache.clear();
+    feePolicyCache.set(marketId, fees);
+  }
+  return fees;
+}
+
 export function wrapperIdFor(owner: string): string {
   return predict().wrapperIdFor(owner);
 }
@@ -350,6 +399,27 @@ export interface BinaryOrder {
   quantity: number;
 }
 
+/** A range order: pays when settlement lands in (lower, upper]. Both bounds
+ *  must sit on the market's admission grid. */
+export interface RangeOrder {
+  underlying: string;
+  expiryMs: number;
+  marketId: string;
+  direction: 'range';
+  lower: number;
+  upper: number;
+  quantity: number;
+}
+
+export type PredictOrder = BinaryOrder | RangeOrder;
+
+function descriptorFor(o: PredictOrder) {
+  const base = { underlying: o.underlying, expiryMs: o.expiryMs, marketId: o.marketId };
+  return o.direction === 'range'
+    ? { ...base, side: 'range' as const, lower: o.lower, upper: o.upper }
+    : { ...base, strike: o.strike, side: o.direction };
+}
+
 /**
  * Exact dry-run of the mint against the real account and market — real fees,
  * real code path. Throws the same typed error the real mint would, so it
@@ -357,37 +427,21 @@ export interface BinaryOrder {
  */
 export async function quoteMint(
   owner: string,
-  o: BinaryOrder,
+  o: PredictOrder,
 ): Promise<{ cost: number; entryProbability: number; quantity: number }> {
-  const q = await predict().read.quoteMint(
-    owner,
-    {
-      underlying: o.underlying,
-      expiryMs: o.expiryMs,
-      marketId: o.marketId,
-      strike: o.strike,
-      side: o.direction,
-    },
-    { quantity: o.quantity },
-  );
+  const q = await predict().read.quoteMint(owner, descriptorFor(o), { quantity: o.quantity });
   return { cost: q.cost, entryProbability: q.entryProbability, quantity: q.quantity };
 }
 
 /** Mint with BOTH slippage caps set — the SDK's defaults are uncapped. */
 export async function buildMintTx(
   owner: string,
-  o: BinaryOrder,
+  o: PredictOrder,
   caps: { maxCost: number; maxProbability: number },
 ): Promise<Transaction> {
   return predict().tx.mint(
     owner,
-    {
-      underlying: o.underlying,
-      expiryMs: o.expiryMs,
-      marketId: o.marketId,
-      strike: o.strike,
-      side: o.direction,
-    },
+    descriptorFor(o),
     {
       quantity: o.quantity,
       // Raw amounts are 1e6 integers — round the ceiling UP to 6 dp.

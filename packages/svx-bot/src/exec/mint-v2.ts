@@ -24,7 +24,7 @@ import {
   buildMintTx,
   decodeMintFill,
   quoteMint,
-  type BinaryOrder,
+  type PredictOrder,
   type MintFill,
 } from '../pricing/predict-sdk.js';
 import type { SuiChainClient } from './sui-client.js';
@@ -59,7 +59,7 @@ export async function mintLive(args: {
   sui: SuiChainClient;
   keypair: Ed25519Keypair;
   owner: string;
-  order: BinaryOrder;
+  order: PredictOrder;
   gates: LiveMintGates;
 }): Promise<LiveMintOutcome> {
   const { order, gates } = args;

@@ -125,7 +125,10 @@ export interface TradeRecord {
   underlyingAsset: string;
   expiryMs: number;
   strike: number;
-  direction: 'up' | 'down';
+  /** 'range' pays when settlement lands in (strike, rangeUpper]. */
+  direction: 'up' | 'down' | 'range';
+  /** Upper bound of a range order; unset for binaries. */
+  rangeUpper?: number;
   /** Notional in dUSDC quote units (i.e. max payout). */
   quantityDusdc: number;
   /** Price paid per unit (in [0, 1]). */
@@ -220,7 +223,7 @@ export interface TradeRecord {
   /** Which strategy opened this trade. Defaults to 'poly_arb' (the original
    *  Predict×Polymarket arb). 'vol_arb' is the standalone HL vol strategy;
    *  'convergence' is the near-expiry Polymarket certainty-discount buyer. */
-  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest' | 'fade_spike' | 'auto_shadow';
+  strategy?: 'poly_arb' | 'vol_arb' | 'convergence' | 'divergence_mint' | 'calibration_harvest' | 'fade_spike' | 'auto_shadow' | 'edge_jump' | 'edge_vol';
   /** Highest mark-to-market P&L fraction seen on the poly leg — drives the
    *  trailing ratchet exit (lock +20%, +40%, ... as the trade runs). */
   polyHighWaterFrac?: number;

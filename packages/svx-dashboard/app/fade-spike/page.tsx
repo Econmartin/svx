@@ -133,15 +133,14 @@ export default function FadeSpikePage() {
   // Win rate and 24h activity follow the headline mode, so a busy paper
   // strategy (harvest v2) can't blur the live numbers.
   const head = mode === 'live' ? live : paper;
-  // Paper counts from the start of live mainnet trading (when the bot
-  // reports it): the older paper history predates mainnet fees.
+  // Paper counts ONLY from the start of live mainnet trading (26 Sep): the
+  // older paper history predates mainnet fees. Never falls back to all-time —
+  // a bot that doesn't report since-start totals shows a dash instead.
+  const paperSince = data?.liveStartMs ?? null;
   const paperRows = (data?.rows ?? [])
-    .filter((r) => r.mode === 'paper')
-    .map((r) => (r.sinceStart ? { ...r, ...r.sinceStart } : r))
+    .filter((r) => r.mode === 'paper' && r.sinceStart)
+    .map((r) => ({ ...r, ...r.sinceStart! }))
     .filter((r) => r.trades > 0);
-  const paperSince = (data?.rows ?? []).some((r) => r.mode === 'paper' && r.sinceStart)
-    ? (data?.liveStartMs ?? null)
-    : null;
   const paperTotal = paperRows.length
     ? paperRows.reduce(
         (a, r) => ({ pnlUsdc: a.pnlUsdc + r.pnlUsdc, settled: a.settled + r.settled, wins: a.wins + r.wins }),
@@ -237,9 +236,10 @@ export default function FadeSpikePage() {
             value: paperTotal ? formatUsdc(paperTotal.pnlUsdc) : '—',
             tone: paperTotal ? (paperTotal.pnlUsdc >= 0 ? 'win' : 'loss') : 'default',
             hint: paperTotal
-              ? (paperSince ? 'since live mainnet trading began · ' : '') +
-                (paperBreakdown || `${paperTotal.settled} settled · ${paperTotal.wins} won`)
-              : 'no paper trades yet',
+              ? paperBreakdown || `${paperTotal.settled} settled · ${paperTotal.wins} won`
+              : paperSince
+                ? 'no paper trades since live trading began'
+                : 'counts from the first live trade',
           },
           {
             label: mode === 'live' ? 'Live trades, last 24h' : 'Trades, last 24h',

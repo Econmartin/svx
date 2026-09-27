@@ -124,8 +124,14 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     res.json({ ok: true, uptimeSec: Math.round((Date.now() - deps.state.startedAtMs) / 1000) });
   });
 
-  app.get('/status', (_req, res) => {
+  app.get('/status', (req, res) => {
     const since24h = Date.now() - 24 * 3600_000;
+    // The viewer's local midnight (sent by the dashboard), for a "today"
+    // that resets at midnight rather than a rolling 24h. Capped to 48h back.
+    const dayStartMs =
+      req.query.dayStartMs != null
+        ? clampFloat(req.query.dayStartMs, Date.now() - 48 * 3600_000, Date.now(), since24h)
+        : null;
     const liveStartMs = deps.ledger.firstLivePredictTradeMs();
     const open = deps.ledger.openTrades();
     // All-time realized PnL — survives bot restarts. Falls back to 0 if the
@@ -175,6 +181,10 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       // realizedPnlUsdc above blends the July V1 poly-arb era with whatever
       // trades today; consumers should sum the rows they mean.
       strategyPnl: deps.ledger.strategyPnlBreakdown(since24h, liveStartMs),
+      // Same rows with the 24h columns counted from dayStartMs instead.
+      ...(dayStartMs != null && {
+        strategyPnlToday: deps.ledger.strategyPnlBreakdown(dayStartMs, liveStartMs),
+      }),
       // First live trade by the current Predict strategies: "mainnet trading
       // began". strategyPnl rows carry sinceStart totals from this instant.
       liveStartMs,

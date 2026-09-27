@@ -27,7 +27,8 @@ export function StatusTicker() {
   const { network } = useNetwork();
   const isMainnet = network === 'mainnet';
   const { data: status, error } = usePolling(
-    useCallback(() => client.status(), [client]),
+    // "Today" resets at midnight in the viewer's own time zone.
+    useCallback(() => client.status(new Date().setHours(0, 0, 0, 0)), [client]),
     5_000,
   );
 
@@ -55,7 +56,11 @@ export function StatusTicker() {
       const liveRows = (status.strategyPnl ?? []).filter(
         (r) => r.mode === 'live' && CURRENT_PREDICT.includes(r.strategy),
       );
-      const pnl24h = liveRows.reduce((a, r) => a + r.pnl24hUsdc, 0);
+      // Since local midnight; a bot too old to know dayStartMs gives the rolling 24h.
+      const todayRows = (status.strategyPnlToday ?? status.strategyPnl ?? []).filter(
+        (r) => r.mode === 'live' && CURRENT_PREDICT.includes(r.strategy),
+      );
+      const pnl24h = todayRows.reduce((a, r) => a + r.pnl24hUsdc, 0);
       const openLive = liveRows.reduce((a, r) => a + r.open, 0);
       if (status.v2WrapperBalanceUsdc != null) {
         items.push({ label: 'Balance', value: `$${formatUsdc(status.v2WrapperBalanceUsdc)}` });

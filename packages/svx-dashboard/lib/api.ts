@@ -88,6 +88,9 @@ export interface BotStatus {
   realizedPnl24hUsdc?: number;
   /** Predict-side PnL per (strategy, mode) — the honest headline source. */
   strategyPnl?: StrategyPnlRow[];
+  /** strategyPnl with its 24h columns counted from the requested local
+   *  midnight (only when /status was asked with dayStartMs). */
+  strategyPnlToday?: StrategyPnlRow[];
   /** First live trade by the current Predict strategies — "mainnet trading began". */
   liveStartMs?: number | null;
   /** Cost sitting in open positions (money at risk; not a mark-to-market).
@@ -696,7 +699,9 @@ export function createApi(base: string) {
      *  client when NEXT_PUBLIC_SVX_API_MAINNET wasn't set at build time. */
     enabled: !!base,
     base,
-    status: () => get<BotStatus>('/status'),
+    /** `dayStartMs`: the viewer's local midnight, for a calendar "today". */
+    status: (dayStartMs?: number) =>
+      get<BotStatus>(dayStartMs != null ? `/status?dayStartMs=${Math.floor(dayStartMs)}` : '/status'),
     signals: (limit = 100) => get<SignalRecord[]>(`/signals?limit=${limit}`),
     positionsOpen: () => get<TradeRecord[]>('/positions/open'),
     positionsClosed: (limit = 500) => get<TradeRecord[]>(`/positions/closed?limit=${limit}`),

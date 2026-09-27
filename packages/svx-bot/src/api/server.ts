@@ -739,10 +739,13 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     const pause = deps.ledger.getPause();
     const board = evaluateSwitchboard(deps.ledger, suiNetwork());
     const fadeOn = board.filter((e) => e.status === 'on' && e.signal.startsWith('fade_spike'));
+    // Every switchboard-traded strategy, so the radar can show all of them.
+    const AUTO = ['fade_spike', 'auto_shadow', 'edge_jump', 'edge_vol'];
     const trades = [...deps.ledger.openTrades(), ...deps.ledger.closedTrades(200)]
-      .filter((t) => t.strategy === 'fade_spike')
+      .filter((t) => AUTO.includes(t.strategy ?? ''))
       .sort((x, y) => y.timestampMs - x.timestampMs)
-      .slice(0, 30);
+      .slice(0, 60);
+    const on = board.filter((e) => e.status === 'on');
     res.json({
       rule: {
         minMoveUsd: s.minMoveUsd,
@@ -760,8 +763,19 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
           t60s: [58_000, 69_999],
           t75s: [70_000, 82_999],
           t90s: [83_000, 95_999],
+          t2m: [100_000, 140_000],
+          t4m: [220_000, 260_000],
+          t65s: [61_000, 80_000],
         },
       },
+      // Everything the switchboard has ON — the radar lists each per window.
+      strategiesOn: on.map((e) => ({
+        key: e.key,
+        signal: e.signal,
+        slot: e.slot,
+        pnlPerContract: e.pnlPerContract,
+        n: e.n,
+      })),
       enabled: true,
       switchedOn: fadeOn.map((e) => e.key),
       liveArmed: fadeOn.length > 0 && !deps.cfg.paperTrading && !pause.paused,
@@ -769,7 +783,7 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       paused: pause.paused,
       pauseReason: pause.reason ?? null,
       hunt: huntState(),
-      evaluations: recentFadeEvals(60),
+      evaluations: recentFadeEvals(300),
       trades,
     });
   });

@@ -31,16 +31,41 @@ export function ToggleGroup({
 }) {
   const items = React.useRef(new Map<string, HTMLButtonElement>());
   const [thumb, setThumb] = React.useState<{ x: number; w: number } | null>(null);
-
-  const measure = React.useCallback(() => {
-    const el = items.current.get(value);
-    if (el) setThumb({ x: el.offsetLeft, w: el.offsetWidth });
-  }, [value]);
-
-  React.useLayoutEffect(measure, [measure]);
+  // Slide only between user choices: the first placements (mount, and the
+  // value restored from storage right after) snap into place.
+  const [animate, setAnimate] = React.useState(false);
   React.useEffect(() => {
+    const id = setTimeout(() => setAnimate(true), 400);
+    return () => clearTimeout(id);
+  }, []);
+
+  const valueRef = React.useRef(value);
+  valueRef.current = value;
+  const measure = React.useCallback(() => {
+    const el = items.current.get(valueRef.current);
+    if (!el) return;
+    const next = { x: el.offsetLeft, w: el.offsetWidth };
+    setThumb((t) => (t && t.x === next.x && t.w === next.w ? t : next));
+  }, []);
+
+  const track = React.useRef<HTMLDivElement>(null);
+  // After every render: cheap, and immune to however the value arrived
+  // (click, keyboard, or restored from storage after mount).
+  React.useLayoutEffect(measure);
+  // Segment widths change after first paint (web font swap, breakpoint
+  // switches that show/hide the icons): re-measure whenever they do.
+  React.useEffect(() => {
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    if (track.current && ro) {
+      ro.observe(track.current);
+      for (const el of items.current.values()) ro.observe(el);
+    }
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    document.fonts?.ready.then(measure).catch(() => undefined);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, [measure]);
 
   const register = React.useCallback((v: string, el: HTMLButtonElement | null) => {
@@ -63,6 +88,7 @@ export function ToggleGroup({
   return (
     <ToggleGroupContext.Provider value={{ value, onValueChange, register }}>
       <div
+        ref={track}
         role="radiogroup"
         aria-label={ariaLabel}
         onKeyDown={onKeyDown}
@@ -74,7 +100,10 @@ export function ToggleGroup({
         {thumb && (
           <span
             aria-hidden
-            className="absolute top-[2px] bottom-[2px] left-0 rounded-[8px] bg-[#636366] shadow-[0_1px_2px_rgba(0,0,0,0.45),inset_0_0.5px_0_rgba(255,255,255,0.18)] transition-[transform,width] duration-300 ease-[cubic-bezier(0.3,1.2,0.4,1)]"
+            className={cn(
+              'absolute top-[2px] bottom-[2px] left-0 rounded-[8px] bg-[#636366] shadow-[0_1px_2px_rgba(0,0,0,0.45),inset_0_0.5px_0_rgba(255,255,255,0.18)]',
+              animate && 'transition-[transform,width] duration-300 ease-[cubic-bezier(0.3,1.2,0.4,1)]',
+            )}
             style={{ transform: `translateX(${thumb.x - 2}px)`, width: thumb.w, marginLeft: 2 }}
           />
         )}

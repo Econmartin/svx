@@ -39,12 +39,15 @@ export interface FadeEval {
   outcome: string;
   /** Plain-words reason / detail for the dashboard. */
   detail: string;
+  /** Switchboard key of the strategy this check belongs to (e.g.
+   *  "vol_model@t65s"); absent for the radar's generic fade note. */
+  key?: string;
 }
 
 const evals: FadeEval[] = [];
 export function recordFadeEval(e: FadeEval): void {
   evals.push(e);
-  if (evals.length > 200) evals.splice(0, evals.length - 200);
+  if (evals.length > 600) evals.splice(0, evals.length - 600);
 }
 export function recentFadeEvals(limit = 60): FadeEval[] {
   return evals.slice(-limit).reverse();

@@ -1,9 +1,10 @@
 'use client';
 
 /**
- * Fade-spike radar: one lane per live Predict window, showing BTC against
- * the window's strike over the last minute with the trigger band drawn in,
- * and the four entry conditions lighting up as they are met.
+ * Strategy radar: one lane per live Predict window, showing BTC against the
+ * window's strike over the last minute (with the fade-spike trigger band),
+ * and every strategy the switchboard has ON for that window — when it
+ * checks, and what it did: bought, skipped (and why), or no signal.
  *
  * Two feeds: the bot (strike, board price, far side and its all-in cost,
  * every ~4s) and Binance's public ticker, polled by the browser each second
@@ -67,6 +68,18 @@ export function FadeHuntRadar() {
     useCallback(() => client.fadeSpikeState(), [client]),
     2_000,
   );
+  // What's switched on comes from the switchboard itself, so the radar lists
+  // exactly what can trade (the state endpoint also carries it, newer bots).
+  const { data: board } = usePolling(
+    useCallback(() => client.switchboard().catch(() => null), [client]),
+    10_000,
+  );
+  const strategiesOn =
+    data?.strategiesOn ??
+    (board?.strategies ?? [])
+      .filter((e) => e.status === 'on')
+      .map((e) => ({ key: e.key, signal: e.signal, slot: e.slot, pnlPerContract: e.pnlPerContract, n: e.n }));
+  const offCount = board ? board.strategies.filter((e) => e.status !== 'on').length : null;
   const binance = useBinanceMid();
   const now = useNow();
 
@@ -146,8 +159,10 @@ export function FadeHuntRadar() {
             trace={traces.current.get(m.marketId) ?? []}
             rule={data!.rule}
             mom30s={hunt?.mom30s ?? null}
-            trade={data!.trades.find((t) => t.oracleId === m.marketId)}
+            trades={data!.trades.filter((t) => t.oracleId === m.marketId)}
             checks={(data!.evaluations ?? []).filter((e) => e.marketId === m.marketId)}
+            strategies={strategiesOn}
+            offCount={offCount}
           />
         ))}
         {(hunt?.upcoming ?? [])
@@ -177,22 +192,65 @@ export function FadeHuntRadar() {
   );
 }
 
+/** Plain names for switchboard signals. */
+const SIGNAL_NAMES: Record<string, string> = {
+  fade_spike: 'Fade spike',
+  fade_spike_any_time: 'Fade spike (timing study)',
+  fade_spike_40: 'Fade spike ≥$40',
+  cheap_far_side: 'Cheap far side',
+  vol_model: 'Vol model',
+  binance_jump: 'Binance jump',
+  board_favourite: 'Board favourite',
+  board_underdog: 'Board underdog',
+};
+const signalName = (s: string) =>
+  SIGNAL_NAMES[s] ??
+  s
+    .replace(/_/g, ' ')
+    .replace(/(\d+)pp/, '≥$1pp')
+    .replace(/^./, (c) => c.toUpperCase());
+const slotName = (slot: string) => (slot === 'jump' ? 'any time' : `at ${slot.slice(1)}`);
+
+type RowState = 'bought' | 'checking' | 'upcoming' | 'skipped' | 'not_filled' | 'quiet' | 'watching';
+const DOT_CLS: Record<RowState, string> = {
+  bought: 'bg-accent',
+  checking: 'bg-info animate-pulse',
+  watching: 'bg-info animate-pulse',
+  upcoming: 'bg-white/25',
+  skipped: 'bg-warn',
+  not_filled: 'bg-warn',
+  quiet: 'bg-white/15',
+};
+const TEXT_CLS: Record<RowState, string> = {
+  bought: 'text-accent',
+  checking: 'text-info',
+  watching: 'text-muted-strong',
+  upcoming: 'text-muted',
+  skipped: 'text-warn',
+  not_filled: 'text-warn',
+  quiet: 'text-muted/70',
+};
+
 function Lane({
   m,
   now,
   trace,
   rule,
   mom30s,
-  trade,
+  trades,
   checks,
+  strategies,
+  offCount,
 }: {
   m: FadeHuntMarket;
   now: number;
   trace: Point[];
   rule: FadeSpikeState['rule'];
   mom30s: number | null;
-  trade?: TradeRecord;
+  trades: TradeRecord[];
   checks: NonNullable<FadeSpikeState['evaluations']>;
+  strategies: NonNullable<FadeSpikeState['strategiesOn']>;
+  offCount: number | null;
 }) {
   const ttm = m.expiryMs - now;
   const latest = trace.length ? trace[trace.length - 1]!.v : m.forwardVsRef;
@@ -203,55 +261,92 @@ function Lane({
     past && now - past.t > 20_000
       ? Math.sign(latest) === Math.sign(latest - past.v) && Math.abs(latest) > Math.abs(past.v)
       : mom30s != null && mom30s !== 0 && Math.sign(mom30s) === Math.sign(latest);
-  const tradeSlot = rule.tradeSlots?.[0] ?? 't50s';
-  const [winLo, winHi] = rule.checkWindowsMs?.[tradeSlot] ?? [46_000, 57_999];
-  const slotSec = tradeSlot.replace(/\D/g, '');
-  const conds = [
+  // Fade-spike conditions (shown under its row while it can still fire).
+  const inBand = m.farPrice >= rule.minFarPrice && m.farPrice <= rule.maxFarPrice;
+  const clip =
+    m.farPrice > 0 && m.farCost != null ? (Math.ceil((1.12 / m.farPrice) * 100) / 100) * m.farCost : null;
+  const fadeConds = [
+    { label: `${usd(latest)} vs strike`, ok: Math.abs(latest) >= rule.minMoveUsd },
+    { label: 'moving away', ok: spikingAway },
     {
       label:
-        ttm > winHi
-          ? `Checks at ~${slotSec}s`
-          : ttm >= winLo
-            ? `${slotSec}s check window`
-            : 'Check passed',
-      ok: ttm <= winHi && ttm >= winLo,
+        `far side ${(m.farPrice * 100).toFixed(1)}¢` +
+        (inBand && clip != null && clip > rule.maxCostUsd ? ` · clip $${clip.toFixed(2)}` : ''),
+      ok: inBand && clip != null && clip <= rule.maxCostUsd,
     },
-    { label: `${usd(latest)} vs strike`, ok: Math.abs(latest) >= rule.minMoveUsd },
-    { label: 'Moving away', ok: spikingAway },
-    (() => {
-      // Mirrors the executor: price inside the band AND the smallest clip
-      // that clears Predict's $1 minimum premium fits the per-trade cap.
-      const inBand = m.farPrice >= rule.minFarPrice && m.farPrice <= rule.maxFarPrice;
-      const clip =
-        m.farPrice > 0 && m.farCost != null
-          ? (Math.ceil((1.12 / m.farPrice) * 100) / 100) * m.farCost
-          : null;
-      const fits = clip != null && clip <= rule.maxCostUsd;
-      return {
-        label:
-          `Far side ${(m.farPrice * 100).toFixed(1)}¢` +
-          (inBand && clip != null && !fits ? ` · clip $${clip.toFixed(2)} > $${rule.maxCostUsd}` : ''),
-        ok: inBand && fits,
-      };
-    })(),
   ];
-  const armed = conds.every((c) => c.ok);
-  const status = trade
-    ? {
-        label: `Bought ${trade.direction} @ ${(trade.costPrice * 100).toFixed(1)}¢ · ${trade.mode}`,
-        cls: 'bg-accent text-bg',
+  const fadeReady = fadeConds.every((c) => c.ok);
+
+  // One row per switched-on strategy that can act on this window. A 1-minute
+  // window only exists for its last 60s, so earlier checkpoints don't apply.
+  const windowSpan = (m.cadenceSec ?? 300) * 1000;
+  const rows = strategies
+    .map((st) => {
+      const win = st.slot === 'jump' ? null : rule.checkWindowsMs?.[st.slot];
+      if (st.slot !== 'jump' && (!win || win[0] >= windowSpan)) return null;
+      const trade = trades.find((t) => t.signalId === st.key);
+      const check = checks.find((c) => c.key === st.key);
+      const detail = (check?.detail ?? '').replace(`${st.key}: `, '');
+      let state: RowState;
+      let text: string;
+      if (trade) {
+        state = 'bought';
+        const what =
+          trade.direction === 'range' && trade.rangeUpper != null
+            ? `$${trade.strike.toFixed(0)}–$${trade.rangeUpper.toFixed(0)}`
+            : trade.direction;
+        text = `Bought ${what} @ ${(trade.costPrice * 100).toFixed(1)}¢${trade.mode === 'paper' ? ' · paper' : ''}`;
+      } else if (check) {
+        state =
+          check.outcome === 'entered'
+            ? 'bought'
+            : check.outcome === 'skipped'
+              ? 'skipped'
+              : check.outcome === 'not_filled'
+                ? 'not_filled'
+                : 'quiet';
+        text =
+          check.outcome === 'no_signal'
+            ? `No signal · ${detail}`
+            : check.outcome === 'skipped'
+              ? `Skipped · ${detail}`
+              : check.outcome === 'not_filled'
+                ? `Not filled · ${detail}`
+                : detail;
+      } else if (!win) {
+        state = 'watching';
+        text = `Watching Binance for $10 / 2s jumps`;
+      } else if (ttm > win[1]) {
+        state = 'upcoming';
+        text = `in ${fmtClock(ttm - win[1])}`;
+      } else if (ttm >= win[0]) {
+        state = 'checking';
+        text = 'Checking now';
+      } else {
+        state = 'quiet';
+        text = 'Passed · no signal';
       }
-    : armed
-      ? { label: 'Armed · buying at this check', cls: 'bg-accent/[0.16] text-accent animate-pulse' }
-      : ttm > winHi
-        ? { label: `Waiting for the ${slotSec}s check`, cls: 'bg-white/[0.05] text-muted' }
-        : ttm >= winLo
-          ? { label: 'Checking', cls: 'bg-white/[0.07] text-muted-strong' }
-          : { label: 'Done for this window', cls: 'bg-white/[0.04] text-muted' };
+      return { st, win, state, text, order: win ? win[1] : Infinity };
+    })
+    .filter((r): r is NonNullable<typeof r> => r != null)
+    .sort((a, b) => b.order - a.order);
+
+  const bought = rows.filter((r) => r.state === 'bought').length;
+  const next = rows.filter((r) => r.state === 'upcoming').sort((a, b) => a.order - b.order).pop();
+  const checking = rows.some((r) => r.state === 'checking');
+  const status = bought
+    ? { label: `${bought} bought`, cls: 'bg-accent text-black' }
+    : checking
+      ? { label: 'Checking', cls: 'bg-info/[0.18] text-info' }
+      : next
+        ? { label: `Next check in ${fmtClock(ttm - (next.win?.[1] ?? 0))}`, cls: 'bg-white/[0.06] text-muted-strong' }
+        : rows.length
+          ? { label: 'Done for this window', cls: 'bg-white/[0.05] text-muted' }
+          : { label: 'No strategy is on for this window', cls: 'bg-white/[0.05] text-muted' };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[180px_1fr_300px] gap-x-6 gap-y-3 px-6 py-4 items-center">
-      <div>
+    <div className="grid grid-cols-1 lg:grid-cols-[170px_1fr_360px] gap-x-6 gap-y-3 px-6 py-4 items-start">
+      <div className="lg:pt-1">
         <div className="text-[13px] text-muted">
           {m.cadenceSec === 60 ? '1-minute' : m.cadenceSec === 300 ? '5-minute' : 'Window'} · strike $
           {m.reference.toLocaleString(undefined, { maximumFractionDigits: 2 })}
@@ -264,62 +359,77 @@ function Lane({
         >
           {fmtClock(ttm)}
         </div>
+        <span
+          className={cn(
+            'mt-2 rounded-full px-2.5 h-6 inline-flex items-center text-[12px] font-semibold',
+            status.cls,
+          )}
+        >
+          {status.label}
+        </span>
       </div>
 
-      <Trace points={trace} now={now} band={rule.minMoveUsd} armed={armed} />
+      <div className="lg:pt-1">
+        <Trace points={trace} now={now} band={rule.minMoveUsd} armed={fadeReady} />
+      </div>
 
-      <div className="space-y-2.5">
-        <div className="flex flex-wrap gap-1.5">
-          {conds.map((c) => (
-            <span
-              key={c.label}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full px-2.5 h-6 text-[12px] font-medium transition-colors duration-300',
-                c.ok ? 'bg-accent/[0.14] text-accent' : 'bg-white/[0.05] text-muted',
-              )}
-            >
-              <span
-                className={cn('h-1.5 w-1.5 rounded-full', c.ok ? 'bg-accent' : 'bg-muted/50')}
-              />
-              {c.label}
-            </span>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={cn('rounded-full px-3 h-7 inline-flex items-center text-[12.5px] font-semibold', status.cls)}>
-            {status.label}
-          </span>
-          {m.farCost != null && !trade && (
-            <span className="text-[12px] text-muted">
-              {m.farSide} costs {(m.farCost * 100).toFixed(1)}¢ all-in
-            </span>
-          )}
-        </div>
-        <div className="space-y-0.5 text-[12px] leading-snug">
-          {[tradeSlot].map((slot) => {
-            const c = checks.find((e) => e.slot === slot);
-            const label = `${slotSec}s check`;
-            return (
-              <div key={slot} className="flex gap-1.5">
-                <span className="text-muted/80 w-[68px] flex-shrink-0">{label}</span>
+      <ul className="rounded-[12px] bg-white/[0.035] divide-y-[0.5px] divide-white/[0.07]" aria-label="Strategies for this window">
+        {rows.length === 0 && (
+          <li className="px-3 py-2.5 text-[12.5px] text-muted">
+            Nothing on the switchboard checks this window.
+          </li>
+        )}
+        {rows.map(({ st, state, text }, i) => {
+          const isFade = st.signal.startsWith('fade_spike');
+          // The fade variants share one set of conditions: show them once.
+          const firstFade = rows.findIndex((r) => r.st.signal.startsWith('fade_spike')) === i;
+          const showConds = isFade && firstFade && (state === 'upcoming' || state === 'checking');
+          return (
+            <li key={st.key} className="px-3 py-2">
+              <div className="flex items-center gap-2 text-[13px]">
+                <span aria-hidden className={cn('h-2 w-2 rounded-full shrink-0', DOT_CLS[state])} />
+                <span className="font-medium text-fg truncate">{signalName(st.signal)}</span>
+                <span className="text-[11.5px] text-muted shrink-0">{slotName(st.slot)}</span>
                 <span
                   className={cn(
-                    !c
-                      ? 'text-muted/60'
-                      : c.outcome === 'entered'
-                        ? 'text-accent'
-                        : c.outcome === 'not_filled'
-                          ? 'text-warn'
-                          : 'text-muted-strong',
+                    'ml-auto text-[12px] text-right shrink-0 max-w-[55%] truncate',
+                    TEXT_CLS[state],
+                    state === 'bought' && 'font-semibold',
                   )}
                 >
-                  {!c ? (ttm > winLo ? 'upcoming' : 'not run') : c.detail}
+                  {state === 'upcoming' || state === 'checking' || state === 'watching' ? text : text.split(' · ')[0]}
                 </span>
               </div>
-            );
-          })}
-        </div>
-      </div>
+              {(state === 'skipped' || state === 'not_filled' || (state === 'quiet' && text.includes(' · '))) && (
+                <p className="mt-0.5 pl-4 text-[11.5px] leading-snug text-muted">
+                  {text.split(' · ').slice(1).join(' · ')}
+                </p>
+              )}
+              {showConds && (
+                <div className="mt-1.5 pl-4 flex flex-wrap gap-1">
+                  {fadeConds.map((c) => (
+                    <span
+                      key={c.label}
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded-full px-2 h-5 text-[11px] font-medium',
+                        c.ok ? 'bg-accent/[0.14] text-accent' : 'bg-white/[0.05] text-muted',
+                      )}
+                    >
+                      <span className={cn('h-1 w-1 rounded-full', c.ok ? 'bg-accent' : 'bg-muted/50')} />
+                      {c.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </li>
+          );
+        })}
+        {offCount != null && offCount > 0 && (
+          <li className="px-3 py-1.5 text-[11.5px] text-muted/70">
+            Only switched-on strategies are listed · {offCount} more tracked on the scoreboard, off
+          </li>
+        )}
+      </ul>
     </div>
   );
 }

@@ -3084,8 +3084,8 @@ export async function runFadeSpikeDecision(
     binVsRef: d.binVsRef ?? null,
     outcomeUp: false, // unknown yet; signals never read it
   };
-  const note = (outcome: string, detail: string) =>
-    recordFadeEval({ marketId: d.marketId, slot: d.slot, atMs: Date.now(), outcome, detail });
+  const note = (outcome: string, detail: string, key?: string) =>
+    recordFadeEval({ marketId: d.marketId, slot: d.slot, atMs: Date.now(), outcome, detail, key });
 
   const entries =
     deps.switchboard ?? evaluateSwitchboard(ledger, suiNetwork());
@@ -3099,15 +3099,20 @@ export async function runFadeSpikeDecision(
     return;
   }
   // Every switched-on strategy that picks a side here trades, independently.
-  const picks = candidates
-    .map((entry) => ({ entry, side: SHADOW_SIGNALS[entry.signal]?.(row) ?? null }))
-    .filter((p): p is { entry: SwitchEntry; side: 'up' | 'down' } => p.side != null);
-  if (!picks.length) {
-    if (radarSlot) {
-      note('no_signal', fadeSpikeWhyNot(row, rule.minMoveUsd, rule.maxFarPrice) ?? 'no signal');
-    }
-    return;
+  const all = candidates
+    .filter((entry) => SHADOW_SIGNALS[entry.signal])
+    .map((entry) => ({ entry, side: SHADOW_SIGNALS[entry.signal]!(row) }));
+  // The radar lists every switched-on strategy per window: record why the
+  // ones that stayed quiet did.
+  for (const { entry, side } of all) {
+    if (side != null) continue;
+    const why = entry.signal.startsWith('fade_spike')
+      ? fadeSpikeWhyNot(row, rule.minMoveUsd, rule.maxFarPrice)
+      : null;
+    note('no_signal', why ?? 'signal did not fire', entry.key);
   }
+  const picks = all.filter((p): p is { entry: SwitchEntry; side: 'up' | 'down' } => p.side != null);
+  if (!picks.length) return;
   for (const p of picks) await tradeOne(p.entry, p.side);
 
   async function tradeOne(entry: SwitchEntry, side: 'up' | 'down'): Promise<void> {
@@ -3122,7 +3127,7 @@ export async function runFadeSpikeDecision(
       clip_above_cost_cap: `smallest clip costs more than the $${SWITCHBOARD.maxCostUsd} cap`,
     };
     const skip = (reason: string) => {
-      note('skipped', `${entry.key}: ${SKIP_WORDS[reason] ?? reason}`);
+      note('skipped', `${entry.key}: ${SKIP_WORDS[reason] ?? reason}`, entry.key);
       log.info('svx.auto.skip', { marketId: d.marketId, strategy: entry.key, side, price, reason });
     };
     if (costPerContract == null) return skip('no_fee_quote');
@@ -3203,6 +3208,7 @@ export async function runFadeSpikeDecision(
           outcome.kind === 'skipped'
             ? `${entry.key}: quote moved (${outcome.reason.replace(/_/g, ' ')})`
             : `${entry.key}: refused on-chain: ${outcome.reason.slice(0, 80)}`,
+          entry.key,
         );
         log.warn('svx.auto.live_not_filled', {
           marketId: d.marketId,
@@ -3239,7 +3245,7 @@ export async function runFadeSpikeDecision(
       strategy,
       ...(txDigest && { txDigest }),
     });
-    note('entered', `${entry.key}: bought ${side} @ ${(costPrice * 100).toFixed(1)}¢ · ${mode}`);
+    note('entered', `${entry.key}: bought ${side} @ ${(costPrice * 100).toFixed(1)}¢ · ${mode}`, entry.key);
     log.info('svx.auto.entered', {
       tradeId,
       mode,
@@ -3262,6 +3268,8 @@ export async function runFadeSpikeDecision(
  */
 interface EdgeTradeArgs {
   key: string;
+  /** Checkpoint for the radar ('jump' for the event-driven jump strategy). */
+  slot: string;
   signal: 'binance_jump' | 'vol_model';
   marketId: string;
   expiryMs: number;
@@ -3282,8 +3290,12 @@ async function runEdgeTrade(
   const entries = deps.switchboard ?? evaluateSwitchboard(ledger, suiNetwork());
   const entry = entries.find((e) => e.key === a.key && e.status === 'on');
   if (!entry) return;
-  const skip = (reason: string) =>
+  const note = (outcome: string, detail: string) =>
+    recordFadeEval({ marketId: a.marketId, slot: a.slot, atMs: Date.now(), outcome, detail, key: a.key });
+  const skip = (reason: string) => {
+    note('skipped', reason.replace(/_/g, ' '));
     log.info('svx.edge.skip', { marketId: a.marketId, strategy: a.key, price: a.price, reason });
+  };
   if (!inTradeBand(a.price)) return skip('price_out_of_bounds');
   const nowMs = Date.now();
   const isAuto = (t: { strategy?: string }) =>
@@ -3332,6 +3344,12 @@ async function runEdgeTrade(
       },
     }).catch((e) => ({ kind: 'failed' as const, reason: errMsg(e) }));
     if (outcome.kind !== 'filled') {
+      note(
+        'not_filled',
+        outcome.kind === 'skipped'
+          ? `quote moved (${outcome.reason.replace(/_/g, ' ')})`
+          : `refused on-chain: ${outcome.reason.slice(0, 80)}`,
+      );
       log.warn('svx.edge.live_not_filled', {
         marketId: a.marketId,
         strategy: a.key,
@@ -3367,6 +3385,10 @@ async function runEdgeTrade(
     strategy: strategyTagFor(a.signal),
     ...(txDigest && { txDigest }),
   });
+  note(
+    'entered',
+    `bought ${a.order.kind === 'range' ? `$${a.order.lower}–$${a.order.upper}` : a.order.direction} @ ${(costPrice * 100).toFixed(1)}¢ · ${mode}`,
+  );
   log.info('svx.edge.entered', {
     tradeId,
     mode,
@@ -3393,6 +3415,7 @@ export async function runJumpTrades(
         : runEdgeTrade(
             {
               key: 'binance_jump@jump',
+              slot: 'jump',
               signal: 'binance_jump',
               marketId: market.id,
               expiryMs: market.expiryMs,
@@ -3411,8 +3434,27 @@ export async function runVolModelTrade(
   e: VolRegimeEvent,
   deps: { ledger: LedgerStore; cfg: SvxConfig; live?: LiveContext; switchboard?: SwitchEntry[] },
 ): Promise<void> {
+  const key = `vol_model@${e.slot}`;
   const best = volModelPick(e.payload, e.ttmMs, VOL_MODEL_MIN_EDGE);
-  if (!best) return;
+  if (!best) {
+    const on = (deps.switchboard ?? evaluateSwitchboard(deps.ledger, suiNetwork())).some(
+      (x) => x.key === key && x.status === 'on',
+    );
+    if (on) {
+      const top = volModelPick(e.payload, e.ttmMs, -Infinity);
+      recordFadeEval({
+        marketId: e.market.id,
+        slot: e.slot,
+        atMs: Date.now(),
+        outcome: 'no_signal',
+        detail: top
+          ? `best was ${top.candidate.name} at ${(top.edge * 100).toFixed(1)}¢ modelled edge (needs ${VOL_MODEL_MIN_EDGE * 100}¢)`
+          : 'no quotable candidate',
+        key,
+      });
+    }
+    return;
+  }
   const c = best.candidate;
   const order: EdgeTradeArgs['order'] =
     c.lower != null && c.upper != null
@@ -3420,7 +3462,8 @@ export async function runVolModelTrade(
       : { kind: 'binary', direction: c.upper == null ? 'up' : 'down', reference: e.payload.reference };
   await runEdgeTrade(
     {
-      key: `vol_model@${e.slot}`,
+      key,
+      slot: e.slot,
       signal: 'vol_model',
       marketId: e.market.id,
       expiryMs: e.market.expiryMs,

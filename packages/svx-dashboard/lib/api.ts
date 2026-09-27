@@ -838,14 +838,18 @@ export interface FadeSpikeState {
       opensAtMs: number | null;
     }>;
   } | null;
-  /** Executor checks (≈50s and ≈30s before expiry), newest first. */
+  /** Executor checks per market × strategy checkpoint, newest first. */
   evaluations?: Array<{
     marketId: string;
     slot: string;
     atMs: number;
     outcome: 'entered' | 'skipped' | 'no_signal' | 'not_filled' | string;
     detail: string;
+    /** Switchboard key the check belongs to (absent on generic fade notes). */
+    key?: string;
   }>;
+  /** Every strategy the switchboard currently has ON. */
+  strategiesOn?: Array<{ key: string; signal: string; slot: string; pnlPerContract: number; n: number }>;
   trades: TradeRecord[];
 }
 

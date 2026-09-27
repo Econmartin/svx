@@ -76,7 +76,7 @@ export function SwitchboardCard() {
                   <TableHead>Checkpoint</TableHead>
                   <TableHead>Decisions</TableHead>
                   <TableHead>Per $1 contract</TableHead>
-                  <TableHead className="text-right">Last 24h · 4h bands</TableHead>
+                  <TableHead>Recent</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead>Since</TableHead>
                 </TableRow>
@@ -95,7 +95,7 @@ export function SwitchboardCard() {
                       <RecentForm
                         recent={s.recent ?? []}
                         captured={s.recentCaptured ?? []}
-                        bands={s.bands}
+                        atMs={s.recentAtMs ?? []}
                         streak={s.streak ?? 0}
                         recentPnl={s.recentPnl}
                         overall={s.pnlPerContract}
@@ -131,6 +131,14 @@ export function SwitchboardCard() {
   );
 }
 
+const HOUR_MS = 3600_000;
+const isOld = (t: number | undefined) => t != null && t > 0 && Date.now() - t > HOUR_MS;
+const age = (t: number | undefined) => {
+  if (!t) return '';
+  const m = Math.round((Date.now() - t) / 60_000);
+  return m < 60 ? `${m}m ago` : `${(m / 60).toFixed(m < 600 ? 1 : 0)}h ago`;
+};
+
 /**
  * Last results as dots (oldest → newest), the current streak, and the
  * direction of travel: the last-20 average against the overall average.
@@ -138,7 +146,7 @@ export function SwitchboardCard() {
 function RecentForm({
   recent,
   captured,
-  bands,
+  atMs,
   streak,
   recentPnl,
   overall,
@@ -146,7 +154,8 @@ function RecentForm({
   recent: number[];
   /** 1 where we traded that result live: drawn with a ring. */
   captured: number[];
-  bands?: Array<{ w: number; l: number; tw: number; tl: number }>;
+  /** When each result was known; runs older than an hour get a bar underneath. */
+  atMs: number[];
   streak: number;
   recentPnl?: number;
   overall: number;
@@ -163,103 +172,50 @@ function RecentForm({
     streak <= -2 ? `${-streak} losses in a row` : streak >= 2 ? `${streak} wins in a row` : null;
   return (
     <div className="flex items-center gap-2 justify-end">
-      {bands ? (
-        <Bands bands={bands} />
-      ) : (
-        <span
-          className="inline-flex items-center gap-[4px]"
-          aria-label={`last ${recent.length} results, ${captured.filter(Boolean).length} traded live`}
-          title={`Ringed: we traded it live (${captured.filter(Boolean).length} of the last ${recent.length})`}
-        >
-          {recent.map((w, i) => (
-            <span
-              key={i}
-              className={cn(
-                'h-2 w-2 rounded-full',
-                w ? 'bg-win' : 'bg-loss',
-                captured[i] ? 'ring-2 ring-fg ring-offset-1 ring-offset-transparent' : i < recent.length - 5 && 'opacity-60',
-              )}
-            />
-          ))}
+      <span
+        className="inline-flex items-start"
+        aria-label={`last ${recent.length} results, ${captured.filter(Boolean).length} traded live`}
+        title={`Ringed: we traded it live (${captured.filter(Boolean).length} of the last ${recent.length}). Underlined: over an hour old.`}
+      >
+        {recent.map((w, i) => {
+          const old = isOld(atMs[i]);
+          return (
+            <span key={i} className="flex flex-col items-center gap-[4px] px-[2px]" title={age(atMs[i])}>
+              <span
+                className={cn(
+                  'h-2 w-2 rounded-full',
+                  w ? 'bg-win' : 'bg-loss',
+                  captured[i] ? 'ring-2 ring-fg ring-offset-1 ring-offset-transparent' : i < recent.length - 5 && 'opacity-60',
+                )}
+              />
+              <span
+                className={cn(
+                  'h-[2px] self-stretch',
+                  old && 'bg-white/[0.28]',
+                  old && !isOld(atMs[i - 1]) && 'rounded-l-full ml-[1px]',
+                  old && !isOld(atMs[i + 1]) && 'rounded-r-full mr-[1px]',
+                )}
+              />
+            </span>
+          );
+        })}
+      </span>
+      <span
+        className={cn('text-[15px] leading-none font-semibold', trend.cls)}
+        title={
+          recentPnl != null
+            ? `${trend.label}: last 20 ${recentPnl >= 0 ? '+' : '−'}${Math.abs(recentPnl * 100).toFixed(1)}¢ vs overall ${overall >= 0 ? '+' : '−'}${Math.abs(overall * 100).toFixed(1)}¢`
+            : undefined
+        }
+      >
+        {trend.glyph}
+      </span>
+      {streakLabel && (
+        <span className={cn('text-[12px] whitespace-nowrap', streak < 0 ? 'text-loss' : 'text-win')}>
+          {streakLabel}
         </span>
       )}
-      <span className="inline-flex items-center gap-2 w-[124px] shrink-0">
-        <span
-          className={cn('text-[15px] leading-none font-semibold', trend.cls)}
-          title={
-            recentPnl != null
-              ? `${trend.label}: last 20 ${recentPnl >= 0 ? '+' : '−'}${Math.abs(recentPnl * 100).toFixed(1)}¢ vs overall ${overall >= 0 ? '+' : '−'}${Math.abs(overall * 100).toFixed(1)}¢`
-              : undefined
-          }
-        >
-          {trend.glyph}
-        </span>
-        {streakLabel && (
-          <span className={cn('text-[12px] whitespace-nowrap', streak < 0 ? 'text-loss' : 'text-win')}>
-            {streakLabel}
-          </span>
-        )}
-      </span>
     </div>
   );
 }
 
-const BAND_MS = 4 * 3600_000;
-const MAX_DOTS = 8;
-
-/**
- * The last 24h as six 4-hour bands, oldest left. Each band's results:
- * ringed = we traded it live, plain = we did not; green won, red lost.
- * Traded first, so a band with plain dots shows misses at a glance.
- */
-function Bands({ bands }: { bands: Array<{ w: number; l: number; tw: number; tl: number }> }) {
-  const now = Date.now();
-  const hour = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return (
-    <span className="inline-flex items-stretch shrink-0">
-      {bands.map((b, i) => {
-        const dots = [
-          ...Array<'tw'>(b.tw).fill('tw'),
-          ...Array<'tl'>(b.tl).fill('tl'),
-          ...Array<'w'>(b.w).fill('w'),
-          ...Array<'l'>(b.l).fill('l'),
-        ];
-        const start = now - (bands.length - i) * BAND_MS;
-        const span = `${hour(start)}–${hour(start + BAND_MS)}`;
-        return (
-          <span
-            key={i}
-            title={
-              dots.length
-                ? `${span}: traded ${b.tw + b.tl} (${b.tw}W ${b.tl}L), not traded ${b.w + b.l} (${b.w}W ${b.l}L)`
-                : `${span}: no results`
-            }
-            className={cn(
-              'relative grid grid-cols-[repeat(4,6px)] gap-[5px] justify-center content-center w-[50px] min-h-[20px] py-[3px]',
-              i > 0 && 'border-l border-white/[0.08]',
-            )}
-          >
-            {dots.length === 0 && <span className="col-span-4 mx-auto h-px w-3 bg-white/[0.12]" />}
-            {dots.slice(0, MAX_DOTS).map((d, k) => (
-              <span
-                key={k}
-                className={cn(
-                  'h-[6px] w-[6px] rounded-full',
-                  d === 'tw' || d === 'w' ? 'bg-win' : 'bg-loss',
-                  d === 'tw' || d === 'tl'
-                    ? 'ring-[1.5px] ring-fg ring-offset-1 ring-offset-transparent'
-                    : 'opacity-70',
-                )}
-              />
-            ))}
-            {dots.length > MAX_DOTS && (
-              <span className="absolute -bottom-2 right-1 text-[9px] leading-none text-muted">
-                +{dots.length - MAX_DOTS}
-              </span>
-            )}
-          </span>
-        );
-      })}
-    </span>
-  );
-}

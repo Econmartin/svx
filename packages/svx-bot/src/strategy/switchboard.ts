@@ -86,9 +86,8 @@ export interface SwitchEntry {
   recent: number[];
   /** Per `recent` result: 1 when we traded it live, 0 when we did not. */
   recentCaptured?: number[];
-  /** The last 24h in BAND_COUNT bands of BAND_MS, oldest first: wins and
-   *  losses we did not trade (w, l) and did trade live (tw, tl). */
-  bands?: Array<{ w: number; l: number; tw: number; tl: number }>;
+  /** Per `recent` result: when it was known (0 = unknown). */
+  recentAtMs?: number[];
   /** +n wins / −n losses in a row, most recent. */
   streak: number;
   /** Average profit per contract over the last up-to-20 decisions. */
@@ -135,15 +134,12 @@ function switchInputs(ledger: LedgerStore, network: string): SwitchInputs {
   };
 }
 
-export const BAND_MS = 4 * 3600_000;
-export const BAND_COUNT = 6;
-
-function scoreAll(inp: SwitchInputs, timelineSinceMs?: number): ShadowSignalScore[] {
+function scoreAll(inp: SwitchInputs): ShadowSignalScore[] {
   const scores: ShadowSignalScore[] = [
-    ...scoreShadowSignals(inp.shadow, timelineSinceMs).filter((s) => s.slot !== 'all'),
+    ...scoreShadowSignals(inp.shadow).filter((s) => s.slot !== 'all'),
     // Edge trackers (ops/edge-trackers.ts): the Binance-jump and vol-model
     // strategies, on the same on/off rule.
-    ...edgeSwitchScores(inp.jumps, inp.vols, timelineSinceMs),
+    ...edgeSwitchScores(inp.jumps, inp.vols),
   ];
   const harvest = sequenceScore(
     'harvest_v2',
@@ -156,7 +152,6 @@ function scoreAll(inp: SwitchInputs, timelineSinceMs?: number): ShadowSignalScor
         market: t.oracleId,
         atMs: t.settledAtMs ?? t.tsMs,
       })),
-    timelineSinceMs,
   );
   if (harvest) scores.push(harvest);
   return scores;
@@ -222,8 +217,7 @@ export function evaluateSwitchboard(
   } catch {
     /* start fresh */
   }
-  const bandsStart = nowMs - BAND_COUNT * BAND_MS;
-  const scores = scoreAll(switchInputs(ledger, network), bandsStart);
+  const scores = scoreAll(switchInputs(ledger, network));
   // Which (strategy, market) pairs we actually traded live — the rings on
   // the switchboard's result dots.
   const liveStart = ledger.firstLivePredictTradeMs();
@@ -261,20 +255,7 @@ export function evaluateSwitchboard(
       recentCaptured: (s.recentMarkets ?? []).map((m) =>
         traded.has(`${s.signal === 'harvest_v2' ? 'harvest_v2' : key}|${m}`) ? 1 : 0,
       ),
-      bands: (() => {
-        const b = Array.from({ length: BAND_COUNT }, () => ({ w: 0, l: 0, tw: 0, tl: 0 }));
-        for (const x of s.timeline ?? []) {
-          const i = Math.min(BAND_COUNT - 1, Math.floor((x.atMs - bandsStart) / BAND_MS));
-          if (i < 0) continue;
-          const hit = traded.has(`${s.signal === 'harvest_v2' ? 'harvest_v2' : key}|${x.market}`);
-          const band = b[i]!;
-          if (x.won && hit) band.tw++;
-          else if (x.won) band.w++;
-          else if (hit) band.tl++;
-          else band.l++;
-        }
-        return b;
-      })(),
+      recentAtMs: s.recentAtMs ?? [],
       streak: s.streak,
       recentPnl: s.recentPnl,
       status,

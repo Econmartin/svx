@@ -88,3 +88,57 @@ describe('switchboard: green on, red off', () => {
     expect(enabledAt(board, 't30s')).toHaveLength(0);
   });
 });
+
+import { HARVEST_KEY, switchboardRealized24h } from '../src/strategy/switchboard.js';
+
+describe('harvest v2 on the switchboard', () => {
+  let tmp: string;
+  let ledger: LedgerStore;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svx-sbh-'));
+    ledger = new LedgerStore(path.join(tmp, 'svx.sqlite'));
+  });
+  afterEach(() => {
+    ledger.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+  let n = 0;
+  const trade = (strategy: string, mode: 'paper' | 'live', tsMs: number, won: boolean, costUsdc = 4) => {
+    const oracleId = `o${n++}`;
+    ledger.insertTrade({
+      signalId: strategy === 'calibration_harvest' ? 'harvest_v2' : 'fade_spike@t50s',
+      timestampMs: tsMs,
+      mode,
+      oracleId,
+      underlyingAsset: 'BTC',
+      expiryMs: tsMs + 60_000,
+      strike: 100,
+      direction: 'up',
+      quantityDusdc: 5,
+      costPrice: 0.8,
+      costUsdc,
+      settled: false,
+      strategy: strategy as never,
+    });
+    ledger.settleTradesForOracle(oracleId, won ? 101 : 99, tsMs + 60_000);
+  };
+
+  it('scores harvest only from its trades since the first live switchboard trade', () => {
+    const now = Date.now();
+    trade('calibration_harvest', 'paper', now - 10 * 3600_000, false); // before live start: ignored
+    trade('fade_spike', 'live', now - 5 * 3600_000, false); // live trading starts here
+    for (let i = 0; i < 4; i++) trade('calibration_harvest', 'paper', now - 4 * 3600_000 + i, true);
+    const e = evaluateSwitchboard(ledger, 'mainnet', now, true).find((x) => x.key === HARVEST_KEY)!;
+    expect(e.n).toBe(4);
+    expect(e.pnlPerContract).toBeCloseTo(1 - 4 / 5); // won $5 on $4 each: +20¢ per contract
+    expect(e.status).toBe('on');
+  });
+
+  it("counts harvest's live losses toward the daily stop, never its paper ones", () => {
+    const now = Date.now();
+    trade('calibration_harvest', 'paper', now - 3600_000, false);
+    trade('calibration_harvest', 'live', now - 3600_000, false, 3);
+    trade('fade_spike', 'live', now - 3600_000, false, 2);
+    expect(switchboardRealized24h(ledger, now)).toBeCloseTo(-5);
+  });
+});

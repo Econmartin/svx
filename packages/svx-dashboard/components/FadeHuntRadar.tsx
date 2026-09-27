@@ -202,6 +202,7 @@ const SIGNAL_NAMES: Record<string, string> = {
   longshot_12c: 'Long-shot ≤12¢',
   cheap_far_side: 'Cheap far side',
   vol_model: 'Vol model',
+  harvest_v2: 'Harvest v2',
   binance_jump: 'Binance jump',
   board_favourite: 'Board favourite',
   board_underdog: 'Board underdog',
@@ -212,7 +213,8 @@ const signalName = (s: string) =>
     .replace(/_/g, ' ')
     .replace(/(\d+)pp/, '≥$1pp')
     .replace(/^./, (c) => c.toUpperCase());
-const slotName = (slot: string) => (slot === 'jump' ? 'any time' : `at ${slot.slice(1)}`);
+const slotName = (slot: string) =>
+  slot === 'jump' ? 'any time' : slot === 'harvest' ? '45–150s' : `at ${slot.slice(1)}`;
 
 type RowState = 'bought' | 'checking' | 'upcoming' | 'skipped' | 'not_filled' | 'quiet' | 'watching';
 const DOT_CLS: Record<RowState, string> = {
@@ -292,7 +294,11 @@ function Lane({
     .map((st) => {
       const win = st.slot === 'jump' ? null : rule.checkWindowsMs?.[st.slot];
       if (st.slot !== 'jump' && (!win || win[0] >= windowSpan)) return null;
-      const trade = trades.find((t) => t.signalId === st.key);
+      const trade = trades.find(
+        (t) =>
+          t.signalId === st.key ||
+          (st.signal === 'harvest_v2' && t.strategy === 'calibration_harvest' && t.mode === 'live'),
+      );
       const check = checks.find((c) => c.key === st.key);
       const detail = (check?.detail ?? '').replace(`${st.key}: `, '');
       let state: RowState;

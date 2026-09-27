@@ -50,7 +50,9 @@ import { SHADOW_SIGNALS, type ShadowDecisionEvent } from './ops/shadow-signals.j
 import type { ShadowDecisionRow } from './ledger/store.js';
 import {
   SWITCHBOARD,
+  HARVEST_KEY,
   clipCapUsd,
+  switchboardRealized24h,
   enabledAt,
   evaluateSwitchboard,
   strategyTagFor,
@@ -3143,10 +3145,7 @@ export async function runFadeSpikeDecision(
     if (open.some((t) => t.oracleId === d.marketId && t.signalId === entry.key)) {
       return skip('already_open_for_market');
     }
-    const realized24h = AUTO_STRATEGIES.reduce(
-      (a, st) => a + ledger.realizedStrategyPnlSince(st, nowMs - DAY),
-      0,
-    );
+    const realized24h = switchboardRealized24h(ledger, nowMs);
     if (realized24h <= -SWITCHBOARD.dailyLossLimitUsd) return skip('daily_loss_limit');
     const quantity = fadeSpikeQuantity(price, costPerContract, clipCapUsd(costPerContract));
     if (quantity == null) return skip('clip_above_cost_cap');
@@ -3302,10 +3301,7 @@ async function runEdgeTrade(
   if (ledger.openTrades().filter(isAuto).some((t) => t.oracleId === a.marketId && t.signalId === a.key)) {
     return skip('already_open_for_market');
   }
-  const realized24h = AUTO_STRATEGIES.reduce(
-    (acc, st) => acc + ledger.realizedStrategyPnlSince(st, nowMs - 24 * 3600_000),
-    0,
-  );
+  const realized24h = switchboardRealized24h(ledger, nowMs);
   if (realized24h <= -SWITCHBOARD.dailyLossLimitUsd) return skip('daily_loss_limit');
   const cap = clipCapUsd(a.costPerContract);
   const quantity = fadeSpikeQuantity(a.price, a.costPerContract, cap);
@@ -3495,6 +3491,19 @@ async function runHarvestV2Step(deps: {
   const { predict, ledger, cfg, state, live } = deps;
   if (!cfg.predictV2 || !cfg.harvestV2Enabled) return;
   const nowMs = Date.now();
+  // On the switchboard (strategy/switchboard.ts, HARVEST_KEY): while its
+  // score since live trading began is green, harvest mints live with the
+  // switchboard's clip sizing, caps and shared daily stop; otherwise it keeps
+  // paper-trading so the score keeps moving.
+  const switchLive =
+    !cfg.paperTrading &&
+    !!live &&
+    !isKilled() &&
+    !ledger.getPause().paused &&
+    evaluateSwitchboard(ledger, suiNetwork()).some(
+      (e) => e.key === HARVEST_KEY && e.status === 'on',
+    ) &&
+    switchboardRealized24h(ledger, nowMs) > -SWITCHBOARD.dailyLossLimitUsd;
   const active = await predict.listActiveOracles();
   for (const o of active) {
     const ttm = o.expiryMs - nowMs;
@@ -3563,7 +3572,14 @@ async function runHarvestV2Step(deps: {
     let costUsdc = feeEst?.cost ?? quantityDusdc * decision.costPrice;
     let mode: 'paper' | 'live' = 'paper';
     let txDigest: string | undefined;
-    if (!cfg.paperTrading && cfg.predictV2LiveEnabled && live) {
+    // Switchboard-live clip: the smallest clip over Predict's $1 minimum
+    // premium, under the per-trade cap (same sizing as every green strategy).
+    const perContract = costUsdc / quantityDusdc;
+    const switchQty = switchLive
+      ? fadeSpikeQuantity(decision.costPrice, perContract, clipCapUsd(perContract))
+      : null;
+    if (!cfg.paperTrading && live && (cfg.predictV2LiveEnabled || switchQty != null)) {
+      if (switchQty != null) quantityDusdc = switchQty;
       try {
         const outcome = await mintLive({
           sui: live.sui,
@@ -3577,11 +3593,23 @@ async function runHarvestV2Step(deps: {
             direction: decision.direction,
             quantity: quantityDusdc,
           },
-          gates: {
-            ...DEFAULT_LIVE_MINT_GATES,
-            maxEntryProbability: cfg.calibrationHarvestMaxCostPrice,
-            maxFeeDrag: cfg.harvestV2MaxFeeDrag,
-          },
+          gates:
+            switchQty != null
+              ? {
+                  // The switchboard score is already fee-inclusive, so the
+                  // legacy 3¢ fee-drag gate (which blocks every mainnet mint)
+                  // gives way to the switchboard's caps.
+                  maxEntryProbability: cfg.calibrationHarvestMaxCostPrice,
+                  maxFeeDrag: 0.3,
+                  costSlippage: 0.03,
+                  probabilitySlippage: 0.03,
+                  maxCostUsd: clipCapUsd(perContract),
+                }
+              : {
+                  ...DEFAULT_LIVE_MINT_GATES,
+                  maxEntryProbability: cfg.calibrationHarvestMaxCostPrice,
+                  maxFeeDrag: cfg.harvestV2MaxFeeDrag,
+                },
         });
         if (outcome.kind === 'skipped') {
           log.info('svx.harvest_v2.live_skipped', {

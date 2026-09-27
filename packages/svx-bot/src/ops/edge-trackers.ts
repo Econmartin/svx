@@ -602,7 +602,7 @@ export function scoreVolRegime(rows: Array<EdgeProbeRow<VolRegimePayload>>): Vol
  *  executors keep to 2–97¢. Scores use the same band so they match trades. */
 export const inTradeBand = (prob: number) => prob >= 0.02 && prob <= 0.97;
 
-function sequenceScore(
+export function sequenceScore(
   signal: string,
   slot: string,
   seq: Array<{ cost: number; win: boolean }>,

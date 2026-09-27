@@ -834,15 +834,35 @@ export class LedgerStore {
    * settlement time (same convention as the shared daily-loss window — a
    * position opened yesterday that dies today counts against today).
    */
-  realizedStrategyPnlSince(strategy: string, sinceMs: number): number {
+  realizedStrategyPnlSince(strategy: string, sinceMs: number, mode?: 'live' | 'paper'): number {
     const r = this.db
-      .prepare<[string, number], { pnl: number | null }>(
+      .prepare<[string, number, string | null, string | null], { pnl: number | null }>(
         `SELECT SUM(pnl_usdc) AS pnl FROM trades
          WHERE strategy = ? AND settled = 1 AND pnl_usdc IS NOT NULL
-           AND COALESCE(settled_at_ms, ts_ms) >= ?`,
+           AND COALESCE(settled_at_ms, ts_ms) >= ?
+           AND (? IS NULL OR mode = ?)`,
       )
-      .get(strategy, sinceMs);
+      .get(strategy, sinceMs, mode ?? null, mode ?? null);
     return r?.pnl ?? 0;
+  }
+
+  /** Settled trades of one strategy from `sinceMs`, oldest first (both modes). */
+  settledStrategyTradesSince(
+    strategy: string,
+    sinceMs: number,
+  ): Array<{ tsMs: number; quantity: number; costUsdc: number; payoutUsdc: number }> {
+    return this.db
+      .prepare<[string, number], { ts_ms: number; quantity_dusdc: number; cost_usdc: number; payout_usdc: number | null }>(
+        `SELECT ts_ms, quantity_dusdc, cost_usdc, payout_usdc FROM trades
+         WHERE strategy = ? AND settled = 1 AND ts_ms >= ? ORDER BY ts_ms ASC`,
+      )
+      .all(strategy, sinceMs)
+      .map((r) => ({
+        tsMs: r.ts_ms,
+        quantity: r.quantity_dusdc,
+        costUsdc: r.cost_usdc,
+        payoutUsdc: r.payout_usdc ?? 0,
+      }));
   }
 
   /**

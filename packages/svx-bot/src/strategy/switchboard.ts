@@ -26,6 +26,7 @@ import {
   type JumpPayload,
   type VolRegimePayload,
 } from '../ops/edge-trackers.js';
+import { sequenceScore } from '../ops/edge-trackers.js';
 import { log } from '../util/log.js';
 
 export const SWITCHBOARD = {
@@ -45,6 +46,21 @@ export const SWITCHBOARD = {
   longshotMaxCostPerContract: 0.12,
   dailyLossLimitUsd: 15,
 } as const;
+
+/**
+ * Realized PnL over the last 24h that counts against the shared daily stop:
+ * every switchboard strategy, plus harvest v2's LIVE trades only (its paper
+ * clips run all the time and must not trip the stop).
+ */
+export function switchboardRealized24h(ledger: LedgerStore, nowMs: number): number {
+  const since = nowMs - 24 * 3600_000;
+  return (
+    ['fade_spike', 'auto_shadow', 'edge_jump', 'edge_vol'].reduce(
+      (a, st) => a + ledger.realizedStrategyPnlSince(st, since),
+      0,
+    ) + ledger.realizedStrategyPnlSince('calibration_harvest', since, 'live')
+  );
+}
 
 /** Per-trade cap for a clip at this all-in cost per contract. */
 export function clipCapUsd(costPerContract: number): number {
@@ -75,10 +91,16 @@ export interface SwitchEntry {
 const META_KEY = 'switchboard_v1';
 let cache: { atMs: number; entries: SwitchEntry[] } | null = null;
 
+/** Harvest v2 (buy the 60–90¢ favourite 45–150s out) on the switchboard. It
+ *  is scored on its own trades since live mainnet trading began — paper
+ *  while it's off, live once on — per $1 contract after fees. */
+export const HARVEST_KEY = 'harvest_v2@harvest';
+
 /** Ledger strategy tag for a signal (fade variants keep their own page). */
 export function strategyTagFor(
   signal: string,
-): 'fade_spike' | 'auto_shadow' | 'edge_jump' | 'edge_vol' {
+): 'fade_spike' | 'auto_shadow' | 'edge_jump' | 'edge_vol' | 'calibration_harvest' {
+  if (signal === 'harvest_v2') return 'calibration_harvest';
   if (signal === 'binance_jump') return 'edge_jump';
   if (signal === 'vol_model') return 'edge_vol';
   return signal.startsWith('fade_spike') ? 'fade_spike' : 'auto_shadow';
@@ -99,7 +121,7 @@ export function evaluateSwitchboard(
   } catch {
     /* start fresh */
   }
-  const scores = [
+  const scores: ReturnType<typeof scoreShadowSignals> = [
     ...scoreShadowSignals(ledger.settledShadowDecisions(network, 0)).filter(
       (s) => s.slot !== 'all',
     ),
@@ -110,6 +132,18 @@ export function evaluateSwitchboard(
       ledger.settledEdgeProbes<VolRegimePayload>(network, 'vol_regime', 0),
     ),
   ];
+  const liveStart = ledger.firstLivePredictTradeMs();
+  if (liveStart != null) {
+    const harvest = sequenceScore(
+      'harvest_v2',
+      'harvest',
+      ledger
+        .settledStrategyTradesSince('calibration_harvest', liveStart)
+        .filter((t) => t.quantity > 0)
+        .map((t) => ({ cost: t.costUsdc / t.quantity, win: t.payoutUsdc > 0 })),
+    );
+    if (harvest) scores.push(harvest);
+  }
   const entries: SwitchEntry[] = scores.map((s) => {
     const key = `${s.signal}@${s.slot}`;
     const before = prev.get(key);

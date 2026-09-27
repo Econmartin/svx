@@ -746,7 +746,13 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
     // Every switchboard-traded strategy, so the radar can show all of them.
     const AUTO = ['fade_spike', 'auto_shadow', 'edge_jump', 'edge_vol'];
     const trades = [...deps.ledger.openTrades(), ...deps.ledger.closedTrades(200)]
-      .filter((t) => AUTO.includes(t.strategy ?? ''))
+      .filter(
+        (t) =>
+          AUTO.includes(t.strategy ?? '') ||
+          // Harvest v2 is on the switchboard too; only its live trades here
+          // (its paper clips run constantly and would crowd the list).
+          (t.strategy === 'calibration_harvest' && t.mode === 'live'),
+      )
       .sort((x, y) => y.timestampMs - x.timestampMs)
       .slice(0, 60);
     const on = board.filter((e) => e.status === 'on');
@@ -772,6 +778,7 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
           t2m: [100_000, 140_000],
           t4m: [220_000, 260_000],
           t65s: [61_000, 80_000],
+          harvest: [45_000, 150_000],
         },
       },
       // Everything the switchboard has ON — the radar lists each per window.

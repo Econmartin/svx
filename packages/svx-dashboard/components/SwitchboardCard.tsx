@@ -22,7 +22,8 @@ import {
 import { cn } from '@/lib/cn';
 
 const pretty = (s: string) => s.replace(/_/g, ' ');
-const slotLabel = (s: string) => (s.endsWith('m') ? `${s.slice(1)} left` : `${s.slice(1)} left`);
+const slotLabel = (s: string) =>
+  s === 'jump' ? 'any time' : s === 'harvest' ? '45–150s left' : `${s.slice(1)} left`;
 
 export function SwitchboardCard() {
   const client = useApiClient();

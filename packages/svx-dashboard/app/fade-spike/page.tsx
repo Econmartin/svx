@@ -48,6 +48,16 @@ interface PageData {
 
 /** Ledger tags of every strategy the switchboard can trade. */
 const SWITCHBOARD_TAGS = ['fade_spike', 'auto_shadow', 'edge_jump', 'edge_vol'];
+/** Every Predict strategy that runs today, including the paper-only harvest. */
+const CURRENT_TAGS = [...SWITCHBOARD_TAGS, 'calibration_harvest', 'divergence_mint'];
+const TAG_NAMES: Record<string, string> = {
+  fade_spike: 'fade spike',
+  auto_shadow: 'shadow signals',
+  edge_jump: 'Binance jump',
+  edge_vol: 'vol model',
+  calibration_harvest: 'harvest v2',
+  divergence_mint: 'divergence',
+};
 const SHADOW = [
   'fade_spike',
   'fade_spike_cheap',
@@ -84,9 +94,10 @@ export default function FadeSpikePage() {
       client.watch().catch(() => null),
     ]);
     return {
-      // Headline totals: what the switchboard trades (fade spike, other green
-      // shadow signals, the edge trackers).
-      rows: (status.strategyPnl ?? []).filter((r) => SWITCHBOARD_TAGS.includes(r.strategy)),
+      // Headline totals: every current Predict strategy — the switchboard's
+      // (fade spike, green shadow signals, edge trackers) plus the paper-only
+      // harvest v2 / divergence mint.
+      rows: (status.strategyPnl ?? []).filter((r) => CURRENT_TAGS.includes(r.strategy)),
       // The trade log shows every trade we have made, whatever opened it.
       open,
       closed,
@@ -116,6 +127,14 @@ export default function FadeSpikePage() {
   const live = sumRows('live');
   const paper = sumRows('paper');
   const mode = live && (live.trades > 0 || live.open > 0) ? 'live' : 'paper';
+  // Win rate and 24h activity follow the headline mode, so a busy paper
+  // strategy (harvest v2) can't blur the live numbers.
+  const head = mode === 'live' ? live : paper;
+  const paperBreakdown = (data?.rows ?? [])
+    .filter((r) => r.mode === 'paper' && r.trades > 0)
+    .sort((a, b) => b.trades - a.trades)
+    .map((r) => `${TAG_NAMES[r.strategy] ?? r.strategy} ${formatUsdc(r.pnlUsdc)} (${r.settled})`)
+    .join(' · ');
   const recent = [...(data?.open ?? []), ...(data?.closed ?? [])]
     .sort((a, b) => b.timestampMs - a.timestampMs)
     .slice(0, 40);
@@ -148,7 +167,7 @@ export default function FadeSpikePage() {
           'Most trades lose: it buys 2–30¢ contracts that win roughly one time in six or seven. Judge it on the running total, not single trades.',
           'It buys at one check per window, about 50 seconds before the end: later checks lost money in testing (fees triple through the final minute and there is less time for the move to reverse).',
           'What trades is decided by the switchboard below: a strategy switches on above +2¢ per contract on the shadow scoreboard and off at zero or below.',
-          'Limits: $2.50 per trade and a 24-hour stand-down after a $15 loss; no cap on how many strategies or trades run.',
+          'Limits: $2.50 per trade ($4 for long-shots at 12¢ or less all-in) and a 24-hour stand-down after a $15 loss; no cap on how many strategies or trades run.',
         ]}
       />
 
@@ -173,18 +192,18 @@ export default function FadeSpikePage() {
             label: 'Paper PnL',
             value: paper ? formatUsdc(paper.pnlUsdc) : '—',
             tone: paper ? (paper.pnlUsdc >= 0 ? 'win' : 'loss') : 'default',
-            hint: paper ? `${paper.settled} settled · ${paper.wins} won` : 'no paper trades yet',
+            hint: paper ? paperBreakdown || `${paper.settled} settled · ${paper.wins} won` : 'no paper trades yet',
           },
           {
-            label: 'Trades, last 24h',
-            value: String((live?.trades24h ?? 0) + (paper?.trades24h ?? 0)),
-            hint: `24h PnL ${formatUsdc((live?.pnl24hUsdc ?? 0) + (paper?.pnl24hUsdc ?? 0))}`,
+            label: mode === 'live' ? 'Live trades, last 24h' : 'Trades, last 24h',
+            value: String(head?.trades24h ?? 0),
+            hint: `24h PnL ${formatUsdc(head?.pnl24hUsdc ?? 0)}`,
           },
           {
-            label: 'Win rate',
+            label: mode === 'live' ? 'Live win rate' : 'Win rate',
             value: (() => {
-              const s = (live?.settled ?? 0) + (paper?.settled ?? 0);
-              const w = (live?.wins ?? 0) + (paper?.wins ?? 0);
+              const s = head?.settled ?? 0;
+              const w = head?.wins ?? 0;
               return s ? formatPct(w / s, 0) : '—';
             })(),
             hint: 'break-even is roughly the average price paid',

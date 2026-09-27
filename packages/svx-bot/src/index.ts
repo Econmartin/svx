@@ -53,7 +53,7 @@ import {
   SWITCHBOARD,
   HARVEST_KEY,
   clipCapUsd,
-  switchboardRealized24h,
+  strategyStop,
   enabledAt,
   evaluateSwitchboard,
   strategyTagFor,
@@ -3130,7 +3130,9 @@ export async function runFadeSpikeDecision(
       no_fee_quote: 'no fee quote for this market',
       price_out_of_bounds: `side priced ${(price * 100).toFixed(1)}¢, outside Predict's 2–97¢ entry band`,
       already_open_for_market: 'this strategy already holds this market',
-      daily_loss_limit: 'daily loss limit hit — standing down',
+      line_daily_loss_limit: `this strategy lost $${SWITCHBOARD.lineDailyLossLimitUsd}+ in 24h — standing down`,
+      account_daily_loss_limit: `switchboard lost $${SWITCHBOARD.accountDailyLossLimitUsd}+ in 24h — all strategies standing down`,
+      already_holds_side: 'another strategy already holds this side of this market',
       clip_above_cost_cap: `smallest clip costs more than the $${clipCapUsd(costPerContract ?? 1)} cap`,
     };
     const skip = (reason: string) => {
@@ -3148,8 +3150,12 @@ export async function runFadeSpikeDecision(
     if (open.some((t) => t.oracleId === d.marketId && t.signalId === entry.key)) {
       return skip('already_open_for_market');
     }
-    const realized24h = switchboardRealized24h(ledger, nowMs);
-    if (realized24h <= -SWITCHBOARD.dailyLossLimitUsd) return skip('daily_loss_limit');
+    // Two signals that pick the same side of the same market are one bet, not two.
+    if (open.some((t) => t.oracleId === d.marketId && t.direction === side)) {
+      return skip('already_holds_side');
+    }
+    const stop = strategyStop(ledger, nowMs, entry.key, costPerContract);
+    if (stop) return skip(stop);
     const quantity = fadeSpikeQuantity(price, costPerContract, clipCapUsd(costPerContract));
     if (quantity == null) return skip('clip_above_cost_cap');
 
@@ -3304,11 +3310,18 @@ async function runEdgeTrade(
   const nowMs = Date.now();
   const isAuto = (t: { strategy?: string }) =>
     (AUTO_STRATEGIES as readonly string[]).includes(t.strategy ?? '');
-  if (ledger.openTrades().filter(isAuto).some((t) => t.oracleId === a.marketId && t.signalId === a.key)) {
+  const openAuto = ledger.openTrades().filter(isAuto);
+  if (openAuto.some((t) => t.oracleId === a.marketId && t.signalId === a.key)) {
     return skip('already_open_for_market');
   }
-  const realized24h = switchboardRealized24h(ledger, nowMs);
-  if (realized24h <= -SWITCHBOARD.dailyLossLimitUsd) return skip('daily_loss_limit');
+  if (
+    a.order.kind === 'binary' &&
+    openAuto.some((t) => t.oracleId === a.marketId && t.direction === (a.order as { direction: string }).direction)
+  ) {
+    return skip('already_holds_side');
+  }
+  const stop = strategyStop(ledger, nowMs, a.key, a.costPerContract);
+  if (stop) return skip(stop);
   const cap = clipCapUsd(a.costPerContract);
   const quantity = fadeSpikeQuantity(a.price, a.costPerContract, cap);
   if (quantity == null) return skip('clip_above_cost_cap');
@@ -3510,7 +3523,8 @@ async function runHarvestV2Step(deps: {
     !isKilled() &&
     !ledger.getPause().paused &&
     harvestEntry?.status === 'on' &&
-    switchboardRealized24h(ledger, nowMs) > -SWITCHBOARD.dailyLossLimitUsd;
+    // Harvest buys ~86¢ favourites: never a long shot, so its own −$15 line stop applies.
+    strategyStop(ledger, nowMs, HARVEST_KEY, 0.86) == null;
   const active = await predict.listActiveOracles();
   for (const o of active) {
     const ttm = o.expiryMs - nowMs;

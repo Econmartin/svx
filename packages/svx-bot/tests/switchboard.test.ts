@@ -44,39 +44,98 @@ describe('switchboard: green on, red off', () => {
   const status = (key: string, now: number) =>
     evaluateSwitchboard(ledger, 'mainnet', now, true).find((e) => e.key === key)?.status;
 
-  it('switches on at the first green average and off when it turns red, then back', () => {
-    // always_up at 60c all-in: one win → +40c/contract → green.
-    ledger.insertShadowDecision(d(1));
-    settle(1, true);
-    expect(status('always_up@t50s', 10)).toBe('on');
-    expect(status('always_down@t50s', 10)).toBe('off'); // lost that one
-    // One loss: average (1 − 0.6 + 0 − 0.6) / 2 = −10c → red → off.
-    ledger.insertShadowDecision(d(2));
-    settle(2, false);
-    expect(status('always_up@t50s', 20)).toBe('off');
-    // Two more wins: (0.4 − 0.6 + 0.4 + 0.4) / 4 = +15c → green → on again.
-    for (const i of [3, 4]) {
-      ledger.insertShadowDecision(d(i));
-      settle(i, true);
+  /** `count` always_up decisions at `cost` all-in, the first `wins` of them won. */
+  const batch = (from: number, count: number, wins: number, over: Partial<ShadowDecisionInput> = {}) => {
+    for (let i = 0; i < count; i++) {
+      ledger.insertShadowDecision(d(from + i, over));
+      settle(from + i, i < wins);
     }
-    expect(status('always_up@t50s', 30)).toBe('on');
+  };
+
+  it('stays off until it has 50 paper decisions, however good they look', () => {
+    batch(1, 49, 49); // 49 straight wins at 60c: +40c/contract, but only 49
+    const e = () => evaluateSwitchboard(ledger, 'mainnet', 10, true).find((x) => x.key === 'always_up@t50s')!;
+    expect(e().status).toBe('off');
+    expect(e().reason).toMatch(/only 49 paper decisions/);
+    batch(50, 1, 1);
+    expect(status('always_up@t50s', 20)).toBe('on');
   });
 
-  it('needs more than +2c to switch on, then stays on until it is losing', () => {
-    // always_up at 97c all-in: each win nets +3c, each loss −97c.
-    const at = (i: number, up: boolean) => {
-      ledger.insertShadowDecision(d(i, { costUp: 0.97 }));
-      settle(i, up);
-    };
-    at(1, true); // +3c → above +2c → on
+  it('needs the average clearly above zero (mean − 2·stderr), not just positive', () => {
+    // 34/50 wins at 60c: +8c/contract, stderr ≈ 6.7c → lower bound < 0 → off.
+    batch(1, 50, 34);
+    const e = evaluateSwitchboard(ledger, 'mainnet', 10, true).find((x) => x.key === 'always_up@t50s')!;
+    expect(e.pnlPerContract).toBeCloseTo(0.08);
+    expect(e.status).toBe('off');
+    expect(e.reason).toMatch(/not clearly profitable/);
+  });
+
+  it('once on, stays on while the average is positive and switches off when it turns red', () => {
+    batch(1, 50, 40); // +20c, clearly positive → on
     expect(status('always_up@t50s', 10)).toBe('on');
-    // Nudge the average into (0, +2c): still on (hysteresis).
-    // (mom_1m_follow first sees data on this row: its only decision, +0.5c.)
-    ledger.insertShadowDecision(d(2, { costUp: 0.995, mom1m: 0.01 })); // +0.5c win
-    settle(2, true);
-    expect(status('always_up@t50s', 20)).toBe('on'); // avg +1.75c: stays on
-    // Never been on and only +0.5c: below the +2c bar, so it stays off.
-    expect(status('mom_1m_follow@t50s', 20)).toBe('off');
+    batch(51, 20, 11); // 51/70 won: +12.9c, no longer "clearly" positive — still on (hysteresis)
+    expect(status('always_up@t50s', 20)).toBe('on');
+    batch(71, 30, 0); // 51/100: −9c → red → off
+    expect(status('always_up@t50s', 30)).toBe('off');
+  });
+
+  it('vetoes a slot when the same signal is clearly losing across all slots', () => {
+    batch(1, 50, 40); // always_up@t50s: +20c
+    // always_up@t30s: 1/200 won at 60c — deeply red, dragging the pooled score down.
+    for (let i = 0; i < 200; i++) {
+      ledger.insertShadowDecision(d(1000 + i, { slot: 't30s' }));
+      settle(1000 + i, i === 0);
+    }
+    const e = evaluateSwitchboard(ledger, 'mainnet', 10, true).find((x) => x.key === 'always_up@t50s')!;
+    expect(e.status).toBe('off');
+    expect(e.reason).toMatch(/clearly losing across all slots/);
+  });
+
+  const live = (i: number, tsMs: number, won: boolean) => {
+    ledger.insertTrade({
+      signalId: 'always_up@t50s',
+      timestampMs: tsMs,
+      mode: 'live',
+      oracleId: `0xlive${i}`,
+      underlyingAsset: 'BTC',
+      expiryMs: tsMs + 60_000,
+      strike: 100,
+      direction: 'up',
+      quantityDusdc: 5,
+      costPrice: 0.6,
+      costUsdc: 3,
+      settled: false,
+      strategy: 'auto_shadow',
+    });
+    ledger.settleTradesForOracle(`0xlive${i}`, won ? 101 : 99, tsMs + 60_000);
+  };
+
+  it('switches off when live fills win far less often than paper, then must relearn', () => {
+    batch(1, 50, 40); // 80% on paper → on at t=10
+    expect(status('always_up@t50s', 10)).toBe('on');
+    for (let i = 0; i < 6; i++) live(i, 100 + i, false); // 0/6 live: P = 0.2^6 ≈ 0.0001
+    const e = evaluateSwitchboard(ledger, 'mainnet', 1_000, true).find((x) => x.key === 'always_up@t50s')!;
+    expect(e.status).toBe('off');
+    expect(e.reason).toMatch(/live 0\/6 wins vs 80% on paper/);
+    expect(e.blockedAtN).toBe(50);
+    // Paper still looks great, but it needs 50 fresh decisions first.
+    batch(51, 49, 49);
+    expect(status('always_up@t50s', 2_000)).toBe('off');
+    batch(100, 1, 1);
+    expect(status('always_up@t50s', 3_000)).toBe('on');
+  });
+
+  it('lets a long shot ride a losing run its hit rate explains (13 straight at 17%)', () => {
+    // always_up at 3c all-in winning 17%: +14c/contract.
+    batch(1, 100, 17, { costUp: 0.03 });
+    expect(status('always_up@t50s', 10)).toBe('on');
+    for (let i = 0; i < 13; i++) live(i, 100 + i, false); // P(0/13 | 17%) ≈ 0.089 > 0.025
+    const e = evaluateSwitchboard(ledger, 'mainnet', 1_000, true).find((x) => x.key === 'always_up@t50s')!;
+    expect(e.status).toBe('on');
+    expect(e.liveN).toBe(13);
+    // …but not a run it can't: 0/25 has P ≈ 0.009.
+    for (let i = 13; i < 25; i++) live(i, 100 + i, false);
+    expect(status('always_up@t50s', 2_000)).toBe('off');
   });
 
   it('backfills old live trades with the score they had when placed, not today\'s', () => {
@@ -129,8 +188,7 @@ describe('switchboard: green on, red off', () => {
   });
 
   it('has no cap on how many strategies run, and scopes them to their checkpoint', () => {
-    ledger.insertShadowDecision(d(1, { mom1m: 0.01, mom5m: 0.01, mom15m: 0.01 }));
-    settle(1, true);
+    batch(1, 50, 45, { mom1m: 0.01, mom5m: 0.01, mom15m: 0.01 });
     const board = evaluateSwitchboard(ledger, 'mainnet', 10, true);
     const on = enabledAt(board, 't50s').map((e) => e.signal);
     expect(on).toEqual(expect.arrayContaining(['always_up', 'mom_1m_follow', 'mom_5m_follow', 'mom_15m_follow']));
@@ -138,7 +196,13 @@ describe('switchboard: green on, red off', () => {
   });
 });
 
-import { HARVEST_KEY, switchboardRealized24h } from '../src/strategy/switchboard.js';
+import {
+  HARVEST_KEY,
+  SWITCHBOARD,
+  binomialLowerTail,
+  strategyStop,
+  switchboardRealized24h,
+} from '../src/strategy/switchboard.js';
 
 describe('harvest v2 on the switchboard', () => {
   let tmp: string;
@@ -188,9 +252,9 @@ describe('harvest v2 on the switchboard', () => {
     const now = Date.now();
     trade('calibration_harvest', 'paper', now - 10 * 3600_000, false); // before live start: ignored
     trade('fade_spike', 'live', now - 5 * 3600_000, false); // live trading starts here
-    for (let i = 0; i < 4; i++) trade('calibration_harvest', 'paper', now - 4 * 3600_000 + i, true);
+    for (let i = 0; i < 50; i++) trade('calibration_harvest', 'paper', now - 4 * 3600_000 + i, true);
     const e = evaluateSwitchboard(ledger, 'mainnet', now, true).find((x) => x.key === HARVEST_KEY)!;
-    expect(e.n).toBe(4);
+    expect(e.n).toBe(50);
     expect(e.pnlPerContract).toBeCloseTo(1 - 4 / 5); // won $5 on $4 each: +20¢ per contract
     expect(e.status).toBe('on');
   });
@@ -201,5 +265,73 @@ describe('harvest v2 on the switchboard', () => {
     trade('calibration_harvest', 'live', now - 3600_000, false, 3);
     trade('fade_spike', 'live', now - 3600_000, false, 2);
     expect(switchboardRealized24h(ledger, now)).toBeCloseTo(-5);
+  });
+});
+
+describe('switchboard stops', () => {
+  let tmp: string;
+  let ledger: LedgerStore;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svx-sbs-'));
+    ledger = new LedgerStore(path.join(tmp, 'svx.sqlite'));
+  });
+  afterEach(() => {
+    ledger.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+  let n = 0;
+  const loss = (signalId: string, strategy: string, tsMs: number, costUsdc: number, mode: 'live' | 'paper' = 'live') => {
+    const oracleId = `s${n++}`;
+    ledger.insertTrade({
+      signalId,
+      timestampMs: tsMs,
+      mode,
+      oracleId,
+      underlyingAsset: 'BTC',
+      expiryMs: tsMs + 60_000,
+      strike: 100,
+      direction: 'up',
+      quantityDusdc: 5,
+      costPrice: 0.8,
+      costUsdc,
+      settled: false,
+      strategy: strategy as never,
+    });
+    ledger.settleTradesForOracle(oracleId, 99, tsMs + 60_000);
+  };
+
+  it('stops a line at −$15 without stopping the others', () => {
+    const now = Date.now();
+    for (let i = 0; i < 4; i++) loss('fade_spike@t50s', 'fade_spike', now - 3600_000 + i, 4); // −$16
+    expect(strategyStop(ledger, now, 'fade_spike@t50s', 0.3)).toBe('line_daily_loss_limit');
+    expect(strategyStop(ledger, now, 'vol_model@t65s', 0.6)).toBeNull();
+  });
+
+  it('never dollar-stops a long-shot clip on its line', () => {
+    const now = Date.now();
+    for (let i = 0; i < 5; i++) loss('longshot_12c@t50s', 'auto_shadow', now - 3600_000 + i, 3.8); // −$19
+    expect(strategyStop(ledger, now, 'longshot_12c@t50s', 0.08)).toBeNull();
+  });
+
+  it('stops everything, long shots included, at the account limit', () => {
+    const now = Date.now();
+    for (let i = 0; i < 8; i++) loss(`line${i}@t50s`, 'fade_spike', now - 3600_000 + i, 4); // −$32 over 8 lines
+    expect(SWITCHBOARD.accountDailyLossLimitUsd).toBe(30);
+    expect(strategyStop(ledger, now, 'longshot_12c@t50s', 0.08)).toBe('account_daily_loss_limit');
+    expect(strategyStop(ledger, now, 'vol_model@t65s', 0.6)).toBe('account_daily_loss_limit');
+  });
+
+  it("stops harvest on its own live losses only", () => {
+    const now = Date.now();
+    for (let i = 0; i < 4; i++) loss('harvest_v2', 'calibration_harvest', now - 3600_000 + i, 4, 'paper');
+    expect(strategyStop(ledger, now, HARVEST_KEY, 0.86)).toBeNull();
+    for (let i = 0; i < 4; i++) loss('harvest_v2', 'calibration_harvest', now - 3600_000 + i, 4);
+    expect(strategyStop(ledger, now, HARVEST_KEY, 0.86)).toBe('line_daily_loss_limit');
+  });
+
+  it('computes the binomial lower tail', () => {
+    expect(binomialLowerTail(13, 0, 0.17)).toBeCloseTo(0.83 ** 13, 10);
+    expect(binomialLowerTail(10, 10, 0.3)).toBe(1);
+    expect(binomialLowerTail(2, 1, 0.5)).toBeCloseTo(0.75, 10);
   });
 });

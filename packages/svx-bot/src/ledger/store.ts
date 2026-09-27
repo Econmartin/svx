@@ -846,6 +846,19 @@ export class LedgerStore {
     return r?.pnl ?? 0;
   }
 
+  /** Realized PnL of one strategy line (signal id, e.g. `fade_spike@t50s`) since `sinceMs`. */
+  realizedSignalPnlSince(signalId: string, sinceMs: number, mode?: 'live' | 'paper'): number {
+    const r = this.db
+      .prepare<[string, number, string | null, string | null], { pnl: number | null }>(
+        `SELECT SUM(pnl_usdc) AS pnl FROM trades
+         WHERE signal_id = ? AND settled = 1 AND pnl_usdc IS NOT NULL
+           AND COALESCE(settled_at_ms, ts_ms) >= ?
+           AND (? IS NULL OR mode = ?)`,
+      )
+      .get(signalId, sinceMs, mode ?? null, mode ?? null);
+    return r?.pnl ?? 0;
+  }
+
   /** Settled trades of one strategy from `sinceMs`, oldest first (both modes). */
   settledStrategyTradesSince(
     strategy: string,

@@ -111,7 +111,16 @@ describe('switchboard executor (paper)', () => {
     expect(ledger.realizedStrategyPnlSince('fade_spike', 0)).toBeCloseTo(9.34 - 9.34 * 0.2, 6);
   });
 
-  it('stands down for the day after the shared loss limit', async () => {
+  it('places one bet when two green strategies pick the same side of the same market', async () => {
+    // fade_spike and fade_spike_any_time fire identically at t50s: both pick DOWN here.
+    const board = [entry('fade_spike', 't50s', 'on'), entry('fade_spike_any_time', 't50s', 'on')];
+    await run(decision(), board);
+    const trades = openAuto();
+    expect(trades).toHaveLength(1);
+    expect(trades[0]!.direction).toBe('down');
+  });
+
+  it('stands down for the day after the line hits its $15 loss limit', async () => {
     const board = [entry('always_up', 't50s', 'on')];
     // Seven $2.19 losses on cheap UP contracts (12c at 93c all-in would bust
     // the cap, so use a 50c market): lose until the $15 stop.

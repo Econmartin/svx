@@ -4,15 +4,24 @@
  *
  * Every shadow signal at every checkpoint is a candidate strategy ("buy the
  * side this signal picks, at the market's reference strike, at this
- * checkpoint"), scored exactly as the shadow scoreboard shows it:
+ * checkpoint"), scored exactly as the shadow scoreboard shows it, per $1
+ * contract after fees.
  *
- *   ON   when its profit per $1 contract (after fees) is above +2¢
- *   OFF  when it falls to zero or below
+ * Audit 2026-09-28: ~150 signal×slot candidates are scored, so a bare
+ * "average above +2¢" rule switched on whichever ones were lucky (with no
+ * edge at all, some longshot slot turns green 97% of the time). Switching
+ * now needs evidence:
  *
- * Between 0 and +2¢ a strategy keeps whatever state it had: it needs a
- * clear margin to switch on, then trades until it is actually losing. This
- * stops strategies hovering around zero from flicking on after one lucky
- * decision (taker_flow, 2026-09-26: on at +0.2¢, two losses, off again).
+ *   ON    ≥ 50 paper decisions AND mean − 2·stderr > 0 (clearly positive),
+ *         and the signal is not clearly losing pooled across all its slots
+ *   OFF   too few decisions, mean ≤ 0, the signal is clearly losing overall,
+ *         or its LIVE fills since switching on win so much less often than
+ *         its paper record that luck can't explain it (binomial tail < 2.5%)
+ *
+ * The live check doubles as the long-shot stop: a 1-in-10 strategy is
+ * judged on whether its losing run is implausible for its hit rate, not on
+ * dollars lost. After a live-check switch-off a strategy must bank 50 fresh
+ * paper decisions before it may switch on again.
  *
  * Re-scored every few minutes, so a strategy switches off as soon as its
  * average turns red and back on when it turns green again. Every
@@ -32,10 +41,18 @@ import { log } from '../util/log.js';
 
 export const SWITCHBOARD = {
   reevaluateMs: 5 * 60_000,
-  /** Profit per $1 contract needed to switch ON (USD). */
-  onAbove: 0.02,
-  /** Switch OFF at or below this (USD per contract). */
+  /** Paper decisions a strategy needs before it may switch ON. */
+  minPaperTrades: 50,
+  /** ON needs mean − onStdErrs·stderr above zero (profit per $1 contract). */
+  onStdErrs: 2,
+  /** Switch OFF at or below this mean (USD per contract). */
   offAtOrBelow: 0,
+  /** A signal whose all-slots t-score is at or below this can't switch on. */
+  pooledVetoT: -2,
+  /** Live wins this improbable given the paper hit rate → OFF. */
+  liveCheckAlpha: 0.025,
+  /** Fresh paper decisions needed after a live-check switch-off. */
+  relearnTrades: 50,
   // Per-trade size cap and a daily loss stop; no cap on how many strategies,
   // positions or trades run — every green strategy trades every signal.
   maxCostUsd: 2.5,
@@ -49,8 +66,53 @@ export const SWITCHBOARD = {
   // same size as the paper trades its score comes from. User-approved
   // 2026-09-27: up to $5 per harvest trade.
   maxHarvestCostUsd: 5,
-  dailyLossLimitUsd: 15,
+  /** Per strategy line (e.g. fade_spike@t50s): stop it for the day at −$15.
+   *  Long-shot clips are exempt — they are judged by the live check. */
+  lineDailyLossLimitUsd: 15,
+  /** Whole-bank backstop over every switchboard line, long shots included. */
+  accountDailyLossLimitUsd: 30,
 } as const;
+
+/** Is a clip at this all-in cost per contract a long shot? */
+export const isLongshot = (costPerContract: number) =>
+  costPerContract <= SWITCHBOARD.longshotMaxCostPerContract;
+
+/**
+ * Why a new clip for strategy `key` must stand down, or null to go ahead.
+ * The account stop covers everything; the per-line $15 stop skips long
+ * shots, whose losing runs are expected and are policed statistically.
+ */
+export function strategyStop(
+  ledger: LedgerStore,
+  nowMs: number,
+  key: string,
+  costPerContract: number,
+): 'account_daily_loss_limit' | 'line_daily_loss_limit' | null {
+  if (switchboardRealized24h(ledger, nowMs) <= -SWITCHBOARD.accountDailyLossLimitUsd) {
+    return 'account_daily_loss_limit';
+  }
+  if (isLongshot(costPerContract)) return null;
+  const since = nowMs - 24 * 3600_000;
+  const line =
+    key === HARVEST_KEY
+      ? ledger.realizedSignalPnlSince('harvest_v2', since, 'live')
+      : ledger.realizedSignalPnlSince(key, since);
+  return line <= -SWITCHBOARD.lineDailyLossLimitUsd ? 'line_daily_loss_limit' : null;
+}
+
+/** P(X ≤ wins) for X ~ Binomial(n, p). */
+export function binomialLowerTail(n: number, wins: number, p: number): number {
+  if (wins >= n) return 1;
+  if (p <= 0) return 1;
+  if (p >= 1) return wins >= n ? 1 : 0;
+  let pmf = (1 - p) ** n; // P(X = 0)
+  let cdf = pmf;
+  for (let k = 1; k <= wins; k++) {
+    pmf *= ((n - k + 1) / k) * (p / (1 - p));
+    cdf += pmf;
+  }
+  return Math.min(1, cdf);
+}
 
 /**
  * Realized PnL over the last 24h that counts against the shared daily stop:
@@ -95,6 +157,15 @@ export interface SwitchEntry {
   status: SwitchStatus;
   /** When the current status began. */
   sinceMs: number;
+  /** Why it is on or off, in words (audit 2026-09-28). */
+  reason?: string;
+  /** Paper hit rate when it last switched on — what live fills must match. */
+  onHitRate?: number;
+  /** Live settled clips / wins since it last switched on. */
+  liveN?: number;
+  liveWins?: number;
+  /** Paper decision count when the live check switched it off. */
+  blockedAtN?: number;
 }
 
 const META_KEY = 'switchboard_v1';
@@ -217,7 +288,8 @@ export function evaluateSwitchboard(
   } catch {
     /* start fresh */
   }
-  const scores = scoreAll(switchInputs(ledger, network));
+  const switchInputsCache = switchInputs(ledger, network);
+  const scores = scoreAll(switchInputsCache);
   // Which (strategy, market) pairs we actually traded live — the rings on
   // the switchboard's result dots.
   const liveStart = ledger.firstLivePredictTradeMs();
@@ -226,23 +298,80 @@ export function evaluateSwitchboard(
       ? []
       : ledger.livePredictTradesSince(liveStart).map((t) => `${t.signalId}|${t.oracleId}`),
   );
+  // Pooled (all-slots) scores: a signal clearly losing overall can't switch on.
+  const pooled = new Map(
+    scoreShadowSignals(switchInputsCache.shadow)
+      .filter((s) => s.slot === 'all')
+      .map((s) => [s.signal, s]),
+  );
+  const liveTrades = liveStart == null ? [] : ledger.livePredictTradesSince(liveStart);
   const entries: SwitchEntry[] = scores.map((s) => {
     const key = `${s.signal}@${s.slot}`;
     const before = prev.get(key);
-    const status: SwitchStatus =
-      before?.status === 'on'
-        ? s.pnlPerContract > SWITCHBOARD.offAtOrBelow
-          ? 'on'
-          : 'off'
-        : s.pnlPerContract > SWITCHBOARD.onAbove
-          ? 'on'
-          : 'off';
+    const tradeKey = s.signal === 'harvest_v2' ? 'harvest_v2' : key;
+    const pool = pooled.get(s.signal);
+    const vetoed =
+      !!pool && pool.pnlStdErr > 0 && pool.pnlPerContract / pool.pnlStdErr <= SWITCHBOARD.pooledVetoT;
+    const lowerBound = s.pnlPerContract - SWITCHBOARD.onStdErrs * s.pnlStdErr;
+    const relearning =
+      before?.blockedAtN != null && s.n < before.blockedAtN + SWITCHBOARD.relearnTrades;
+
+    let status: SwitchStatus;
+    let reason: string;
+    let blockedAtN = relearning ? before?.blockedAtN : undefined;
+    let liveN: number | undefined;
+    let liveWins: number | undefined;
+    const onHitRate = before?.status === 'on' ? (before.onHitRate ?? s.hitRate) : s.hitRate;
+
+    if (before?.status === 'on') {
+      // Live fills since it switched on, judged against its paper hit rate.
+      const fills = liveTrades.filter(
+        (t) => t.signalId === tradeKey && t.settled && t.timestampMs >= before.sinceMs && t.quantityDusdc > 0,
+      );
+      liveN = fills.length;
+      liveWins = fills.filter((t) => (t.payoutUsdc ?? 0) > 0).length;
+      const tail = liveN ? binomialLowerTail(liveN, liveWins, onHitRate) : 1;
+      if (s.n < SWITCHBOARD.minPaperTrades) {
+        status = 'off';
+        reason = `only ${s.n} paper decisions (needs ${SWITCHBOARD.minPaperTrades})`;
+      } else if (s.pnlPerContract <= SWITCHBOARD.offAtOrBelow) {
+        status = 'off';
+        reason = 'average profit turned red';
+      } else if (vetoed) {
+        status = 'off';
+        reason = 'signal clearly losing across all slots';
+      } else if (tail < SWITCHBOARD.liveCheckAlpha) {
+        status = 'off';
+        blockedAtN = s.n;
+        reason = `live ${liveWins}/${liveN} wins vs ${(onHitRate * 100).toFixed(0)}% on paper (p=${tail.toFixed(3)})`;
+      } else {
+        status = 'on';
+        reason = 'holding: still profitable, live fills consistent';
+      }
+    } else if (s.n < SWITCHBOARD.minPaperTrades) {
+      status = 'off';
+      reason = `only ${s.n} paper decisions (needs ${SWITCHBOARD.minPaperTrades})`;
+    } else if (relearning) {
+      status = 'off';
+      reason = `relearning after live check: ${s.n - before!.blockedAtN!}/${SWITCHBOARD.relearnTrades} fresh decisions`;
+    } else if (vetoed) {
+      status = 'off';
+      reason = 'signal clearly losing across all slots';
+    } else if (lowerBound <= 0) {
+      status = 'off';
+      reason = 'not clearly profitable yet (mean − 2·stderr ≤ 0)';
+    } else {
+      status = 'on';
+      reason = 'clearly profitable on paper';
+    }
+
     if (before && before.status !== status) {
       log.info('svx.switchboard.switch', {
         strategy: key,
         to: status,
         n: s.n,
         pnlPerContract: Number(s.pnlPerContract.toFixed(4)),
+        reason,
       });
     }
     return {
@@ -260,6 +389,11 @@ export function evaluateSwitchboard(
       recentPnl: s.recentPnl,
       status,
       sinceMs: before && before.status === status ? before.sinceMs : nowMs,
+      reason,
+      onHitRate: status === 'on' ? onHitRate : undefined,
+      liveN,
+      liveWins,
+      blockedAtN,
     };
   });
   entries.sort((a, b) => b.pnlPerContract - a.pnlPerContract);

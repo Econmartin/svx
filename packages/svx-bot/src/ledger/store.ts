@@ -852,7 +852,19 @@ export class LedgerStore {
    * dashboard show the CURRENT strategies' record and label the legacy tail
    * instead of hiding it inside one number.
    */
-  strategyPnlBreakdown(since24hMs: number): Array<{
+  /** When this ledger's current Predict strategies first traded real money
+   *  (the switchboard's tags) — the start of "mainnet trading". */
+  firstLivePredictTradeMs(): number | null {
+    const r = this.db
+      .prepare<[], { t: number | null }>(
+        `SELECT MIN(ts_ms) AS t FROM trades WHERE mode = 'live'
+         AND strategy IN ('fade_spike', 'auto_shadow', 'edge_jump', 'edge_vol')`,
+      )
+      .get();
+    return r?.t ?? null;
+  }
+
+  strategyPnlBreakdown(since24hMs: number, sinceStartMs?: number | null): Array<{
     strategy: string;
     mode: string;
     trades: number;
@@ -863,10 +875,14 @@ export class LedgerStore {
     pnl24hUsdc: number;
     trades24h: number;
     lastTradeAtMs: number;
+    /** The same totals counting only trades from `sinceStartMs` (the start
+     *  of live mainnet trading), when given. */
+    sinceStart?: { trades: number; settled: number; wins: number; pnlUsdc: number };
   }> {
+    const start = sinceStartMs ?? 0;
     const rows = this.db
       .prepare<
-        [number, number],
+        [{ since24h: number; start: number }],
         {
           strategy: string;
           mode: string;
@@ -878,6 +894,10 @@ export class LedgerStore {
           pnl24h: number;
           trades24h: number;
           last_ts: number;
+          s_trades: number;
+          s_settled: number;
+          s_wins: number;
+          s_pnl: number;
         }
       >(
         `SELECT COALESCE(strategy, 'unknown') AS strategy, mode,
@@ -887,14 +907,18 @@ export class LedgerStore {
            SUM(CASE WHEN settled = 1 AND COALESCE(pnl_usdc, 0) > 0 THEN 1 ELSE 0 END) AS wins,
            COALESCE(SUM(CASE WHEN settled = 1 THEN pnl_usdc END), 0) AS pnl,
            COALESCE(SUM(CASE WHEN settled = 1
-             AND COALESCE(settled_at_ms, ts_ms) >= ? THEN pnl_usdc END), 0) AS pnl24h,
-           SUM(CASE WHEN ts_ms >= ? THEN 1 ELSE 0 END) AS trades24h,
-           MAX(ts_ms) AS last_ts
+             AND COALESCE(settled_at_ms, ts_ms) >= @since24h THEN pnl_usdc END), 0) AS pnl24h,
+           SUM(CASE WHEN ts_ms >= @since24h THEN 1 ELSE 0 END) AS trades24h,
+           MAX(ts_ms) AS last_ts,
+           SUM(CASE WHEN ts_ms >= @start THEN 1 ELSE 0 END) AS s_trades,
+           SUM(CASE WHEN ts_ms >= @start AND settled = 1 THEN 1 ELSE 0 END) AS s_settled,
+           SUM(CASE WHEN ts_ms >= @start AND settled = 1 AND COALESCE(pnl_usdc, 0) > 0 THEN 1 ELSE 0 END) AS s_wins,
+           COALESCE(SUM(CASE WHEN ts_ms >= @start AND settled = 1 THEN pnl_usdc END), 0) AS s_pnl
          FROM trades
          GROUP BY COALESCE(strategy, 'unknown'), mode
          ORDER BY last_ts DESC`,
       )
-      .all(since24hMs, since24hMs);
+      .all({ since24h: since24hMs, start });
     return rows.map((r) => ({
       strategy: r.strategy,
       mode: r.mode,
@@ -906,6 +930,9 @@ export class LedgerStore {
       pnl24hUsdc: r.pnl24h,
       trades24h: r.trades24h,
       lastTradeAtMs: r.last_ts,
+      ...(sinceStartMs != null && {
+        sinceStart: { trades: r.s_trades, settled: r.s_settled, wins: r.s_wins, pnlUsdc: r.s_pnl },
+      }),
     }));
   }
 

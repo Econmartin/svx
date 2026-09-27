@@ -26,6 +26,8 @@ export interface StrategyPnlRow {
   pnl24hUsdc: number;
   trades24h: number;
   lastTradeAtMs: number;
+  /** The same totals from the start of live mainnet trading (status.liveStartMs). */
+  sinceStart?: { trades: number; settled: number; wins: number; pnlUsdc: number };
 }
 
 /** The strategies of the CURRENT stack generation (SVX V2). Everything else
@@ -86,6 +88,8 @@ export interface BotStatus {
   realizedPnl24hUsdc?: number;
   /** Predict-side PnL per (strategy, mode) — the honest headline source. */
   strategyPnl?: StrategyPnlRow[];
+  /** First live trade by the current Predict strategies — "mainnet trading began". */
+  liveStartMs?: number | null;
   /** Cost sitting in open positions (money at risk; not a mark-to-market).
    *  Replaced the old hardcoded `unrealizedPnlUsdc: 0`. */
   openCostUsdc?: number;

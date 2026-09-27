@@ -11,7 +11,7 @@
  *   3. the watched wallets the pattern was learned from
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useApiClient } from '@/lib/network-context';
 import { usePolling } from '@/lib/usePolling';
 import {
@@ -29,6 +29,7 @@ import { StatRow } from '@/components/StatRow';
 import { PageIntro } from '@/components/PageIntro';
 import { FadeHuntRadar } from '@/components/FadeHuntRadar';
 import { SwitchboardCard } from '@/components/SwitchboardCard';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Table,
   TableBody,
@@ -40,6 +41,7 @@ import {
 
 interface PageData {
   rows: StrategyPnlRow[];
+  liveStartMs: number | null;
   open: TradeRecord[];
   closed: TradeRecord[];
   shadow: ShadowSignalScore[];
@@ -98,6 +100,7 @@ export default function FadeSpikePage() {
       // (fade spike, green shadow signals, edge trackers) plus the paper-only
       // harvest v2 / divergence mint.
       rows: (status.strategyPnl ?? []).filter((r) => CURRENT_TAGS.includes(r.strategy)),
+      liveStartMs: status.liveStartMs ?? null,
       // The trade log shows every trade we have made, whatever opened it.
       open,
       closed,
@@ -130,12 +133,51 @@ export default function FadeSpikePage() {
   // Win rate and 24h activity follow the headline mode, so a busy paper
   // strategy (harvest v2) can't blur the live numbers.
   const head = mode === 'live' ? live : paper;
-  const paperBreakdown = (data?.rows ?? [])
-    .filter((r) => r.mode === 'paper' && r.trades > 0)
+  // Paper counts from the start of live mainnet trading (when the bot
+  // reports it): the older paper history predates mainnet fees.
+  const paperRows = (data?.rows ?? [])
+    .filter((r) => r.mode === 'paper')
+    .map((r) => (r.sinceStart ? { ...r, ...r.sinceStart } : r))
+    .filter((r) => r.trades > 0);
+  const paperSince = (data?.rows ?? []).some((r) => r.mode === 'paper' && r.sinceStart)
+    ? (data?.liveStartMs ?? null)
+    : null;
+  const paperTotal = paperRows.length
+    ? paperRows.reduce(
+        (a, r) => ({ pnlUsdc: a.pnlUsdc + r.pnlUsdc, settled: a.settled + r.settled, wins: a.wins + r.wins }),
+        { pnlUsdc: 0, settled: 0, wins: 0 },
+      )
+    : undefined;
+  const paperBreakdown = paperRows
     .sort((a, b) => b.trades - a.trades)
     .map((r) => `${TAG_NAMES[r.strategy] ?? r.strategy} ${formatUsdc(r.pnlUsdc)} (${r.settled})`)
     .join(' · ');
-  const recent = [...(data?.open ?? []), ...(data?.closed ?? [])]
+  // Trade log filter: live by default once there are live trades, so the
+  // busy paper harvest doesn't bury them. Remembered per browser.
+  const [show, setShow] = useState<'live' | 'paper' | 'all'>('live');
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem('svx.fade.tradesFilter');
+      if (v === 'live' || v === 'paper' || v === 'all') setShow(v);
+    } catch {
+      /* private mode */
+    }
+  }, []);
+  const choose = (v: string) => {
+    setShow(v as typeof show);
+    try {
+      window.localStorage.setItem('svx.fade.tradesFilter', v);
+    } catch {
+      /* private mode */
+    }
+  };
+  const allTrades = [...(data?.open ?? []), ...(data?.closed ?? [])];
+  const counts = {
+    live: allTrades.filter((t) => t.mode === 'live').length,
+    paper: allTrades.filter((t) => t.mode === 'paper').length,
+  };
+  const recent = allTrades
+    .filter((t) => show === 'all' || t.mode === show)
     .sort((a, b) => b.timestampMs - a.timestampMs)
     .slice(0, 40);
 
@@ -189,10 +231,15 @@ export default function FadeSpikePage() {
               : 'no live trades yet',
           },
           {
-            label: 'Paper PnL',
-            value: paper ? formatUsdc(paper.pnlUsdc) : '—',
-            tone: paper ? (paper.pnlUsdc >= 0 ? 'win' : 'loss') : 'default',
-            hint: paper ? paperBreakdown || `${paper.settled} settled · ${paper.wins} won` : 'no paper trades yet',
+            label: paperSince
+              ? `Paper PnL since ${new Date(paperSince).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
+              : 'Paper PnL',
+            value: paperTotal ? formatUsdc(paperTotal.pnlUsdc) : '—',
+            tone: paperTotal ? (paperTotal.pnlUsdc >= 0 ? 'win' : 'loss') : 'default',
+            hint: paperTotal
+              ? (paperSince ? 'since live mainnet trading began · ' : '') +
+                (paperBreakdown || `${paperTotal.settled} settled · ${paperTotal.wins} won`)
+              : 'no paper trades yet',
           },
           {
             label: mode === 'live' ? 'Live trades, last 24h' : 'Trades, last 24h',
@@ -213,11 +260,23 @@ export default function FadeSpikePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Trades</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle>Trades</CardTitle>
+            <ToggleGroup value={show} onValueChange={choose} aria-label="Show trades">
+              <ToggleGroupItem value="live">Live{counts.live ? ` · ${counts.live}` : ''}</ToggleGroupItem>
+              <ToggleGroupItem value="paper">Paper{counts.paper ? ` · ${counts.paper}` : ''}</ToggleGroupItem>
+              <ToggleGroupItem value="all">All</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
           <CardDescription>Newest first. Open positions settle within a minute of expiry.</CardDescription>
         </CardHeader>
         <CardContent>
-          {recent.length === 0 ? (
+          {recent.length === 0 && allTrades.length > 0 ? (
+            <p className="text-[14px] text-muted">
+              No {show} trades yet — switch to {show === 'live' ? 'Paper or All' : 'Live or All'} to see the
+              others.
+            </p>
+          ) : recent.length === 0 ? (
             <p className="text-[14px] text-muted">
               No trades yet. The signal fires roughly once every ten minutes, only after a sharp
               last-minute move.

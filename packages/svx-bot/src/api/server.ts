@@ -117,6 +117,7 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
 
   app.get('/status', (_req, res) => {
     const since24h = Date.now() - 24 * 3600_000;
+    const liveStartMs = deps.ledger.firstLivePredictTradeMs();
     const open = deps.ledger.openTrades();
     // All-time realized PnL — survives bot restarts. Falls back to 0 if the
     // ledger is empty.
@@ -164,7 +165,10 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       // Per-(strategy, mode) Predict-side PnL — the honest headline source.
       // realizedPnlUsdc above blends the July V1 poly-arb era with whatever
       // trades today; consumers should sum the rows they mean.
-      strategyPnl: deps.ledger.strategyPnlBreakdown(since24h),
+      strategyPnl: deps.ledger.strategyPnlBreakdown(since24h, liveStartMs),
+      // First live trade by the current Predict strategies: "mainnet trading
+      // began". strategyPnl rows carry sinceStart totals from this instant.
+      liveStartMs,
       // Settled Predict winners not yet claimed into the account (USD), from
       // the last claim sweep. Non-zero for long = payouts are not landing.
       predictUnclaimedUsdc: unclaimedSummary()?.unclaimedUsdc ?? null,

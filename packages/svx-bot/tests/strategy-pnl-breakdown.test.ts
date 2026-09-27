@@ -81,3 +81,28 @@ describe('strategyPnlBreakdown', () => {
     void win;
   });
 });
+
+describe('sinceStart (paper PnL from the start of live mainnet trading)', () => {
+  it('finds the first live switchboard trade and totals only trades after it', () => {
+    const now = Date.now();
+    const start = now - 2 * 24 * 3600_000;
+    // Before live trading: an old paper harvest win and an old HL live row.
+    trade({ strategy: 'calibration_harvest', mode: 'paper', tsMs: start - 3600_000, oracleId: 'o-old' });
+    ledger.settleTradesForOracle('o-old', 63_000, start - 3500_000);
+    trade({ strategy: 'vol_arb', tsMs: start - 10 * 3600_000 }); // not a Predict switchboard tag
+    expect(ledger.firstLivePredictTradeMs()).toBeNull();
+    // Live trading starts.
+    trade({ strategy: 'fade_spike', tsMs: start, oracleId: 'o-live' });
+    expect(ledger.firstLivePredictTradeMs()).toBe(start);
+    // After: one paper harvest loss.
+    trade({ strategy: 'calibration_harvest', mode: 'paper', tsMs: now - 3600_000, oracleId: 'o-new' });
+    ledger.settleTradesForOracle('o-new', 65_000, now - 3500_000);
+
+    const paper = ledger
+      .strategyPnlBreakdown(now - 24 * 3600_000, ledger.firstLivePredictTradeMs())
+      .find((r) => r.strategy === 'calibration_harvest' && r.mode === 'paper')!;
+    expect(paper.settled).toBe(2); // all-time
+    expect(paper.sinceStart).toEqual({ trades: 1, settled: 1, wins: 0, pnlUsdc: -3.85 });
+    expect(ledger.strategyPnlBreakdown(0)[0]!.sinceStart).toBeUndefined();
+  });
+});

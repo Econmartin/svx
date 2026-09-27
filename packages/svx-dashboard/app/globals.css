@@ -2,9 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Geist — Vercel's free, sober, distinctive sans / mono. The taste-skill
-   audit specifically flagged Inter (our previous body font) as the
-   universal AI-default — Geist is the single highest-leverage swap. */
+/* Type: Apple devices render the system face (SF Pro / SF Mono) straight
+   from the viewer's OS — we never host or ship Apple's fonts, which their
+   licence reserves for Apple-platform software. Geist is the fallback
+   everywhere else. */
 @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
 
 :root {
@@ -12,14 +13,31 @@
 }
 
 body {
-  background: #06090a;
-  color: #e6efe8;
-  font-family: 'Geist', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  background: #000000;
+  color: #f5f5f7;
+  font-family: -apple-system, BlinkMacSystemFont, 'Geist', system-ui, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  letter-spacing: -0.011em;
+  letter-spacing: -0.008em;
+}
+
+/* Materials (HIG "thin / regular / thick"): translucent graphite with a
+   blur + saturation boost, so what scrolls beneath tints through. */
+.material-thin {
+  background: rgba(28, 28, 30, 0.55);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+.material-regular {
+  background: rgba(28, 28, 30, 0.72);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+}
+.material-thick {
+  background: rgba(44, 44, 46, 0.86);
+  -webkit-backdrop-filter: blur(40px) saturate(190%);
+  backdrop-filter: blur(40px) saturate(190%);
 }
 
 /* One soft light source above the content — atmosphere, not decoration.
@@ -31,8 +49,8 @@ body {
   pointer-events: none;
   z-index: 0;
   background-image:
-    radial-gradient(ellipse 70% 45% at 50% -10%, rgba(30, 255, 138, 0.075), transparent 70%),
-    radial-gradient(ellipse 50% 40% at 100% 100%, rgba(30, 255, 138, 0.025), transparent 70%);
+    radial-gradient(ellipse 70% 45% at 50% -10%, rgba(48, 209, 88, 0.075), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 100% 100%, rgba(48, 209, 88, 0.025), transparent 70%);
 }
 
 .svx-grid {
@@ -48,14 +66,14 @@ body {
    app, not a terminal. Code and identifiers opt into `.font-code`. */
 .font-mono,
 [class*="tabular-nums"] {
-  font-family: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Geist', system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum', 'cv11', 'ss01';
-  letter-spacing: -0.01em;
+  font-feature-settings: 'tnum';
+  letter-spacing: -0.006em;
 }
 
 .font-code {
-  font-family: 'Geist Mono', ui-monospace, 'JetBrains Mono', Menlo, monospace;
+  font-family: ui-monospace, 'SF Mono', 'Geist Mono', 'JetBrains Mono', Menlo, monospace;
   letter-spacing: 0;
 }
 
@@ -65,9 +83,9 @@ main code {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   padding: 0.05rem 0.35rem;
-  font-family: 'Geist Mono', ui-monospace, Menlo, monospace;
+  font-family: ui-monospace, 'SF Mono', 'Geist Mono', Menlo, monospace;
   font-size: 0.85em;
-  color: #c9d3c8;
+  color: #d1d1d6;
 }
 
 table {
@@ -76,7 +94,7 @@ table {
 }
 th, td {
   padding: 0.7rem 0.9rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  border-bottom: 0.5px solid rgba(84, 84, 88, 0.55);
   text-align: right;
   font-size: 0.86rem;
   font-variant-numeric: tabular-nums;
@@ -89,23 +107,23 @@ tbody tr:last-child td {
   border-bottom: 0;
 }
 th {
-  color: #7a8579;
+  color: #8e8e93;
   font-weight: 500;
   font-size: 0.75rem;
   letter-spacing: 0;
   text-transform: none;
-  border-bottom-color: rgba(255, 255, 255, 0.08);
+  border-bottom-color: rgba(84, 84, 88, 0.65);
 }
 tr td {
   transition: background-color 120ms ease;
 }
 tr:hover td {
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.035);
 }
 
 ::selection {
-  background: rgba(30, 255, 138, 0.30);
-  color: #e6efe8;
+  background: rgba(10, 132, 255, 0.45);
+  color: #f5f5f7;
 }
 
 ::-webkit-scrollbar {
@@ -115,12 +133,16 @@ tr:hover td {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+/* Overlay-style scrollbars, like macOS: thin, inset, only as loud as needed. */
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.14);
   border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
 }
 
 /* Small uppercase eyebrow labels are a terminal idiom; native apps use

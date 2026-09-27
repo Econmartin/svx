@@ -11,6 +11,7 @@
  * the small swings the operator actually cares about.
  */
 
+import { chartTooltip } from '@/lib/chart-theme';
 import type { SurfaceHistoryPoint } from '@/lib/api';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -26,11 +27,11 @@ const PARAMS: Array<{
   /** How many decimals to show on the axis + tooltip. */
   decimals: number;
 }> = [
-  { key: 'a', label: 'a', stroke: '#1eff8a', decimals: 5 },
-  { key: 'b', label: 'b', stroke: '#7dd3fc', decimals: 4 },
-  { key: 'rho', label: 'ρ', stroke: '#ffb648', decimals: 4 },
-  { key: 'm', label: 'm', stroke: '#ff5a5f', decimals: 4 },
-  { key: 'sigma', label: 'σ', stroke: '#c084fc', decimals: 4 },
+  { key: 'a', label: 'a', stroke: '#30d158', decimals: 5 },
+  { key: 'b', label: 'b', stroke: '#64d2ff', decimals: 4 },
+  { key: 'rho', label: 'ρ', stroke: '#ff9f0a', decimals: 4 },
+  { key: 'm', label: 'm', stroke: '#ff453a', decimals: 4 },
+  { key: 'sigma', label: 'σ', stroke: '#bf5af2', decimals: 4 },
 ];
 
 export function SviHistoryChart({ points }: Props) {
@@ -89,7 +90,7 @@ function Sparkline({
       <div className="h-16 -mx-1">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 2, right: 4, left: 4, bottom: 2 }}>
-            <CartesianGrid strokeDasharray="2 3" stroke="#1c2230" vertical={false} />
+            <CartesianGrid strokeDasharray="2 3" stroke="rgba(84,84,88,0.45)" vertical={false} />
             <XAxis dataKey="tsMs" hide />
             <YAxis
               tick={false}
@@ -98,12 +99,7 @@ function Sparkline({
               domain={['auto', 'auto']}
             />
             <Tooltip
-              contentStyle={{
-                background: '#11141b',
-                border: '1px solid #1c2230',
-                borderRadius: 6,
-                fontSize: 11,
-              }}
+              {...chartTooltip}
               labelFormatter={(v) => new Date(Number(v)).toLocaleTimeString()}
               formatter={(v: number) => [v.toFixed(decimals), label]}
             />

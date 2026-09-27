@@ -26,6 +26,7 @@
  * glance which buckets are statistically meaningful.
  */
 
+import { chartTooltip } from '@/lib/chart-theme';
 import { useMemo } from 'react';
 import {
   ScatterChart,
@@ -125,19 +126,19 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart margin={{ top: 5, right: 16, left: 0, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" strokeOpacity={0.5} />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(84,84,88,0.45)" strokeOpacity={0.5} />
             <XAxis
               type="number"
               dataKey="predicted"
               domain={[0, 1]}
               ticks={[0, 0.25, 0.5, 0.75, 1]}
               tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-              tick={{ fontSize: 11, fill: '#7a8579' }}
+              tick={{ fontSize: 11, fill: '#8e8e93' }}
               label={{
                 value: 'Predicted win probability',
                 position: 'bottom',
                 offset: 5,
-                fill: '#7a8579',
+                fill: '#8e8e93',
                 fontSize: 11,
               }}
             />
@@ -147,40 +148,35 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
               domain={[0, 1]}
               ticks={[0, 0.25, 0.5, 0.75, 1]}
               tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-              tick={{ fontSize: 11, fill: '#7a8579' }}
+              tick={{ fontSize: 11, fill: '#8e8e93' }}
               width={50}
               label={{
                 value: 'Actual hit rate',
                 angle: -90,
                 position: 'left',
                 offset: -10,
-                fill: '#7a8579',
+                fill: '#8e8e93',
                 fontSize: 11,
               }}
             />
             <ZAxis type="number" dataKey="n" range={[60, 360]} />
             <Tooltip
               cursor={{ strokeDasharray: '3 3' }}
-              contentStyle={{
-                background: '#0c1110',
-                border: '1px solid #1a2520',
-                borderRadius: 6,
-                fontSize: 12,
-              }}
+              {...chartTooltip}
               formatter={(v: number, name: string) => {
                 if (name === 'ideal') return [`${(v * 100).toFixed(0)}%`, 'ideal'];
                 return [`${(v * 100).toFixed(1)}%`, name];
               }}
               labelFormatter={() => ''}
             />
-            <ReferenceLine y={0} stroke="#28342e" />
-            <ReferenceLine x={0} stroke="#28342e" />
+            <ReferenceLine y={0} stroke="rgba(84,84,88,0.45)" />
+            <ReferenceLine x={0} stroke="rgba(84,84,88,0.45)" />
             {/* y = x diagonal — perfect calibration. */}
             <Line
               data={diagonal}
               dataKey="ideal"
               type="linear"
-              stroke="#fbbf24"
+              stroke="#ffd60a"
               strokeWidth={1.5}
               strokeDasharray="4 4"
               dot={false}
@@ -195,7 +191,7 @@ export function CalibrationChart({ closed, isMainnet }: Props) {
                 // red; under-confident (above diagonal) = blue.
                 const miss = b.actual - b.predicted;
                 const color =
-                  Math.abs(miss) < 0.05 ? '#1eff8a' : miss < 0 ? '#ff5a5f' : '#5af9fb';
+                  Math.abs(miss) < 0.05 ? '#30d158' : miss < 0 ? '#ff453a' : '#64d2ff';
                 return <Cell key={i} fill={color} fillOpacity={0.8} />;
               })}
             </Scatter>

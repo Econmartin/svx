@@ -217,7 +217,7 @@ function ActionBadge({ action, reason }: { action: string; reason?: string }) {
     return <Badge variant="outline">sub-thresh</Badge>;
   }
   return (
-    <Badge variant="default" title={reason}>
+    <Badge variant="default">
       {reason ?? 'filtered'}
     </Badge>
   );
@@ -294,18 +294,18 @@ function CalibrationScatter({ data }: { data: ScatterPoint[] }) {
     <div className="h-64">
       <ResponsiveContainer width="100%" height="100%">
         <ScatterChart margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1c2230" />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(84,84,88,0.45)" />
           <XAxis
             dataKey="x"
             type="number"
             domain={[0, 1]}
             tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-            tick={{ fontSize: 11, fill: '#8c93a3' }}
+            tick={{ fontSize: 11, fill: '#8e8e93' }}
             label={{
               value: 'Venue quote (Poly ask · V2 board)',
               position: 'insideBottom',
               offset: -2,
-              fill: '#8c93a3',
+              fill: '#8e8e93',
               fontSize: 11,
             }}
           />
@@ -314,20 +314,20 @@ function CalibrationScatter({ data }: { data: ScatterPoint[] }) {
             type="number"
             domain={[0, 1]}
             tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-            tick={{ fontSize: 11, fill: '#8c93a3' }}
+            tick={{ fontSize: 11, fill: '#8e8e93' }}
             label={{
               value: 'Predict ↑',
               angle: -90,
               position: 'insideLeft',
-              fill: '#8c93a3',
+              fill: '#8e8e93',
               fontSize: 11,
               offset: 8,
             }}
           />
           <Tooltip
             contentStyle={{
-              background: '#11141b',
-              border: '1px solid #1c2230',
+              background: '#1c1c1e',
+              border: '1px solid rgba(84,84,88,0.45)',
               borderRadius: 6,
               fontSize: 12,
             }}
@@ -359,7 +359,7 @@ function CalibrationScatter({ data }: { data: ScatterPoint[] }) {
               { x: 0, y: 0 },
               { x: 1, y: 1 },
             ]}
-            stroke="#2a3142"
+            stroke="#3a3a3c"
             strokeDasharray="3 3"
           />
           <Scatter data={data}>
@@ -368,10 +368,10 @@ function CalibrationScatter({ data }: { data: ScatterPoint[] }) {
                 key={i}
                 fill={
                   p.action === 'paper_executed' || p.action === 'live_executed'
-                    ? '#10b981'
+                    ? '#30d158'
                     : p.action === 'sub_threshold'
-                      ? '#7dd3fc'
-                      : '#6b7280'
+                      ? '#64d2ff'
+                      : '#8e8e93'
                 }
                 fillOpacity={0.7}
               />

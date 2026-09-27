@@ -125,21 +125,21 @@ export default function SurfacePage() {
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={surface.points} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1c2230" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(84,84,88,0.45)" />
                       <XAxis
                         dataKey="strike"
-                        tick={{ fontSize: 11, fill: '#8c93a3' }}
+                        tick={{ fontSize: 11, fill: '#8e8e93' }}
                         tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                       />
                       <YAxis
-                        tick={{ fontSize: 11, fill: '#8c93a3' }}
+                        tick={{ fontSize: 11, fill: '#8e8e93' }}
                         tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
                         domain={['auto', 'auto']}
                       />
                       <Tooltip
                         contentStyle={{
-                          background: '#11141b',
-                          border: '1px solid #1c2230',
+                          background: '#1c1c1e',
+                          border: '1px solid rgba(84,84,88,0.45)',
                           borderRadius: 6,
                           fontSize: 12,
                         }}
@@ -148,11 +148,11 @@ export default function SurfacePage() {
                       />
                       <ReferenceLine
                         x={surface.forward}
-                        stroke="#7dd3fc"
+                        stroke="#64d2ff"
                         strokeDasharray="4 4"
-                        label={{ value: 'F', fill: '#7dd3fc', fontSize: 11, position: 'top' }}
+                        label={{ value: 'F', fill: '#64d2ff', fontSize: 11, position: 'top' }}
                       />
-                      <Line type="monotone" dataKey="iv" stroke="#7dd3fc" dot={false} strokeWidth={2.5} />
+                      <Line type="monotone" dataKey="iv" stroke="#64d2ff" dot={false} strokeWidth={2.5} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -172,25 +172,25 @@ export default function SurfacePage() {
                     <AreaChart data={surface.points} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
                       <defs>
                         <linearGradient id="upFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#10b981" stopOpacity={0.25} />
-                          <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                          <stop offset="0%" stopColor="#30d158" stopOpacity={0.25} />
+                          <stop offset="100%" stopColor="#30d158" stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1c2230" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(84,84,88,0.45)" />
                       <XAxis
                         dataKey="strike"
-                        tick={{ fontSize: 11, fill: '#8c93a3' }}
+                        tick={{ fontSize: 11, fill: '#8e8e93' }}
                         tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                       />
                       <YAxis
                         domain={[0, 1]}
-                        tick={{ fontSize: 11, fill: '#8c93a3' }}
+                        tick={{ fontSize: 11, fill: '#8e8e93' }}
                         tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
                       />
                       <Tooltip
                         contentStyle={{
-                          background: '#11141b',
-                          border: '1px solid #1c2230',
+                          background: '#1c1c1e',
+                          border: '1px solid rgba(84,84,88,0.45)',
                           borderRadius: 6,
                           fontSize: 12,
                         }}
@@ -199,14 +199,14 @@ export default function SurfacePage() {
                       />
                       <ReferenceLine
                         x={surface.forward}
-                        stroke="#7dd3fc"
+                        stroke="#64d2ff"
                         strokeDasharray="4 4"
                       />
-                      <ReferenceLine y={0.5} stroke="#2a3142" strokeDasharray="2 2" />
+                      <ReferenceLine y={0.5} stroke="#3a3a3c" strokeDasharray="2 2" />
                       <Area
                         type="monotone"
                         dataKey="up"
-                        stroke="#10b981"
+                        stroke="#30d158"
                         strokeWidth={2.5}
                         fill="url(#upFill)"
                       />

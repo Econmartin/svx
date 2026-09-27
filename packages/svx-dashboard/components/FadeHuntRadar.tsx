@@ -355,17 +355,17 @@ function Trace({
       aria-label="BTC versus strike over the last minute"
     >
       {/* trigger zones beyond ±band */}
-      <rect x={0} y={0} width={W} height={Math.max(0, y(band))} fill="rgba(30,255,138,0.05)" />
-      <rect x={0} y={y(-band)} width={W} height={Math.max(0, H - y(-band))} fill="rgba(30,255,138,0.05)" />
-      <line x1={0} x2={W} y1={y(band)} y2={y(band)} stroke="rgba(30,255,138,0.35)" strokeDasharray="4 5" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-      <line x1={0} x2={W} y1={y(-band)} y2={y(-band)} stroke="rgba(30,255,138,0.35)" strokeDasharray="4 5" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+      <rect x={0} y={0} width={W} height={Math.max(0, y(band))} fill="rgba(48,209,88,0.05)" />
+      <rect x={0} y={y(-band)} width={W} height={Math.max(0, H - y(-band))} fill="rgba(48,209,88,0.05)" />
+      <line x1={0} x2={W} y1={y(band)} y2={y(band)} stroke="rgba(48,209,88,0.35)" strokeDasharray="4 5" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+      <line x1={0} x2={W} y1={y(-band)} y2={y(-band)} stroke="rgba(48,209,88,0.35)" strokeDasharray="4 5" strokeWidth={1} vectorEffect="non-scaling-stroke" />
       {/* the strike */}
       <line x1={0} x2={W} y1={y(0)} y2={y(0)} stroke="rgba(255,255,255,0.18)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
       {path && (
         <path
           d={path}
           fill="none"
-          stroke={outside ? '#1eff8a' : 'rgba(230,239,232,0.85)'}
+          stroke={outside ? '#30d158' : 'rgba(230,239,232,0.85)'}
           strokeWidth={1.75}
           strokeLinejoin="round"
           strokeLinecap="round"
@@ -378,7 +378,7 @@ function Trace({
         aria-hidden
         className={cn(
           'absolute -translate-x-1/2 -translate-y-1/2 rounded-full',
-          outside ? 'bg-accent shadow-[0_0_12px_rgba(30,255,138,0.7)]' : 'bg-fg',
+          outside ? 'bg-accent shadow-[0_0_12px_rgba(48,209,88,0.7)]' : 'bg-fg',
           armed ? 'h-2.5 w-2.5 animate-pulse' : 'h-2 w-2',
         )}
         style={{ left: `${(x(last.t) / W) * 100}%`, top: `${(y(last.v) / H) * 100}%` }}

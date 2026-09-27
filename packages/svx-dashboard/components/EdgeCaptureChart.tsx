@@ -17,6 +17,7 @@
  * the strategy delivers what its signal claims.
  */
 
+import { chartTooltip } from '@/lib/chart-theme';
 import { useMemo } from 'react';
 import {
   ScatterChart,
@@ -110,18 +111,18 @@ export function EdgeCaptureChart({ closed, spreadThreshold = 0.03 }: Props) {
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart margin={{ top: 5, right: 16, left: 0, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" strokeOpacity={0.5} />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(84,84,88,0.45)" strokeOpacity={0.5} />
             <XAxis
               type="number"
               dataKey="edge"
               name="Entry edge"
               tickFormatter={(v) => `${(v * 100).toFixed(0)}pp`}
-              tick={{ fontSize: 11, fill: '#7a8579' }}
+              tick={{ fontSize: 11, fill: '#8e8e93' }}
               label={{
                 value: 'Entry edge (Predict − Polymarket, pp)',
                 position: 'bottom',
                 offset: 5,
-                fill: '#7a8579',
+                fill: '#8e8e93',
                 fontSize: 11,
               }}
               domain={['auto', 'auto']}
@@ -131,18 +132,13 @@ export function EdgeCaptureChart({ closed, spreadThreshold = 0.03 }: Props) {
               dataKey="ret"
               name="Realized return"
               tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-              tick={{ fontSize: 11, fill: '#7a8579' }}
+              tick={{ fontSize: 11, fill: '#8e8e93' }}
               width={60}
               domain={['auto', 'auto']}
             />
             <Tooltip
               cursor={{ strokeDasharray: '3 3' }}
-              contentStyle={{
-                background: '#0c1110',
-                border: '1px solid #1a2520',
-                borderRadius: 6,
-                fontSize: 12,
-              }}
+              {...chartTooltip}
               formatter={(v: number, name: string) => {
                 if (name === 'fit') return [`${(v * 100).toFixed(1)}%`, 'fit'];
                 if (name === 'Realized return') return [`${(v * 100).toFixed(1)}%`, 'return'];
@@ -151,17 +147,17 @@ export function EdgeCaptureChart({ closed, spreadThreshold = 0.03 }: Props) {
               }}
               labelFormatter={() => ''}
             />
-            <ReferenceLine y={0} stroke="#28342e" strokeDasharray="2 2" />
+            <ReferenceLine y={0} stroke="rgba(84,84,88,0.45)" strokeDasharray="2 2" />
             <ReferenceLine
               x={spreadThreshold}
-              stroke="#5af9fb"
+              stroke="#64d2ff"
               strokeDasharray="2 2"
               strokeOpacity={0.5}
-              label={{ value: 'open thresh', fill: '#5af9fb', fontSize: 10, position: 'top' }}
+              label={{ value: 'open thresh', fill: '#64d2ff', fontSize: 10, position: 'top' }}
             />
             <Scatter name="Trades" data={points}>
               {points.map((p, i) => (
-                <Cell key={i} fill={p.win ? '#1eff8a' : '#ff5a5f'} fillOpacity={0.7} />
+                <Cell key={i} fill={p.win ? '#30d158' : '#ff453a'} fillOpacity={0.7} />
               ))}
             </Scatter>
             {fitData.length === 2 && (
@@ -169,7 +165,7 @@ export function EdgeCaptureChart({ closed, spreadThreshold = 0.03 }: Props) {
                 data={fitData}
                 dataKey="fit"
                 type="linear"
-                stroke="#fbbf24"
+                stroke="#ffd60a"
                 strokeWidth={1.5}
                 dot={false}
                 isAnimationActive={false}

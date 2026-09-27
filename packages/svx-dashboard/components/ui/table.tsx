@@ -21,7 +21,7 @@ export function TableHeader({
 }: React.HTMLAttributes<HTMLTableSectionElement>) {
   return (
     <thead
-      className={cn('[&_tr]:border-b [&_tr]:border-border/80', className)}
+      className={cn('[&_tr]:border-b-[0.5px] [&_tr]:border-[rgba(84,84,88,0.65)]', className)}
       {...props}
     />
   );
@@ -41,7 +41,7 @@ export function TableRow({
   return (
     <tr
       className={cn(
-        'border-b border-border/50 last:border-b-0 transition-colors hover:bg-surface-elevated/50',
+        'border-b-[0.5px] border-[rgba(84,84,88,0.45)] last:border-b-0 transition-colors hover:bg-white/[0.035]',
         className,
       )}
       {...props}

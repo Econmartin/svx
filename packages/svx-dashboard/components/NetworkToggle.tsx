@@ -16,6 +16,7 @@ export function NetworkToggle() {
   return (
     <ToggleGroup
       value={network}
+      aria-label="Network"
       onValueChange={(v) => setNetwork(v as 'testnet' | 'mainnet')}
     >
       <ToggleGroupItem value="testnet">

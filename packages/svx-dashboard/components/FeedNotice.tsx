@@ -35,7 +35,7 @@ export function FeedNotice() {
   return (
     <div
       role="status"
-      className="fixed bottom-12 right-5 z-50 w-[min(340px,calc(100vw-2.5rem))] rounded-2xl border border-white/[0.09] bg-[#0d1211]/85 backdrop-blur-2xl backdrop-saturate-150 px-4 py-3.5 shadow-pop animate-fade-in"
+      className="fixed bottom-12 right-5 z-50 w-[min(340px,calc(100vw-2.5rem))] rounded-2xl border border-white/[0.09] bg-[#111113]/85 backdrop-blur-2xl backdrop-saturate-150 px-4 py-3.5 shadow-pop animate-fade-in"
     >
       <div className="flex items-start gap-3">
         <span aria-hidden className="mt-[5px] inline-block h-2 w-2 flex-shrink-0 rounded-full bg-accent" />

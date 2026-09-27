@@ -297,23 +297,23 @@ function IvRvChart({
     <div className="h-64">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1c2230" />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(84,84,88,0.45)" />
           <XAxis
             dataKey="ts"
             type="number"
             domain={['auto', 'auto']}
             tickFormatter={(v) => new Date(v).toLocaleTimeString()}
-            tick={{ fontSize: 11, fill: '#8c93a3' }}
+            tick={{ fontSize: 11, fill: '#8e8e93' }}
             scale="time"
           />
           <YAxis
-            tick={{ fontSize: 11, fill: '#8c93a3' }}
+            tick={{ fontSize: 11, fill: '#8e8e93' }}
             tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
           />
           <Tooltip
             contentStyle={{
-              background: '#11141b',
-              border: '1px solid #1c2230',
+              background: '#1c1c1e',
+              border: '1px solid rgba(84,84,88,0.45)',
               borderRadius: 6,
               fontSize: 12,
             }}
@@ -321,15 +321,15 @@ function IvRvChart({
             formatter={(v: number, name: string) => [`${(v * 100).toFixed(2)}%`, name]}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <ReferenceLine y={threshold} stroke="#f59e0b" strokeDasharray="4 4" />
-          <ReferenceLine y={-threshold} stroke="#f59e0b" strokeDasharray="4 4" />
-          <Line type="monotone" dataKey="iv" name="Predict IV" stroke="#10b981" strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="rv" name="HL realized vol" stroke="#7dd3fc" strokeWidth={2} dot={false} />
+          <ReferenceLine y={threshold} stroke="#ff9f0a" strokeDasharray="4 4" />
+          <ReferenceLine y={-threshold} stroke="#ff9f0a" strokeDasharray="4 4" />
+          <Line type="monotone" dataKey="iv" name="Predict IV" stroke="#30d158" strokeWidth={2} dot={false} />
+          <Line type="monotone" dataKey="rv" name="HL realized vol" stroke="#64d2ff" strokeWidth={2} dot={false} />
           <Line
             type="monotone"
             dataKey="spread"
             name="IV − RV"
-            stroke="#f59e0b"
+            stroke="#ff9f0a"
             strokeWidth={1}
             dot={false}
           />

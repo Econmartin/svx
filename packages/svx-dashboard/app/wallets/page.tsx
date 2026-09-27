@@ -14,6 +14,7 @@
  * here for hackathon demo purposes.
  */
 
+import { Tooltip } from '@/components/ui/popover';
 import { useCallback } from 'react';
 import { useApiClient, useNetwork } from '@/lib/network-context';
 import { formatPct, formatRelative, formatUsdc, type WalletsSnapshot } from '@/lib/api';
@@ -270,9 +271,11 @@ function PolygonCard({
               {polygon.executionEnabled ? 'exec on' : 'exec off'}
             </Badge>
             {polygon.signatureMode && (
-              <Badge variant="outline" title="Signature mode used for CLOB orders">
-                {polygon.signatureMode}
-              </Badge>
+              <Tooltip content="Signature mode used for CLOB orders">
+                <Badge variant="outline" tabIndex={0}>
+                  {polygon.signatureMode}
+                </Badge>
+              </Tooltip>
             )}
           </div>
         </CardTitle>

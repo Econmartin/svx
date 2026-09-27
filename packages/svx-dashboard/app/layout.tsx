@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#06090a',
+  themeColor: '#000000',
 };
 
 /**
@@ -47,7 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Skip to content
           </a>
 
-          <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-bg/80 backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-bg/60">
+          <header className="sticky top-0 z-40 border-b-[0.5px] border-white/[0.1] bg-black/70 backdrop-blur-2xl backdrop-saturate-[180%] supports-[backdrop-filter]:bg-black/55">
             {/* Two-row header on mobile (brand + toggles on top, scrollable
                 nav below); single-row from md up. Keeps each row well within
                 the viewport instead of clipping the nav off-screen. */}
@@ -60,7 +60,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 >
                   <span
                     aria-hidden
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-[9px] bg-gradient-to-b from-[#3dff9c] to-[#10d974] text-bg font-bold text-[15px] tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_1px_2px_rgba(0,0,0,0.4)] transition-transform duration-200 group-hover:scale-[1.04]"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-[9px] bg-gradient-to-b from-[#4be072] to-[#28b84b] text-bg font-bold text-[15px] tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_1px_2px_rgba(0,0,0,0.4)] transition-transform duration-200 group-hover:scale-[1.04]"
                   >
                     S
                   </span>

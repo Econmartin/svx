@@ -558,7 +558,7 @@ function SignalActionBadge({ action, reason }: { action: string; reason?: string
     return <Badge variant="outline">sub</Badge>;
   }
   return (
-    <Badge variant="default" title={reason}>
+    <Badge variant="default">
       {reason ?? 'filt'}
     </Badge>
   );

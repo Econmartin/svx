@@ -247,17 +247,17 @@ function PnlHistogram({
     <div className="h-48">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={buckets} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1c2230" />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(84,84,88,0.45)" />
           <XAxis
             dataKey="label"
-            tick={{ fontSize: 11, fill: '#8c93a3' }}
+            tick={{ fontSize: 11, fill: '#8e8e93' }}
             interval={0}
           />
-          <YAxis tick={{ fontSize: 11, fill: '#8c93a3' }} allowDecimals={false} />
+          <YAxis tick={{ fontSize: 11, fill: '#8e8e93' }} allowDecimals={false} />
           <Tooltip
             contentStyle={{
-              background: '#11141b',
-              border: '1px solid #1c2230',
+              background: '#1c1c1e',
+              border: '1px solid rgba(84,84,88,0.45)',
               borderRadius: 6,
               fontSize: 12,
             }}
@@ -270,7 +270,7 @@ function PnlHistogram({
           />
           <Bar dataKey="count">
             {buckets.map((b, i) => (
-              <Cell key={i} fill={b.center >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.85} />
+              <Cell key={i} fill={b.center >= 0 ? '#30d158' : '#ff453a'} fillOpacity={0.85} />
             ))}
           </Bar>
         </BarChart>

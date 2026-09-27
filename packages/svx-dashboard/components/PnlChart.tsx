@@ -7,6 +7,7 @@
  * Total appears (Predict's dUSDC PnL only — no Poly/HL data).
  */
 
+import { chartTooltip } from '@/lib/chart-theme';
 import {
   AreaChart,
   Area,
@@ -95,7 +96,7 @@ export function PnlChart({
     points.push({ ts: nowMs, total: last.total, poly: last.poly, hl: last.hl });
   }
 
-  const totalColor = cumTotal >= 0 ? '#1eff8a' : '#ff5a5f';
+  const totalColor = cumTotal >= 0 ? '#30d158' : '#ff453a';
 
   // Generate one tick per midnight UTC across the visible time span so the
   // x-axis shows "13 Jun · 14 Jun · 15 Jun" once each instead of recharts'
@@ -128,37 +129,32 @@ export function PnlChart({
               <stop offset="95%" stopColor={totalColor} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1a2520" strokeOpacity={0.5} />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(84,84,88,0.45)" strokeOpacity={0.5} />
           <XAxis
             dataKey="ts"
             type="number"
             domain={['auto', 'auto']}
             ticks={spansLessThanADay ? undefined : dayTicks}
             tickFormatter={tickFormat}
-            tick={{ fontSize: 11, fill: '#7a8579' }}
+            tick={{ fontSize: 11, fill: '#8e8e93' }}
             scale="time"
           />
           <YAxis
-            tick={{ fontSize: 11, fill: '#7a8579' }}
+            tick={{ fontSize: 11, fill: '#8e8e93' }}
             domain={['auto', 'auto']}
             tickFormatter={(v) => `${v >= 0 ? '+' : ''}$${v.toFixed(2)}`}
             width={70}
           />
           <Tooltip
             labelFormatter={(v) => new Date(Number(v)).toLocaleString()}
-            contentStyle={{
-              background: '#0c1110',
-              border: '1px solid #1a2520',
-              borderRadius: 6,
-              fontSize: 12,
-            }}
+            {...chartTooltip}
             formatter={(v: number, name: string) => [
               `${v >= 0 ? '+' : ''}$${v.toFixed(4)}`,
               name,
             ]}
           />
           {showLegs && <Legend wrapperStyle={{ fontSize: 12 }} />}
-          <ReferenceLine y={0} stroke="#28342e" strokeDasharray="2 2" />
+          <ReferenceLine y={0} stroke="rgba(84,84,88,0.45)" strokeDasharray="2 2" />
           <Area
             type="stepAfter"
             dataKey="total"
@@ -168,10 +164,10 @@ export function PnlChart({
             fill="url(#totalFill)"
           />
           {showLegs && (
-            <Line type="stepAfter" dataKey="poly" name="Polymarket" stroke="#5af9fb" strokeWidth={1.5} dot={false} />
+            <Line type="stepAfter" dataKey="poly" name="Polymarket" stroke="#64d2ff" strokeWidth={1.5} dot={false} />
           )}
           {showLegs && (
-            <Line type="stepAfter" dataKey="hl" name="Hyperliquid hedge" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
+            <Line type="stepAfter" dataKey="hl" name="Hyperliquid hedge" stroke="#ff9f0a" strokeWidth={1.5} dot={false} />
           )}
         </ComposedChart>
       </ResponsiveContainer>

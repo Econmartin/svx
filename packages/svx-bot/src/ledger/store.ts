@@ -2946,7 +2946,7 @@ export interface CrossVenuePairRow {
 export interface EdgeProbeInput {
   id: string;
   network: string;
-  kind: 'jump' | 'vol_regime';
+  kind: 'jump' | 'vol_regime' | 'tail';
   marketId: string;
   slot: string;
   expiryMs: number;

@@ -14,7 +14,14 @@ import { bankGauge } from '../ops/bank-gauge.js';
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
 import { scoreCrossVenue } from '../ops/cross-venue.js';
 import { reportWatchedWallets } from '../ops/wallet-watch.js';
-import { scoreJumps, scoreVolRegime, type JumpPayload, type VolRegimePayload } from '../ops/edge-trackers.js';
+import {
+  scoreJumps,
+  scoreTail,
+  scoreVolRegime,
+  type JumpPayload,
+  type TailPayload,
+  type VolRegimePayload,
+} from '../ops/edge-trackers.js';
 import { suiNetwork } from '../exec/sui-client.js';
 import cors from 'cors';
 import type { LedgerStore } from '../ledger/store.js';
@@ -538,6 +545,8 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
       volRegime: scoreVolRegime(
         deps.ledger.settledEdgeProbes<VolRegimePayload>(network, 'vol_regime', sinceMs),
       ),
+      // Far up/down strikes at 2/3/5¢ per checkpoint, split by vol regime.
+      tail: scoreTail(deps.ledger.settledEdgeProbes<TailPayload>(network, 'tail', sinceMs)),
     });
   });
 

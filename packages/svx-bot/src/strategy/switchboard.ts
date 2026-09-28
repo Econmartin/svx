@@ -32,7 +32,9 @@ import type { EdgeProbeRow, LedgerStore, ShadowDecisionRow } from '../ledger/sto
 import { scoreShadowSignals } from '../ops/shadow-signals.js';
 import {
   edgeSwitchScores,
+  tailSwitchScores,
   type JumpPayload,
+  type TailPayload,
   type VolRegimePayload,
 } from '../ops/edge-trackers.js';
 import { sequenceScore } from '../ops/edge-trackers.js';
@@ -186,7 +188,9 @@ export function strategyTagFor(
 ): 'fade_spike' | 'auto_shadow' | 'edge_jump' | 'edge_vol' | 'calibration_harvest' {
   if (signal === 'harvest_v2') return 'calibration_harvest';
   if (signal === 'binance_jump') return 'edge_jump';
-  if (signal === 'vol_model') return 'edge_vol';
+  // Tail strangles ride the vol-model tag (same tracker family); their
+  // signal_id (tail@t2m, tail_hot@t70s) keeps them apart.
+  if (signal === 'vol_model' || signal === 'tail' || signal === 'tail_hot') return 'edge_vol';
   return signal.startsWith('fade_spike') ? 'fade_spike' : 'auto_shadow';
 }
 
@@ -195,6 +199,7 @@ interface SwitchInputs {
   shadow: ShadowDecisionRow[];
   jumps: Array<EdgeProbeRow<JumpPayload>>;
   vols: Array<EdgeProbeRow<VolRegimePayload>>;
+  tails: Array<EdgeProbeRow<TailPayload>>;
   harvest: ReturnType<LedgerStore['settledStrategyTradesSince']>;
 }
 
@@ -204,6 +209,7 @@ function switchInputs(ledger: LedgerStore, network: string): SwitchInputs {
     shadow: ledger.settledShadowDecisions(network, 0),
     jumps: ledger.settledEdgeProbes<JumpPayload>(network, 'jump', 0),
     vols: ledger.settledEdgeProbes<VolRegimePayload>(network, 'vol_regime', 0),
+    tails: ledger.settledEdgeProbes<TailPayload>(network, 'tail', 0),
     harvest:
       liveStart == null ? [] : ledger.settledStrategyTradesSince('calibration_harvest', liveStart),
   };
@@ -215,6 +221,7 @@ function scoreAll(inp: SwitchInputs): ShadowSignalScore[] {
     // Edge trackers (ops/edge-trackers.ts): the Binance-jump and vol-model
     // strategies, on the same on/off rule.
     ...edgeSwitchScores(inp.jumps, inp.vols),
+    ...tailSwitchScores(inp.tails),
   ];
   const harvest = sequenceScore(
     'harvest_v2',
@@ -242,6 +249,7 @@ export function scoreAsOf(inp: SwitchInputs, key: string, atMs: number): number 
     shadow: inp.shadow.filter((r) => (r.expiryMs ?? Infinity) <= atMs),
     jumps: inp.jumps.filter((r) => r.expiryMs <= atMs),
     vols: inp.vols.filter((r) => r.expiryMs <= atMs),
+    tails: inp.tails.filter((r) => r.expiryMs <= atMs),
     harvest: inp.harvest.filter((t) => (t.settledAtMs ?? Infinity) <= atMs),
   }).find((x) => `${x.signal}@${x.slot}` === key);
   return s ? s.pnlPerContract : null;

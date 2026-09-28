@@ -25,6 +25,13 @@ export const DEFAULT_WATCHED_WALLETS = [
   '0x5c22733d496e38828e74ce3c361ccfc5fc566f0fc9da7e16ee623543ef2b6b9f',
   '0xb4d939833a6ba9c6c7b8d1c5da95f127dd76248294f2d45d17567dba558afe66',
   '0xfffd090eb63c393a5f3049c013cbb6b5c0d2f1ba0f6609227a9735ff832c53bb',
+  // 2026-09-28: three bots buying BOTH far-out sides (2–4¢) 1–2 min before
+  // expiry, from the moment BTC volatility returned after a quiet weekend:
+  // +215–222%, winning 15–24% vs 2–4% priced. a9eb and 96ed trade the same
+  // markets in the same millisecond (one operator); a204 is a looser copy.
+  '0xa9eb57bfae500797f04c9802d468c34151e60a29470464f9f9d13b322275c79c',
+  '0x96ed1d73783b195ea2b9bcf9447c9a871b326ea41271f9dd3113b4dee62eccd2',
+  '0xa204638aaad0855adbc18c2deb651321745e16de5e3f45a9024d27a90774a119',
 ];
 
 /** SVX_WATCH_WALLETS: comma list overrides the default; "none" disables. */
@@ -112,6 +119,14 @@ export async function pollWatchedWallets(deps: { ledger: LedgerStore; nowMs?: nu
   const { ledger } = deps;
   const now = deps.nowMs ?? Date.now();
   let changed = 0;
+  // A changed watch list rescans the backfill window so new wallets arrive
+  // with their history (positions already stored are not duplicated).
+  const listKey = [...watch].sort().join(',');
+  if (ledger.getMeta('watch_wallets') !== listKey) {
+    ledger.deleteMeta('watch_mint_ms');
+    ledger.deleteMeta('watch_exit_ms');
+    ledger.setMeta('watch_wallets', listKey);
+  }
 
   // Mints first, so an exit in the same poll finds its position.
   const mintMark = Number(ledger.getMeta('watch_mint_ms') ?? now - BACKFILL_MS);

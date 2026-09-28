@@ -506,8 +506,255 @@ export async function recordVolRegime(deps: {
   return recorded;
 }
 
+// ── 3. tail tracker ─────────────────────────────────────────────────────────
+//
+// Found 2026-09-28 on the wallet watch: three bots buying BOTH far-out sides
+// (2–4¢) of 1m and 5m markets 1–2 minutes before expiry won 15–24% against
+// 2–4% priced (+215% on ~$1.8k) the day BTC volatility came back after a
+// quiet weekend — when realized movement ran far above what the chain
+// priced. Around 21:00 that day new markets raised the entry floor from 1¢
+// to 5¢ (admission band 5–95%) and the bots stopped: sub-5¢ tails can no
+// longer be minted. This records, for every market at those checkpoints,
+// the far up/down strikes the chain prices at 5–10¢ (all-in cost from the
+// market's fee policy — ~9.5¢ for a 5¢ side near expiry) plus realized vs
+// chain vol, so the switchboard can score "buy both 6¢ tails" (tail) and the
+// same only when realized vol runs hot (tail_hot) before any money goes near
+// it. Targets the market refuses are not recorded. Live trading
+// additionally needs SVX_TAIL_LIVE=true.
+
+export const TAIL_SLOTS: Array<{ slot: string; minMs: number; maxMs: number }> = [
+  // W1/W3 buy at 119s left; 1m markets are already listed then.
+  { slot: 't2m', minMs: 100_000, maxMs: 140_000 },
+  // W2's median entry (71s), still before the final-minute fee ramp.
+  { slot: 't70s', minMs: 61_000, maxMs: 85_000 },
+];
+export const TAIL_TARGETS = [0.05, 0.06, 0.08, 0.1];
+/** The target the tail strategies trade: a point above the 5¢ entry floor,
+ *  so a small move before the mint lands doesn't push it under. */
+export const TAIL_TRADE_TARGET = 0.06;
+/** tail_hot trades only when realized vol (scaled) exceeds chain vol by this. */
+export const TAIL_HOT_RATIO = 1.1;
+
+export interface TailQuote {
+  direction: 'up' | 'down';
+  target: number;
+  strike: number;
+  /** Chain probability of the side paying. */
+  prob: number;
+  /** All-in cost per contract (premium + fees). */
+  cost: number;
+}
+
+export interface TailPayload {
+  forward: number;
+  reference: number;
+  rv15: number;
+  rv5: number | null;
+  chainSdUsd: number;
+  quotes: TailQuote[];
+}
+
+export interface TailEvent {
+  market: SdkMarket;
+  slot: string;
+  ttmMs: number;
+  payload: TailPayload;
+}
+
+/**
+ * The strike on `grid` whose side pays with probability closest to `target`,
+ * searched outward from the forward (up: above it, down: below it).
+ */
+export function tailStrike(
+  up: (k: number) => number,
+  forward: number,
+  direction: 'up' | 'down',
+  target: number,
+  grid: number,
+  span: number,
+): number | null {
+  const side = (k: number) => (direction === 'up' ? up(k) : 1 - up(k));
+  const sign = direction === 'up' ? 1 : -1;
+  let near = 0;
+  let far = span;
+  if (!(side(forward + sign * far) < target)) return null;
+  for (let i = 0; i < 40; i++) {
+    const mid = (near + far) / 2;
+    if (side(forward + sign * mid) > target) near = mid;
+    else far = mid;
+  }
+  const k = Math.round((forward + sign * far) / grid) * grid;
+  return k > 0 ? k : null;
+}
+
+export async function recordTail(deps: {
+  ledger: LedgerStore;
+  nowMs?: number;
+  onRecorded?: (e: TailEvent) => Promise<void>;
+}): Promise<number> {
+  const { ledger } = deps;
+  const now = deps.nowMs ?? Date.now();
+  const slotOf = (m: SdkMarket) =>
+    TAIL_SLOTS.find((s) => m.expiryMs - now >= s.minMs && m.expiryMs - now <= s.maxMs);
+  const due = (await listSdkMarkets()).filter((m) => {
+    const s = slotOf(m);
+    // No reference needed: a 1m market is tradable ~2 min out, before its own
+    // minute (and reference) starts — exactly when the tail bots buy.
+    return !m.mintPaused && s && !ledger.hasEdgeProbe(m.id, 'tail', s.slot);
+  });
+  if (!due.length) return 0;
+  const { rv15, rv5 } = await realizedVol(now);
+  if (rv15 == null) return 0;
+  let recorded = 0;
+  for (const m of due) {
+    const slot = slotOf(m)!.slot;
+    const [pricer, fees] = await Promise.all([
+      resolvedPricer('BTC', m.expiryMs).catch(() => null),
+      marketFeePolicy(m.id),
+    ]);
+    if (!pricer || !fees) continue;
+    const quotedAt = Date.now();
+    const F = pricer.forward;
+    const up = (k: number) => sdkPricing.upProbability({ forward: F, svi: pricer.svi }, k);
+    const grid = m.admissionTickSize > 0 ? m.admissionTickSize : 1;
+    const chainSdUsd = Number((F * Math.sqrt(Math.max(0, totalVariance(0, pricer.svi)))).toFixed(3));
+    const span = Math.max(50, 12 * chainSdUsd);
+    const quotes: TailQuote[] = [];
+    for (const direction of ['up', 'down'] as const) {
+      for (const target of TAIL_TARGETS) {
+        const strike = tailStrike(up, F, direction, target, grid, span);
+        if (strike == null) continue;
+        const u = up(strike);
+        const q = estimateBoundaryCost({
+          fees,
+          expiryMs: m.expiryMs,
+          nowMs: quotedAt,
+          lowerUp: direction === 'up' ? u : null,
+          higherUp: direction === 'up' ? null : u,
+          quantity: 100,
+        });
+        if (!q) continue;
+        quotes.push({
+          direction,
+          target,
+          strike,
+          prob: Number(q.probability.toFixed(6)),
+          cost: Number(q.costPerContract.toFixed(6)),
+        });
+      }
+    }
+    if (!quotes.length) continue;
+    const payload: TailPayload = { forward: F, reference: m.referencePrice ?? F, rv15, rv5, chainSdUsd, quotes };
+    if (
+      ledger.insertEdgeProbe({
+        id: `tail:${m.id}:${slot}`,
+        network: suiNetwork(),
+        kind: 'tail',
+        marketId: m.id,
+        slot,
+        expiryMs: m.expiryMs,
+        recordedAtMs: quotedAt,
+        ttmMs: m.expiryMs - quotedAt,
+        payload,
+      })
+    ) {
+      recorded++;
+      await deps
+        .onRecorded?.({ market: m, slot, ttmMs: m.expiryMs - quotedAt, payload })
+        .catch((e) =>
+          log.warn('svx.edge.tail_exec_error', { err: e instanceof Error ? e.message : String(e) }),
+        );
+    }
+  }
+  if (recorded) log.info('svx.edge.tail_recorded', { rows: recorded });
+  return recorded;
+}
+
+/** The side of a tail quote, as an order range: up = (strike, ∞), down = (−∞, strike]. */
+export const tailRange = (q: TailQuote): { lower: number | null; upper: number | null } =>
+  q.direction === 'up' ? { lower: q.strike, upper: null } : { lower: null, upper: q.strike };
+
+/**
+ * What a tail strategy buys on one recorded row: both sides at the trade
+ * target, inside the bot's price band; `tail_hot` only while realized vol
+ * runs hot against the chain's.
+ */
+export function tailPicks(signal: 'tail' | 'tail_hot', p: TailPayload, ttmMs: number): TailQuote[] {
+  if (signal === 'tail_hot') {
+    const ratio = regimeRatio(p, ttmMs);
+    if (ratio == null || ratio < TAIL_HOT_RATIO) return [];
+  }
+  return p.quotes.filter((q) => q.target === TAIL_TRADE_TARGET && inTradeBand(q.prob));
+}
+
+/** Switchboard candidates `tail@<slot>` and `tail_hot@<slot>`: each side is one decision. */
+export function tailSwitchScores(rows: Array<EdgeProbeRow<TailPayload>>): ShadowSignalScore[] {
+  const out: ShadowSignalScore[] = [];
+  for (const s of TAIL_SLOTS) {
+    for (const signal of ['tail', 'tail_hot'] as const) {
+      const seq = rows
+        .filter((r) => r.slot === s.slot)
+        .flatMap((r) =>
+          tailPicks(signal, r.payload, r.ttmMs).map((q) => {
+            const { lower, upper } = tailRange(q);
+            return { cost: q.cost, win: pays(lower, upper, r.settlementPrice), market: r.marketId, atMs: r.expiryMs };
+          }),
+        );
+      const sc = sequenceScore(signal, s.slot, seq);
+      if (sc) out.push(sc);
+    }
+  }
+  return out;
+}
+
+export interface TailReport {
+  rows: number;
+  /** Per checkpoint × target: every side quoted, and the same split by vol regime. */
+  bySlot: Array<{
+    slot: string;
+    target: number;
+    all: Stat | null;
+    hot: Stat | null;
+    cool: Stat | null;
+    avgDistanceUsd: number | null;
+  }>;
+}
+
+export function scoreTail(rows: Array<EdgeProbeRow<TailPayload>>): TailReport {
+  const bySlot: TailReport['bySlot'] = [];
+  for (const s of TAIL_SLOTS) {
+    for (const target of TAIL_TARGETS) {
+      const pts: Array<{ prob: number; cost: number; win: boolean; hot: boolean; dist: number }> = [];
+      for (const r of rows) {
+        if (r.slot !== s.slot) continue;
+        const ratio = regimeRatio(r.payload, r.ttmMs);
+        for (const q of r.payload.quotes) {
+          if (q.target !== target) continue;
+          const { lower, upper } = tailRange(q);
+          pts.push({
+            prob: q.prob,
+            cost: q.cost,
+            win: pays(lower, upper, r.settlementPrice),
+            hot: ratio != null && ratio >= TAIL_HOT_RATIO,
+            dist: Math.abs(q.strike - r.payload.forward),
+          });
+        }
+      }
+      bySlot.push({
+        slot: s.slot,
+        target,
+        all: stat(pts),
+        hot: stat(pts.filter((x) => x.hot)),
+        cool: stat(pts.filter((x) => !x.hot)),
+        avgDistanceUsd: pts.length ? Number((pts.reduce((a, x) => a + x.dist, 0) / pts.length).toFixed(1)) : null,
+      });
+    }
+  }
+  return { rows: rows.length, bySlot };
+}
+
 /** Realized (scaled) over chain sd: < 1 means the chain expects more movement than recent history. */
-export function regimeRatio(p: VolRegimePayload, ttmMs: number): number | null {
+export function regimeRatio(p: Pick<VolRegimePayload, 'rv15' | 'chainSdUsd'>, ttmMs: number): number | null {
   if (!(p.chainSdUsd > 0)) return null;
   return (RV_SCALE * p.rv15 * Math.sqrt(ttmMs / 1000)) / p.chainSdUsd;
 }

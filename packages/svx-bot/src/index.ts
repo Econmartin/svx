@@ -72,12 +72,15 @@ import { pollWatchedWallets } from './ops/wallet-watch.js';
 import {
   edgeTrackersEnabled,
   inTradeBand,
+  recordTail,
   recordVolRegime,
   resolveEdgeProbes,
   startJumpTracker,
+  tailPicks,
   volModelPick,
   VOL_MODEL_MIN_EDGE,
   type JumpEvent,
+  type TailEvent,
   type VolRegimeEvent,
 } from './ops/edge-trackers.js';
 
@@ -702,6 +705,10 @@ export async function runBot(opts: { onceOnly?: boolean } = {}): Promise<void> {
             }).catch((e) =>
               log.warn('svx.edge.vol_record_error', { err: errMsg(e) }),
             );
+            await recordTail({
+              ledger,
+              onRecorded: (e) => runTailTrade(e, { ledger, cfg, live }),
+            }).catch((e) => log.warn('svx.edge.tail_record_error', { err: errMsg(e) }));
             await resolveEdgeProbes({ predict, ledger }).catch((e) =>
               log.warn('svx.edge.resolve_error', { err: errMsg(e) }),
             );
@@ -3280,12 +3287,12 @@ interface EdgeTradeArgs {
   key: string;
   /** Checkpoint for the radar ('jump' for the event-driven jump strategy). */
   slot: string;
-  signal: 'binance_jump' | 'vol_model';
+  signal: 'binance_jump' | 'vol_model' | 'tail' | 'tail_hot';
   marketId: string;
   expiryMs: number;
-  /** Binary at the reference strike, or a range (lower, upper]. */
+  /** Binary at the reference strike (or at `strike` when given), or a range (lower, upper]. */
   order:
-    | { kind: 'binary'; direction: 'up' | 'down'; reference: number }
+    | { kind: 'binary'; direction: 'up' | 'down'; reference: number; strike?: number }
     | { kind: 'range'; lower: number; upper: number };
   /** Chain probability that the order pays. */
   price: number;
@@ -3311,7 +3318,15 @@ async function runEdgeTrade(
   const isAuto = (t: { strategy?: string }) =>
     (AUTO_STRATEGIES as readonly string[]).includes(t.strategy ?? '');
   const openAuto = ledger.openTrades().filter(isAuto);
-  if (openAuto.some((t) => t.oracleId === a.marketId && t.signalId === a.key)) {
+  // A binary strategy may hold both sides of one market (the tail strangle).
+  if (
+    openAuto.some(
+      (t) =>
+        t.oracleId === a.marketId &&
+        t.signalId === a.key &&
+        (a.order.kind !== 'binary' || t.direction === a.order.direction),
+    )
+  ) {
     return skip('already_open_for_market');
   }
   if (
@@ -3319,6 +3334,12 @@ async function runEdgeTrade(
     openAuto.some((t) => t.oracleId === a.marketId && t.direction === (a.order as { direction: string }).direction)
   ) {
     return skip('already_holds_side');
+  }
+  // Tail lines trade only once the operator turns them on (after funding);
+  // until then the recorder scores them and nothing is booked — not even
+  // paper, which would count against the real daily stops.
+  if ((a.signal === 'tail' || a.signal === 'tail_hot') && process.env.SVX_TAIL_LIVE !== 'true') {
+    return skip('tail_live_off');
   }
   const stop = strategyStop(ledger, nowMs, a.key, a.costPerContract);
   if (stop) return skip(stop);
@@ -3349,7 +3370,7 @@ async function runEdgeTrade(
       order:
         a.order.kind === 'range'
           ? { ...base, direction: 'range', lower: a.order.lower, upper: a.order.upper }
-          : { ...base, direction: a.order.direction, strike: 'reference' },
+          : { ...base, direction: a.order.direction, strike: a.order.strike ?? 'reference' },
       gates: {
         maxEntryProbability: Math.min(0.97, a.price + 0.05),
         maxFeeDrag: 0.4,
@@ -3390,7 +3411,7 @@ async function runEdgeTrade(
     expiryMs: a.expiryMs,
     ...(a.order.kind === 'range'
       ? { strike: a.order.lower, direction: 'range' as const, rangeUpper: a.order.upper }
-      : { strike: a.order.reference, direction: a.order.direction }),
+      : { strike: a.order.strike ?? a.order.reference, direction: a.order.direction }),
     quantityDusdc: qty,
     costPrice,
     costUsdc,
@@ -3489,6 +3510,35 @@ export async function runVolModelTrade(
     },
     deps,
   );
+}
+
+/**
+ * Tail strangle: both far sides at the tail target on a freshly recorded
+ * market, for each tail line the switchboard has ON (tail_hot only while
+ * realized vol runs hot). runEdgeTrade applies the switch, the
+ * SVX_TAIL_LIVE gate, one-bet-per-side and the stops.
+ */
+export async function runTailTrade(
+  e: TailEvent,
+  deps: { ledger: LedgerStore; cfg: SvxConfig; live?: LiveContext; switchboard?: SwitchEntry[] },
+): Promise<void> {
+  for (const signal of ['tail', 'tail_hot'] as const) {
+    for (const q of tailPicks(signal, e.payload, e.ttmMs)) {
+      await runEdgeTrade(
+        {
+          key: `${signal}@${e.slot}`,
+          slot: e.slot,
+          signal,
+          marketId: e.market.id,
+          expiryMs: e.market.expiryMs,
+          order: { kind: 'binary', direction: q.direction, reference: e.payload.reference, strike: q.strike },
+          price: q.prob,
+          costPerContract: q.cost,
+        },
+        deps,
+      );
+    }
+  }
 }
 
 /**

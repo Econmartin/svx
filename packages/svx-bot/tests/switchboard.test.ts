@@ -316,9 +316,9 @@ describe('switchboard stops', () => {
   it('stops everything, long shots included, at the account limit', () => {
     const now = Date.now();
     for (let i = 0; i < 8; i++) loss(`line${i}@t50s`, 'fade_spike', now - 3600_000 + i, 4); // −$32 over 8 lines
-    expect(strategyStop(ledger, now, 'vol_model@t65s', 0.6)).toBeNull(); // under the $60 backstop
-    for (let i = 8; i < 16; i++) loss(`line${i}@t50s`, 'fade_spike', now - 3600_000 + i, 4); // −$64 over 16
-    expect(SWITCHBOARD.accountDailyLossLimitUsd).toBe(60);
+    expect(strategyStop(ledger, now, 'vol_model@t65s', 0.6)).toBeNull(); // under the $80 backstop
+    for (let i = 8; i < 21; i++) loss(`line${i}@t50s`, 'fade_spike', now - 3600_000 + i, 4); // −$84 over 21
+    expect(SWITCHBOARD.accountDailyLossLimitUsd).toBe(80);
     expect(strategyStop(ledger, now, 'longshot_12c@t50s', 0.08)).toBe('account_daily_loss_limit');
     expect(strategyStop(ledger, now, 'vol_model@t65s', 0.6)).toBe('account_daily_loss_limit');
   });

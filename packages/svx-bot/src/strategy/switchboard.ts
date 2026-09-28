@@ -71,8 +71,10 @@ export const SWITCHBOARD = {
   lineDailyLossLimitUsd: 15,
   /** Whole-bank backstop over every switchboard line, long shots included.
    *  User-raised 2026-09-27 from $30 (a fade-spike day had tripped it while
-   *  harvest and vol_model were up). */
-  accountDailyLossLimitUsd: 60,
+   *  harvest and vol_model were up), and 2026-09-28 to $80 so the lines
+   *  still ON can trade. Above the ~$22 balance then: the balance is the
+   *  real limit, with the $15 per-line stops. */
+  accountDailyLossLimitUsd: 80,
 } as const;
 
 /** Is a clip at this all-in cost per contract a long shot? */

@@ -716,6 +716,11 @@ export function tailPicks(signal: TailSignal, p: TailPayload, ttmMs: number): Ta
     const burst = burstRatio(p);
     if (burst == null || burst < TAIL_BURST_RATIO) return [];
   }
+  if (signal === 'tail_busy') {
+    // The bots' filter: busy markets only, and the 12¢ rung each side.
+    if (p.rv60 == null || p.rv60 < TAIL_BUSY_RV60) return [];
+    return p.quotes.filter((q) => q.target === TAIL_BUSY_TARGET && inTradeBand(q.prob));
+  }
   const picks: TailQuote[] = [];
   for (const direction of ['up', 'down'] as const) {
     const cheapest = p.quotes
@@ -726,7 +731,17 @@ export function tailPicks(signal: TailSignal, p: TailPayload, ttmMs: number): Ta
   return picks;
 }
 
-export type TailSignal = 'tail' | 'tail_hot' | 'tail_burst';
+export type TailSignal = 'tail' | 'tail_hot' | 'tail_burst' | 'tail_busy';
+
+/**
+ * tail_busy copies what the surviving tail bots do after the 10¢ floor
+ * (2026-09-29): W1 (0xa9eb…) traded 39% of minutes when BTC's last-hour vol
+ * ran $40–60/min and ~1% under $30, buying ~14¢ sides (+23% on 465 bets).
+ * Our recorder had the 12–15¢ rungs beating 10¢ in hot markets. So: both
+ * 12¢ sides, only while last-hour vol ≥ $40/min. Paper-only.
+ */
+export const TAIL_BUSY_RV60 = 40 / Math.sqrt(60); // $40/min in $ per √s
+export const TAIL_BUSY_TARGET = 0.12;
 
 /**
  * Short-term vol against its own last hour. A sibling analysis of 3,085 fills
@@ -742,7 +757,7 @@ export const burstRatio = (p: Pick<TailPayload, 'rv2' | 'rv60'>): number | null 
 export function tailSwitchScores(rows: Array<EdgeProbeRow<TailPayload>>): ShadowSignalScore[] {
   const out: ShadowSignalScore[] = [];
   for (const s of TAIL_SLOTS) {
-    for (const signal of ['tail', 'tail_hot', 'tail_burst'] as const) {
+    for (const signal of ['tail', 'tail_hot', 'tail_burst', 'tail_busy'] as const) {
       const seq = rows
         .filter((r) => r.slot === s.slot)
         .flatMap((r) =>

@@ -179,11 +179,13 @@ export interface SwitchEntry {
 /**
  * Lines scored on the switchboard that never trade, even when green — new
  * research until the operator promotes them (remove from this set and wire
- * an executor). tail_burst: tails in short-term vol bursts (2026-09-29).
+ * an executor). tail_burst: tails in short-term vol bursts; tail_busy: the
+ * surviving tail bots' filter (12¢ sides while last-hour vol ≥ $40/min)
+ * (both 2026-09-29).
  * vol_clock was promoted the same day: it trades through runVolModelTrade,
  * taking any checkpoint where it is on from vol_model.
  */
-export const PAPER_ONLY_SIGNALS: ReadonlySet<string> = new Set(['tail_burst']);
+export const PAPER_ONLY_SIGNALS: ReadonlySet<string> = new Set(['tail_burst', 'tail_busy']);
 
 const META_KEY = 'switchboard_v1';
 let cache: { atMs: number; entries: SwitchEntry[] } | null = null;
@@ -201,7 +203,7 @@ export function strategyTagFor(
   if (signal === 'binance_jump') return 'edge_jump';
   // Tail strangles and vol_clock ride the vol-model tag (same tracker
   // family); their signal_id (tail@t2m, vol_clock@t65s) keeps them apart.
-  if (['vol_model', 'vol_clock', 'tail', 'tail_hot', 'tail_burst'].includes(signal)) return 'edge_vol';
+  if (['vol_model', 'vol_clock', 'tail', 'tail_hot', 'tail_burst', 'tail_busy'].includes(signal)) return 'edge_vol';
   return signal.startsWith('fade_spike') ? 'fade_spike' : 'auto_shadow';
 }
 

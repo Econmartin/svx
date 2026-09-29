@@ -205,7 +205,7 @@ describe('paper lines from the 2026-09-29 vol-shape analysis', () => {
   });
 
   it('marks the new lines paper-only on the switchboard', () => {
-    expect([...PAPER_ONLY_SIGNALS].sort()).toEqual(['tail_burst']);
+    expect([...PAPER_ONLY_SIGNALS].sort()).toEqual(['tail_burst', 'tail_busy']);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'svx-paper-'));
     const l = new LedgerStore(path.join(dir, 'l.sqlite'));
     const now = Date.now();
@@ -260,5 +260,23 @@ describe('fee incentive (the 20%-off promotion)', () => {
     expect(cost(1_000_000_000n)).toBeCloseTo(0.5 + fee * 0.8, 6);
     // $0.50 left on a $100-contract clip: the rebate stops at the balance.
     expect(cost(500_000n)).toBeCloseTo(full - 0.005, 6);
+  });
+});
+
+describe('tail_busy (the bots’ busy-market filter)', () => {
+  const rung12 = [
+    { direction: 'up' as const, target: 0.12, strike: 100_060, prob: 0.12, cost: 0.18 },
+    { direction: 'down' as const, target: 0.12, strike: 99_940, prob: 0.12, cost: 0.18 },
+  ];
+  it('buys both 12¢ sides only while last-hour vol is at least $40 a minute', () => {
+    const quotes = [...payload().quotes, ...rung12];
+    expect(tailPicks('tail_busy', payload({ quotes, rv60: 30 / Math.sqrt(60) }), 120_000)).toEqual([]);
+    expect(tailPicks('tail_busy', payload({ quotes }), 120_000)).toEqual([]); // no rv60 (old rows)
+    const busy = tailPicks('tail_busy', payload({ quotes, rv60: 45 / Math.sqrt(60) }), 120_000);
+    expect(busy.map((q) => [q.direction, q.target])).toEqual([
+      ['up', 0.12],
+      ['down', 0.12],
+    ]);
+    expect(strategyTagFor('tail_busy')).toBe('edge_vol');
   });
 });

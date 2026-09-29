@@ -73,6 +73,7 @@ import { pollWatchedWallets } from './ops/wallet-watch.js';
 import {
   edgeTrackersEnabled,
   inTradeBand,
+  clockSdFactor,
   recordTail,
   recordVolRegime,
   resolveEdgeProbes,
@@ -3288,7 +3289,7 @@ interface EdgeTradeArgs {
   key: string;
   /** Checkpoint for the radar ('jump' for the event-driven jump strategy). */
   slot: string;
-  signal: 'binance_jump' | 'vol_model' | 'tail' | 'tail_hot';
+  signal: 'binance_jump' | 'vol_model' | 'vol_clock' | 'tail' | 'tail_hot';
   marketId: string;
   expiryMs: number;
   /** Binary at the reference strike (or at `strike` when given), or a range (lower, upper]. */
@@ -3472,14 +3473,19 @@ export async function runVolModelTrade(
   e: VolRegimeEvent,
   deps: { ledger: LedgerStore; cfg: SvxConfig; live?: LiveContext; switchboard?: SwitchEntry[] },
 ): Promise<void> {
-  const key = `vol_model@${e.slot}`;
-  const best = volModelPick(e.payload, e.ttmMs, VOL_MODEL_MIN_EDGE);
+  // vol_clock (vol_model with the clock-wave sd) takes a checkpoint while it
+  // is on; vol_model stands aside there so one market never gets both —
+  // they usually pick the same range (user-approved 2026-09-29).
+  const board = deps.switchboard ?? evaluateSwitchboard(deps.ledger, suiNetwork());
+  const isOn = (key: string) => board.some((x) => x.key === key && x.status === 'on');
+  const signal: 'vol_clock' | 'vol_model' = isOn(`vol_clock@${e.slot}`) ? 'vol_clock' : 'vol_model';
+  const key = `${signal}@${e.slot}`;
+  const scale =
+    signal === 'vol_clock' ? clockSdFactor(e.market.expiryMs - e.ttmMs, e.market.expiryMs) : 1;
+  const best = volModelPick(e.payload, e.ttmMs, VOL_MODEL_MIN_EDGE, scale);
   if (!best) {
-    const on = (deps.switchboard ?? evaluateSwitchboard(deps.ledger, suiNetwork())).some(
-      (x) => x.key === key && x.status === 'on',
-    );
-    if (on) {
-      const top = volModelPick(e.payload, e.ttmMs, -Infinity);
+    if (isOn(key)) {
+      const top = volModelPick(e.payload, e.ttmMs, -Infinity, scale);
       recordFadeEval({
         marketId: e.market.id,
         slot: e.slot,
@@ -3502,14 +3508,14 @@ export async function runVolModelTrade(
     {
       key,
       slot: e.slot,
-      signal: 'vol_model',
+      signal,
       marketId: e.market.id,
       expiryMs: e.market.expiryMs,
       order,
       price: c.prob,
       costPerContract: c.cost,
     },
-    deps,
+    { ...deps, switchboard: board },
   );
 }
 

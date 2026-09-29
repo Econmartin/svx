@@ -179,10 +179,11 @@ export interface SwitchEntry {
 /**
  * Lines scored on the switchboard that never trade, even when green — new
  * research until the operator promotes them (remove from this set and wire
- * an executor). tail_burst: tails in short-term vol bursts; vol_clock:
- * vol_model with the clock-wave sd (both 2026-09-29).
+ * an executor). tail_burst: tails in short-term vol bursts (2026-09-29).
+ * vol_clock was promoted the same day: it trades through runVolModelTrade,
+ * taking any checkpoint where it is on from vol_model.
  */
-export const PAPER_ONLY_SIGNALS: ReadonlySet<string> = new Set(['tail_burst', 'vol_clock']);
+export const PAPER_ONLY_SIGNALS: ReadonlySet<string> = new Set(['tail_burst']);
 
 const META_KEY = 'switchboard_v1';
 let cache: { atMs: number; entries: SwitchEntry[] } | null = null;

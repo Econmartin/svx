@@ -205,7 +205,7 @@ describe('paper lines from the 2026-09-29 vol-shape analysis', () => {
   });
 
   it('marks the new lines paper-only on the switchboard', () => {
-    expect([...PAPER_ONLY_SIGNALS].sort()).toEqual(['tail_burst', 'vol_clock']);
+    expect([...PAPER_ONLY_SIGNALS].sort()).toEqual(['tail_burst']);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'svx-paper-'));
     const l = new LedgerStore(path.join(dir, 'l.sqlite'));
     const now = Date.now();

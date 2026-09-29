@@ -288,6 +288,18 @@ describe('edge executors (paper)', () => {
     expect(c!.rangeUpper).toBe(100_012);
   });
 
+  it('vol_clock takes the checkpoint while on; vol_model stands aside (one bet per market)', async () => {
+    const r = volRow({}, 0);
+    const ev = (id: string) => ({ market: market(id), slot: 't2m', ttmMs: 120_000, payload: r.payload });
+    const both = [...sw('vol_clock@t2m', 'on'), ...sw('vol_model@t2m', 'on')];
+    await runVolModelTrade(ev('0xc'), deps(both));
+    expect(ledger.openTrades().map((t) => t.signalId)).toEqual(['vol_clock@t2m']);
+    // vol_clock off: vol_model trades as before.
+    await runVolModelTrade(ev('0xd'), deps([...sw('vol_clock@t2m', 'off'), ...sw('vol_model@t2m', 'on')]));
+    expect(ledger.openTrades().map((t) => t.signalId).sort()).toEqual(['vol_clock@t2m', 'vol_model@t2m']);
+    expect(ledger.openTrades().find((t) => t.oracleId === '0xd')!.signalId).toBe('vol_model@t2m');
+  });
+
   it('a range settling on its lower bound loses', () => {
     ledger.insertTrade({
       signalId: 'x',

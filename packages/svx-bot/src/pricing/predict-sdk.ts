@@ -309,6 +309,9 @@ export function estimateMintCost(args: {
  * infinite side. Same exact fee math as {@link estimateMintCost}; null when
  * the chain would refuse the order (entry band, min premium, cost > payout).
  */
+/** Inward margin on the per-boundary entry band (see estimateBoundaryCost). */
+export const BOUNDARY_HEADROOM = 0.005;
+
 export function estimateBoundaryCost(args: {
   fees: FeePolicy;
   expiryMs: number;
@@ -318,6 +321,16 @@ export function estimateBoundaryCost(args: {
   quantity: number;
 }): { costPerContract: number; probability: number } | null {
   const raw = (p: number | null) => (p == null ? null : probabilityToRaw(Number(p.toFixed(9))));
+  // The chain also admits each finite boundary on its own
+  // (strike_exposure_config::assert_mint_probability_policy): a range whose
+  // total is fine is still refused when one end prices outside the market's
+  // entry band. The SDK checks only the total, so check the ends here —
+  // with a little headroom so a pick at the edge survives drift to the mint.
+  const lo = Number(args.fees.minEntryProbability) / 1e9 + BOUNDARY_HEADROOM;
+  const hi = Number(args.fees.maxEntryProbability) / 1e9 - BOUNDARY_HEADROOM;
+  for (const b of [args.lowerUp, args.higherUp]) {
+    if (b != null && (b < lo || b > hi)) return null;
+  }
   try {
     const r = sdkCost.mintCost({
       fees: args.fees,

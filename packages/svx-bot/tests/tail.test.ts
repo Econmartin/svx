@@ -13,6 +13,7 @@ import {
 } from '../src/ops/edge-trackers.js';
 import { runTailTrade } from '../src/index.js';
 import { strategyTagFor, type SwitchEntry } from '../src/strategy/switchboard.js';
+import { estimateBoundaryCost } from '../src/pricing/predict-sdk.js';
 
 // A chain whose UP digital is N(100_000, $50) — 6¢ tails sit ~1.55σ out.
 const F = 100_000;
@@ -52,8 +53,14 @@ describe('tail tracker', () => {
     expect(tailStrike(up, F, 'up', 0.06, 1, 50)).toBeNull(); // span too short to reach 6¢
   });
 
-  it('tail buys both 6¢ sides; tail_hot only when realized vol runs hot', () => {
-    expect(tailPicks('tail', payload(), 120_000).map((q) => q.direction)).toEqual(['up', 'down']);
+  it('tail buys the cheapest admitted rung on each side; tail_hot only when realized vol runs hot', () => {
+    expect(tailPicks('tail', payload(), 120_000).map((q) => [q.direction, q.target])).toEqual([
+      ['up', 0.06],
+      ['down', 0.06],
+    ]);
+    // A market that admits only 10¢+: the 10¢ rung is taken.
+    const floor10 = payload({ quotes: payload().quotes.filter((q) => q.target >= 0.1) });
+    expect(tailPicks('tail', floor10, 120_000).map((q) => [q.direction, q.target])).toEqual([['up', 0.1]]);
     expect(tailPicks('tail_hot', payload(), 120_000)).toEqual([]);
     const hot = payload({ rv15: 5 }); // ≈ 1.48 ≥ TAIL_HOT_RATIO
     expect(TAIL_HOT_RATIO).toBeLessThan(1.48);
@@ -121,5 +128,29 @@ describe('tail executor', () => {
     process.env.SVX_TAIL_LIVE = 'true';
     await runTailTrade(event(), deps([]));
     expect(ledger.openTrades()).toHaveLength(0);
+  });
+});
+
+describe('per-boundary admission', () => {
+  const fees = {
+    baseFee: 204_000_000n,
+    minFee: 22_000_000n,
+    expiryFeeWindowMs: 60_000n,
+    expiryFeeMaxMultiplier: 3_000_000_000n,
+    minEntryProbability: 100_000_000n, // 10¢
+    maxEntryProbability: 900_000_000n, // 90¢
+    inventoryImpactMaxRate: 0n,
+    inventoryImpactScale: 10_000_000_000n,
+    backingBufferLambda: 310_000_000n,
+  } as never;
+  const quote = (lowerUp: number | null, higherUp: number | null) =>
+    estimateBoundaryCost({ fees, expiryMs: Date.now() + 120_000, nowMs: Date.now(), lowerUp, higherUp, quantity: 100 });
+
+  it('refuses a range whose total is fine but one end sits outside the band (as the chain does)', () => {
+    expect(quote(0.73, 0.27)).not.toBeNull(); // both ends inside 10–90¢
+    expect(quote(0.999, 0.4)).toBeNull(); // lower end 99.9¢: refused on-chain, 2026-09-29
+    expect(quote(0.6, 0.001)).toBeNull(); // upper end 0.1¢
+    expect(quote(0.12, null)).not.toBeNull(); // a 12¢ up tail
+    expect(quote(0.06, null)).toBeNull(); // a 6¢ tail under a 10¢ floor
   });
 });

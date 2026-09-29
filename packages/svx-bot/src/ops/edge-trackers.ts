@@ -528,10 +528,12 @@ export const TAIL_SLOTS: Array<{ slot: string; minMs: number; maxMs: number }> =
   // W2's median entry (71s), still before the final-minute fee ramp.
   { slot: 't70s', minMs: 61_000, maxMs: 85_000 },
 ];
-export const TAIL_TARGETS = [0.05, 0.06, 0.08, 0.1];
-/** The target the tail strategies trade: a point above the 5¢ entry floor,
- *  so a small move before the mint lands doesn't push it under. */
-export const TAIL_TRADE_TARGET = 0.06;
+// By the next morning some markets admitted only 10–90¢ per boundary, so
+// the ladder runs up to 15¢ and the strategies take, per side, the cheapest
+// rung the market actually admits (inadmissible rungs are never recorded).
+export const TAIL_TARGETS = [0.05, 0.06, 0.08, 0.1, 0.12, 0.15];
+/** Tail strategies skip sides dearer than this (the edge is in cheap tails). */
+export const TAIL_MAX_TARGET = 0.15;
 /** tail_hot trades only when realized vol (scaled) exceeds chain vol by this. */
 export const TAIL_HOT_RATIO = 1.1;
 
@@ -675,16 +677,24 @@ export const tailRange = (q: TailQuote): { lower: number | null; upper: number |
   q.direction === 'up' ? { lower: q.strike, upper: null } : { lower: null, upper: q.strike };
 
 /**
- * What a tail strategy buys on one recorded row: both sides at the trade
- * target, inside the bot's price band; `tail_hot` only while realized vol
- * runs hot against the chain's.
+ * What a tail strategy buys on one recorded row: on each side, the cheapest
+ * rung the market admits (inside the bot's price band, at most
+ * TAIL_MAX_TARGET); `tail_hot` only while realized vol runs hot against the
+ * chain's.
  */
 export function tailPicks(signal: 'tail' | 'tail_hot', p: TailPayload, ttmMs: number): TailQuote[] {
   if (signal === 'tail_hot') {
     const ratio = regimeRatio(p, ttmMs);
     if (ratio == null || ratio < TAIL_HOT_RATIO) return [];
   }
-  return p.quotes.filter((q) => q.target === TAIL_TRADE_TARGET && inTradeBand(q.prob));
+  const picks: TailQuote[] = [];
+  for (const direction of ['up', 'down'] as const) {
+    const cheapest = p.quotes
+      .filter((q) => q.direction === direction && q.target <= TAIL_MAX_TARGET && inTradeBand(q.prob))
+      .sort((a, b) => a.target - b.target)[0];
+    if (cheapest) picks.push(cheapest);
+  }
+  return picks;
 }
 
 /** Switchboard candidates `tail@<slot>` and `tail_hot@<slot>`: each side is one decision. */

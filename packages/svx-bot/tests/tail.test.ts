@@ -154,3 +154,79 @@ describe('per-boundary admission', () => {
     expect(quote(0.06, null)).toBeNull(); // a 6¢ tail under a 10¢ floor
   });
 });
+
+import {
+  burstRatio,
+  clockSdFactor,
+  edgeSwitchScores,
+  MINUTE_OF_HOUR_VARIANCE,
+  type VolRegimePayload,
+} from '../src/ops/edge-trackers.js';
+import { evaluateSwitchboard, PAPER_ONLY_SIGNALS } from '../src/strategy/switchboard.js';
+
+describe('paper lines from the 2026-09-29 vol-shape analysis', () => {
+  it('clock factor: the quiet top of the hour shrinks the sd, the loud turn of the hour grows it', () => {
+    const at = (h: number, m: number, s = 0) => Date.UTC(2026, 8, 29, h, m, s);
+    const lastThree = Math.sqrt((0.65 + 0.62 + 0.49) / 3);
+    expect(clockSdFactor(at(10, 57), at(11, 0))).toBeCloseTo(lastThree, 6);
+    expect(clockSdFactor(at(11, 0), at(11, 2))).toBeCloseTo(Math.sqrt((1.25 + 1.1) / 2), 6);
+    expect(clockSdFactor(at(11, 0), at(12, 0))).toBeCloseTo(
+      Math.sqrt(MINUTE_OF_HOUR_VARIANCE.reduce((a, x) => a + x, 0) / 60),
+      6,
+    );
+  });
+
+  it('tail_burst buys only when the last 2 minutes run ≥ 1.2× the last hour', () => {
+    expect(tailPicks('tail_burst', payload(), 120_000)).toEqual([]); // no burst data (old rows)
+    expect(burstRatio({ rv2: 3, rv60: 2 })).toBeCloseTo(1.5);
+    expect(tailPicks('tail_burst', payload({ rv2: 3, rv60: 2 }), 120_000)).toHaveLength(2);
+    expect(tailPicks('tail_burst', payload({ rv2: 2, rv60: 2 }), 120_000)).toEqual([]);
+  });
+
+  it('scores vol_clock beside vol_model, off the same rows', () => {
+    const vol = (settle: number): EdgeProbeRow<VolRegimePayload> => ({
+      marketId: '0xv',
+      slot: 't2m',
+      expiryMs: Date.UTC(2026, 8, 29, 11, 0),
+      recordedAtMs: Date.UTC(2026, 8, 29, 10, 58),
+      ttmMs: 120_000,
+      settlementPrice: settle,
+      payload: {
+        forward: 100_000,
+        reference: 100_000,
+        rv15: 0.5,
+        rv5: 0.5,
+        chainSdUsd: 50,
+        candidates: [{ name: 'W25', lower: 99_987, upper: 100_012, prob: 0.2, cost: 0.4 }],
+      },
+    });
+    const keys = edgeSwitchScores([], [vol(100_005), vol(100_050)]).map((s) => `${s.signal}@${s.slot}`);
+    expect(keys).toEqual(expect.arrayContaining(['vol_model@t2m', 'vol_clock@t2m']));
+  });
+
+  it('marks the new lines paper-only on the switchboard', () => {
+    expect([...PAPER_ONLY_SIGNALS].sort()).toEqual(['tail_burst', 'vol_clock']);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'svx-paper-'));
+    const l = new LedgerStore(path.join(dir, 'l.sqlite'));
+    const now = Date.now();
+    for (let i = 0; i < 3; i++) {
+      l.insertEdgeProbe({
+        id: `tail:0x${i}:t2m`,
+        network: 'mainnet',
+        kind: 'tail',
+        marketId: `0x${i}`,
+        slot: 't2m',
+        expiryMs: now - 60_000 + i,
+        recordedAtMs: now - 180_000 + i,
+        ttmMs: 120_000,
+        payload: payload({ rv2: 3, rv60: 2 }),
+      });
+      l.resolveEdgeProbeMarket(`0x${i}`, 100_200, now);
+    }
+    const board = evaluateSwitchboard(l, 'mainnet', now, true);
+    expect(board.find((e) => e.key === 'tail_burst@t2m')?.paperOnly).toBe(true);
+    expect(board.find((e) => e.key === 'tail@t2m')?.paperOnly).toBeUndefined();
+    l.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});

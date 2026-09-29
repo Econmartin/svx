@@ -105,10 +105,15 @@ export function SwitchboardCard() {
                       <span
                         className={cn(
                           'rounded-full px-2.5 h-6 inline-flex items-center text-[12px] font-medium',
-                          s.status === 'on' ? 'bg-win/[0.12] text-win' : 'bg-white/[0.05] text-muted',
+                          s.status === 'on'
+                            ? s.paperOnly
+                              ? 'border border-win/40 text-win'
+                              : 'bg-win/[0.12] text-win'
+                            : 'bg-white/[0.05] text-muted',
                         )}
+                        title={s.paperOnly ? 'Paper only: scored, never traded' : undefined}
                       >
-                        {s.status === 'on' ? 'On' : 'Off'}
+                        {s.paperOnly ? (s.status === 'on' ? 'Paper on' : 'Paper off') : s.status === 'on' ? 'On' : 'Off'}
                       </span>
                     </TableCell>
                     <TableCell className="text-muted">{formatRelative(s.sinceMs)}</TableCell>

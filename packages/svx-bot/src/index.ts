@@ -52,6 +52,7 @@ import { recordBankSnapshot } from './ops/bank-gauge.js';
 import {
   SWITCHBOARD,
   HARVEST_KEY,
+  PAPER_ONLY_SIGNALS,
   clipCapUsd,
   strategyStop,
   enabledAt,
@@ -3306,7 +3307,7 @@ async function runEdgeTrade(
   const { ledger, cfg, live } = deps;
   const entries = deps.switchboard ?? evaluateSwitchboard(ledger, suiNetwork());
   const entry = entries.find((e) => e.key === a.key && e.status === 'on');
-  if (!entry) return;
+  if (!entry || PAPER_ONLY_SIGNALS.has(a.signal)) return;
   const note = (outcome: string, detail: string) =>
     recordFadeEval({ marketId: a.marketId, slot: a.slot, atMs: Date.now(), outcome, detail, key: a.key });
   const skip = (reason: string) => {

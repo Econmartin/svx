@@ -172,7 +172,17 @@ export interface SwitchEntry {
   liveWins?: number;
   /** Paper decision count when the live check switched it off. */
   blockedAtN?: number;
+  /** Scored only: no executor trades it even when on (PAPER_ONLY_SIGNALS). */
+  paperOnly?: boolean;
 }
+
+/**
+ * Lines scored on the switchboard that never trade, even when green — new
+ * research until the operator promotes them (remove from this set and wire
+ * an executor). tail_burst: tails in short-term vol bursts; vol_clock:
+ * vol_model with the clock-wave sd (both 2026-09-29).
+ */
+export const PAPER_ONLY_SIGNALS: ReadonlySet<string> = new Set(['tail_burst', 'vol_clock']);
 
 const META_KEY = 'switchboard_v1';
 let cache: { atMs: number; entries: SwitchEntry[] } | null = null;
@@ -188,9 +198,9 @@ export function strategyTagFor(
 ): 'fade_spike' | 'auto_shadow' | 'edge_jump' | 'edge_vol' | 'calibration_harvest' {
   if (signal === 'harvest_v2') return 'calibration_harvest';
   if (signal === 'binance_jump') return 'edge_jump';
-  // Tail strangles ride the vol-model tag (same tracker family); their
-  // signal_id (tail@t2m, tail_hot@t70s) keeps them apart.
-  if (signal === 'vol_model' || signal === 'tail' || signal === 'tail_hot') return 'edge_vol';
+  // Tail strangles and vol_clock ride the vol-model tag (same tracker
+  // family); their signal_id (tail@t2m, vol_clock@t65s) keeps them apart.
+  if (['vol_model', 'vol_clock', 'tail', 'tail_hot', 'tail_burst'].includes(signal)) return 'edge_vol';
   return signal.startsWith('fade_spike') ? 'fade_spike' : 'auto_shadow';
 }
 
@@ -403,6 +413,7 @@ export function evaluateSwitchboard(
       sinceMs: before && before.status === status ? before.sinceMs : nowMs,
       reason,
       onHitRate: status === 'on' ? onHitRate : undefined,
+      ...(PAPER_ONLY_SIGNALS.has(s.signal) && { paperOnly: true }),
       liveN,
       liveWins,
       blockedAtN,

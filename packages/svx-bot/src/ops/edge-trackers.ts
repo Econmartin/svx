@@ -387,7 +387,7 @@ export interface VolRegimePayload {
   candidates: VolCandidate[];
 }
 
-let rvCache: { atMs: number; rv15: number | null; rv5: number | null } | null = null;
+let rvCache: { atMs: number; rv15: number | null; rv5: number | null; rv2: number | null } | null = null;
 
 /** RMS of successive 1s closes, in $ per √s. Null on any fetch failure. */
 export function rmsPerSqrtSecond(closes: number[]): number | null {
@@ -397,7 +397,27 @@ export function rmsPerSqrtSecond(closes: number[]): number | null {
   return Math.sqrt(s / (closes.length - 1));
 }
 
-async function realizedVol(nowMs: number): Promise<{ rv15: number | null; rv5: number | null }> {
+let rv60Cache: { atMs: number; rv60: number | null } | null = null;
+
+/** Last hour's realized vol from 1m closes, in $ per √s (1m RMS / √60). */
+async function realizedVolHour(nowMs: number): Promise<number | null> {
+  if (rv60Cache && nowMs - rv60Cache.atMs < 30_000) return rv60Cache.rv60;
+  const k = await axios
+    .get<Array<Array<string | number>>>(
+      'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=61',
+      { timeout: 5_000 },
+    )
+    .then((r) => r.data)
+    .catch(() => null);
+  const closes = Array.isArray(k) ? k.map((x) => Number(x[4])).filter((x) => x > 0) : [];
+  const perMin = closes.length >= 50 ? rmsPerSqrtSecond(closes) : null;
+  rv60Cache = { atMs: nowMs, rv60: perMin == null ? null : perMin / Math.sqrt(60) };
+  return rv60Cache.rv60;
+}
+
+async function realizedVol(
+  nowMs: number,
+): Promise<{ rv15: number | null; rv5: number | null; rv2: number | null }> {
   if (rvCache && nowMs - rvCache.atMs < 5_000) return rvCache;
   const k = await axios
     .get<Array<Array<string | number>>>(
@@ -411,6 +431,7 @@ async function realizedVol(nowMs: number): Promise<{ rv15: number | null; rv5: n
     atMs: nowMs,
     rv15: closes.length >= 800 ? rmsPerSqrtSecond(closes) : null,
     rv5: closes.length >= 300 ? rmsPerSqrtSecond(closes.slice(-301)) : null,
+    rv2: closes.length >= 120 ? rmsPerSqrtSecond(closes.slice(-121)) : null,
   };
   return rvCache;
 }
@@ -552,6 +573,9 @@ export interface TailPayload {
   reference: number;
   rv15: number;
   rv5: number | null;
+  /** Last 2 minutes / last hour of realized vol, $ per √s (rows from 2026-09-29). */
+  rv2?: number | null;
+  rv60?: number | null;
   chainSdUsd: number;
   quotes: TailQuote[];
 }
@@ -605,8 +629,9 @@ export async function recordTail(deps: {
     return !m.mintPaused && s && !ledger.hasEdgeProbe(m.id, 'tail', s.slot);
   });
   if (!due.length) return 0;
-  const { rv15, rv5 } = await realizedVol(now);
+  const { rv15, rv5, rv2 } = await realizedVol(now);
   if (rv15 == null) return 0;
+  const rv60 = await realizedVolHour(now);
   let recorded = 0;
   for (const m of due) {
     const slot = slotOf(m)!.slot;
@@ -646,7 +671,7 @@ export async function recordTail(deps: {
       }
     }
     if (!quotes.length) continue;
-    const payload: TailPayload = { forward: F, reference: m.referencePrice ?? F, rv15, rv5, chainSdUsd, quotes };
+    const payload: TailPayload = { forward: F, reference: m.referencePrice ?? F, rv15, rv5, rv2, rv60, chainSdUsd, quotes };
     if (
       ledger.insertEdgeProbe({
         id: `tail:${m.id}:${slot}`,
@@ -682,10 +707,14 @@ export const tailRange = (q: TailQuote): { lower: number | null; upper: number |
  * TAIL_MAX_TARGET); `tail_hot` only while realized vol runs hot against the
  * chain's.
  */
-export function tailPicks(signal: 'tail' | 'tail_hot', p: TailPayload, ttmMs: number): TailQuote[] {
+export function tailPicks(signal: TailSignal, p: TailPayload, ttmMs: number): TailQuote[] {
   if (signal === 'tail_hot') {
     const ratio = regimeRatio(p, ttmMs);
     if (ratio == null || ratio < TAIL_HOT_RATIO) return [];
+  }
+  if (signal === 'tail_burst') {
+    const burst = burstRatio(p);
+    if (burst == null || burst < TAIL_BURST_RATIO) return [];
   }
   const picks: TailQuote[] = [];
   for (const direction of ['up', 'down'] as const) {
@@ -697,11 +726,23 @@ export function tailPicks(signal: 'tail' | 'tail_hot', p: TailPayload, ttmMs: nu
   return picks;
 }
 
-/** Switchboard candidates `tail@<slot>` and `tail_hot@<slot>`: each side is one decision. */
+export type TailSignal = 'tail' | 'tail_hot' | 'tail_burst';
+
+/**
+ * Short-term vol against its own last hour. A sibling analysis of 3,085 fills
+ * (2026-09-29) found moves past 2 chain-sd 19.7% of the time when the last
+ * 2 minutes ran ≥ 1.2× the hour, vs 10% when calm (4.6% if the chain were
+ * right): the fat tails concentrate in bursts. tail_burst is paper-only.
+ */
+export const TAIL_BURST_RATIO = 1.2;
+export const burstRatio = (p: Pick<TailPayload, 'rv2' | 'rv60'>): number | null =>
+  p.rv2 != null && p.rv60 != null && p.rv60 > 0 ? p.rv2 / p.rv60 : null;
+
+/** Switchboard candidates `tail@<slot>`, `tail_hot@<slot>`, `tail_burst@<slot>`: each side is one decision. */
 export function tailSwitchScores(rows: Array<EdgeProbeRow<TailPayload>>): ShadowSignalScore[] {
   const out: ShadowSignalScore[] = [];
   for (const s of TAIL_SLOTS) {
-    for (const signal of ['tail', 'tail_hot'] as const) {
+    for (const signal of ['tail', 'tail_hot', 'tail_burst'] as const) {
       const seq = rows
         .filter((r) => r.slot === s.slot)
         .flatMap((r) =>
@@ -786,8 +827,10 @@ export function volModelPick(
   p: VolRegimePayload,
   ttmMs: number,
   minEdge: number,
+  /** Multiplier on the modelled sd (vol_clock passes the clock factor). */
+  sdScale = 1,
 ): { candidate: VolCandidate; fair: number; edge: number } | null {
-  const sd = RV_SCALE * p.rv15 * Math.sqrt(ttmMs / 1000);
+  const sd = RV_SCALE * p.rv15 * Math.sqrt(ttmMs / 1000) * sdScale;
   if (!(sd > 0)) return null;
   const cdf = (x: number | null, dflt: number) => (x == null ? dflt : normalCdf((x - p.forward) / sd));
   let best: { candidate: VolCandidate; fair: number; edge: number } | null = null;
@@ -797,6 +840,29 @@ export function volModelPick(
     if (edge > minEdge && (!best || edge > best.edge)) best = { candidate: c, fair, edge };
   }
   return best;
+}
+
+// ── clock wave ──────────────────────────────────────────────────────────────
+//
+// BTC 1s return variance by minute of the hour, relative to the mean, from
+// 5.4 days of Binance 1s data (sibling analysis, 2026-09-29). The loudest
+// stable feature: :57–:59 run ~0.5–0.65× and :00–:02 ~1.1–1.4× on most days
+// (halves correlate 0.47 — real but noisy). vol_clock scales vol_model's sd
+// by the square root of the mean multiplier over a market's remaining time.
+export const MINUTE_OF_HOUR_VARIANCE = [
+  1.25, 1.1, 1.39, 1.15, 1.2, 1.04, 1.28, 1.24, 1.03, 0.93, 1.03, 0.99, 0.85, 0.94, 1.02,
+  1.29, 1.46, 1.18, 1.06, 0.93, 0.98, 1.13, 0.74, 0.96, 0.86, 0.88, 0.75, 0.77, 1.22, 0.8,
+  1.42, 1.15, 1.18, 0.91, 1.05, 1.28, 0.91, 0.97, 1.12, 1.08, 0.88, 0.77, 0.69, 0.86, 0.82,
+  0.87, 1.09, 1.09, 1.01, 1.44, 1.09, 0.88, 1.0, 0.95, 0.8, 0.77, 0.67, 0.65, 0.62, 0.49,
+];
+
+/** √(mean minute-of-hour variance multiplier over [fromMs, toMs)), by the second. */
+export function clockSdFactor(fromMs: number, toMs: number): number {
+  const a = Math.floor(fromMs / 1000);
+  const b = Math.max(a + 1, Math.floor(toMs / 1000));
+  let s = 0;
+  for (let t = a; t < b; t++) s += MINUTE_OF_HOUR_VARIANCE[Math.floor(t / 60) % 60]!;
+  return Math.sqrt(s / (b - a));
 }
 
 /** Minimum modelled edge for the switchboard's vol_model strategies. */
@@ -917,18 +983,23 @@ export function edgeSwitchScores(
   const j = sequenceScore('binance_jump', 'jump', jumpSeq);
   if (j) out.push(j);
   for (const s of VOL_SLOTS) {
-    const seq = vols
-      .filter((r) => r.slot === s.slot)
-      .flatMap((r) => {
-        const best = volModelPick(r.payload, r.ttmMs, VOL_MODEL_MIN_EDGE);
-        if (!best || !inTradeBand(best.candidate.prob)) return [];
-        const c = best.candidate;
-        return [
-          { cost: c.cost, win: pays(c.lower, c.upper, r.settlementPrice), market: r.marketId, atMs: r.expiryMs },
-        ];
-      });
-    const v = sequenceScore('vol_model', s.slot, seq);
-    if (v) out.push(v);
+    // vol_model, and vol_clock: the same trader with its sd scaled by the
+    // clock wave over the market's remaining time (paper-only).
+    for (const signal of ['vol_model', 'vol_clock'] as const) {
+      const seq = vols
+        .filter((r) => r.slot === s.slot)
+        .flatMap((r) => {
+          const scale = signal === 'vol_clock' ? clockSdFactor(r.recordedAtMs, r.expiryMs) : 1;
+          const best = volModelPick(r.payload, r.ttmMs, VOL_MODEL_MIN_EDGE, scale);
+          if (!best || !inTradeBand(best.candidate.prob)) return [];
+          const c = best.candidate;
+          return [
+            { cost: c.cost, win: pays(c.lower, c.upper, r.settlementPrice), market: r.marketId, atMs: r.expiryMs },
+          ];
+        });
+      const v = sequenceScore(signal, s.slot, seq);
+      if (v) out.push(v);
+    }
   }
   return out;
 }

@@ -806,6 +806,8 @@ export interface SwitchboardState {
     recentCaptured?: number[];
     /** Per `recent` result: when it was known, epoch ms (0 = unknown). */
     recentAtMs?: number[];
+    /** Scored only — never trades, even when on. */
+    paperOnly?: boolean;
     /** +n wins / −n losses in a row, most recent. */
     streak?: number;
     /** Average profit per contract over the last up-to-20 decisions. */

@@ -230,3 +230,35 @@ describe('paper lines from the 2026-09-29 vol-shape analysis', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('fee incentive (the 20%-off promotion)', () => {
+  const policy = {
+    baseFee: 204_000_000n,
+    minFee: 22_000_000n,
+    expiryFeeWindowMs: 60_000n,
+    expiryFeeMaxMultiplier: 3_000_000_000n,
+    minEntryProbability: 100_000_000n,
+    maxEntryProbability: 900_000_000n,
+    inventoryImpactMaxRate: 0n,
+    inventoryImpactScale: 10_000_000_000n,
+    backingBufferLambda: 310_000_000n,
+  };
+  const at = Date.now();
+  const cost = (feeIncentiveBalance?: bigint) =>
+    estimateBoundaryCost({
+      fees: { ...policy, ...(feeIncentiveBalance != null && { feeIncentiveBalance }) } as never,
+      expiryMs: at + 120_000,
+      nowMs: at,
+      lowerUp: 0.5,
+      higherUp: null,
+      quantity: 100,
+    })!.costPerContract;
+
+  it('takes 20% off the fee while the market has sponsor balance, and only what is left', () => {
+    const full = cost(); // no balance: full fee
+    const fee = full - 0.5;
+    expect(cost(1_000_000_000n)).toBeCloseTo(0.5 + fee * 0.8, 6);
+    // $0.50 left on a $100-contract clip: the rebate stops at the balance.
+    expect(cost(500_000n)).toBeCloseTo(full - 0.005, 6);
+  });
+});

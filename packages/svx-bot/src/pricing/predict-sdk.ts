@@ -221,7 +221,18 @@ export async function resolvedPricer(
 // ── fees ────────────────────────────────────────────────────────────────────
 
 /** A market's snapshotted fee policy (from its `strike_exposure.config`). */
-export type FeePolicy = Parameters<typeof sdkCost.mintCost>[0]['fees'];
+export type FeePolicy = Parameters<typeof sdkCost.mintCost>[0]['fees'] & {
+  /**
+   * The market's sponsored fee-incentive balance (raw USDC). While it lasts,
+   * a sponsor pays `fee_incentive_subsidy_rate` (20%) of each MINT fee — the
+   * "20% off" promotion from 2026-09-29 ~12:00 UTC. Passed to the SDK so
+   * every estimate matches the chain's net cost; absent/zero = no rebate.
+   */
+  feeIncentiveBalance?: bigint;
+};
+
+/** The sponsor balance as the SDK's mintCost input (0 when unknown). */
+const incentiveInput = (fees: FeePolicy) => ({ feeIncentiveBalance: fees.feeIncentiveBalance ?? 0n });
 
 /**
  * Parse the fee policy out of an ExpiryMarket object's json. Each market
@@ -281,6 +292,7 @@ export function estimateMintCost(args: {
     const upRaw = probabilityToRaw(Number(up.toFixed(9)));
     const r = sdkCost.mintCost({
       fees: args.fees,
+      ...incentiveInput(args.fees),
       expiryMs: args.expiryMs,
       nowMs: args.nowMs,
       quantity: args.quantity,
@@ -334,6 +346,7 @@ export function estimateBoundaryCost(args: {
   try {
     const r = sdkCost.mintCost({
       fees: args.fees,
+      ...incentiveInput(args.fees),
       expiryMs: args.expiryMs,
       nowMs: args.nowMs,
       quantity: args.quantity,
@@ -349,19 +362,33 @@ export function estimateBoundaryCost(args: {
 }
 
 /** A market's fee policy straight off its object (cached: it is snapshotted at creation). */
-const feePolicyCache = new Map<string, FeePolicy>();
+const feePolicyCache = new Map<string, { fees: FeePolicy; atMs: number }>();
+/** The sponsor balance drains as the market trades; re-read it this often. */
+const INCENTIVE_REFRESH_MS = 30_000;
+
+/**
+ * A market's fee policy straight off its object — the policy is snapshotted
+ * at creation, the sponsored fee-incentive balance is live, so the object is
+ * re-read every INCENTIVE_REFRESH_MS.
+ */
 export async function marketFeePolicy(marketId: string): Promise<FeePolicy | null> {
   const hit = feePolicyCache.get(marketId);
-  if (hit) return hit;
+  if (hit && Date.now() - hit.atMs < INCENTIVE_REFRESH_MS) return hit.fees;
   const obj = await makeSuiClient()
     .getObject({ objectId: marketId, include: { json: true } })
     .catch(() => null);
   const json = obj?.object?.json as Record<string, unknown> | undefined;
-  const fees = json ? feePolicyFromMarketJson(json) : null;
-  if (fees) {
-    if (feePolicyCache.size > 500) feePolicyCache.clear();
-    feePolicyCache.set(marketId, fees);
+  const policy = json ? feePolicyFromMarketJson(json) : null;
+  if (!policy) return hit?.fees ?? null;
+  let balance = 0n;
+  try {
+    balance = BigInt(String(json?.fee_incentive_balance ?? 0));
+  } catch {
+    balance = 0n;
   }
+  const fees: FeePolicy = { ...policy, feeIncentiveBalance: balance };
+  if (feePolicyCache.size > 500) feePolicyCache.clear();
+  feePolicyCache.set(marketId, { fees, atMs: Date.now() });
   return fees;
 }
 

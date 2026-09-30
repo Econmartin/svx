@@ -3473,12 +3473,18 @@ export async function runVolModelTrade(
   e: VolRegimeEvent,
   deps: { ledger: LedgerStore; cfg: SvxConfig; live?: LiveContext; switchboard?: SwitchEntry[] },
 ): Promise<void> {
-  // vol_clock (vol_model with the clock-wave sd) takes a checkpoint while it
-  // is on; vol_model stands aside there so one market never gets both —
-  // they usually pick the same range (user-approved 2026-09-29).
+  // vol_model and vol_clock (the same trader with the clock-wave sd) usually
+  // pick the same range, so one market gets one of them: when both are on,
+  // the one scoring higher right now (per $1 contract, overall) trades —
+  // user-directed 2026-09-30, replacing "vol_clock always first".
   const board = deps.switchboard ?? evaluateSwitchboard(deps.ledger, suiNetwork());
+  const on = (sig: 'vol_clock' | 'vol_model') =>
+    board.find((x) => x.key === `${sig}@${e.slot}` && x.status === 'on');
   const isOn = (key: string) => board.some((x) => x.key === key && x.status === 'on');
-  const signal: 'vol_clock' | 'vol_model' = isOn(`vol_clock@${e.slot}`) ? 'vol_clock' : 'vol_model';
+  const clock = on('vol_clock');
+  const model = on('vol_model');
+  const signal: 'vol_clock' | 'vol_model' =
+    clock && (!model || clock.pnlPerContract >= model.pnlPerContract) ? 'vol_clock' : 'vol_model';
   const key = `${signal}@${e.slot}`;
   const scale =
     signal === 'vol_clock' ? clockSdFactor(e.market.expiryMs - e.ttmMs, e.market.expiryMs) : 1;

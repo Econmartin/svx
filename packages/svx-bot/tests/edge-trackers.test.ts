@@ -288,10 +288,15 @@ describe('edge executors (paper)', () => {
     expect(c!.rangeUpper).toBe(100_012);
   });
 
-  it('vol_clock takes the checkpoint while on; vol_model stands aside (one bet per market)', async () => {
+  it('with both on, the higher-scoring of vol_clock / vol_model trades (one bet per market)', async () => {
     const r = volRow({}, 0);
     const ev = (id: string) => ({ market: market(id), slot: 't2m', ttmMs: 120_000, payload: r.payload });
-    const both = [...sw('vol_clock@t2m', 'on'), ...sw('vol_model@t2m', 'on')];
+    const scored = (key: string, pnl: number) => sw(key, 'on').map((x) => ({ ...x, pnlPerContract: pnl }));
+    // vol_model ahead (+10.2¢ vs +9.4¢, t65s on 2026-09-30): vol_model trades.
+    await runVolModelTrade(ev('0xb'), deps([...scored('vol_clock@t2m', 0.094), ...scored('vol_model@t2m', 0.102)]));
+    expect(ledger.openTrades().map((t) => t.signalId)).toEqual(['vol_model@t2m']);
+    ledger.settleTradesForOracle('0xb', 0, Date.now());
+    const both = [...sw('vol_clock@t2m', 'on'), ...sw('vol_model@t2m', 'on')]; // tied: vol_clock
     await runVolModelTrade(ev('0xc'), deps(both));
     expect(ledger.openTrades().map((t) => t.signalId)).toEqual(['vol_clock@t2m']);
     // vol_clock off: vol_model trades as before.

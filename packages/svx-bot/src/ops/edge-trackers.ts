@@ -552,9 +552,12 @@ export const TAIL_SLOTS: Array<{ slot: string; minMs: number; maxMs: number }> =
 // By the next morning some markets admitted only 10–90¢ per boundary, so
 // the ladder runs up to 15¢ and the strategies take, per side, the cheapest
 // rung the market actually admits (inadmissible rungs are never recorded).
-export const TAIL_TARGETS = [0.05, 0.06, 0.08, 0.1, 0.12, 0.15];
+// The 2026-10-20 relaunch raised the floor to 15¢ per boundary, which (with
+// the 0.5¢ headroom) refused every rung up to 15¢ — so the ladder runs on to
+// 25¢. Rungs a market refuses are simply not recorded.
+export const TAIL_TARGETS = [0.05, 0.06, 0.08, 0.1, 0.12, 0.15, 0.18, 0.2, 0.25];
 /** Tail strategies skip sides dearer than this (the edge is in cheap tails). */
-export const TAIL_MAX_TARGET = 0.15;
+export const TAIL_MAX_TARGET = 0.25;
 /** tail_hot trades only when realized vol (scaled) exceeds chain vol by this. */
 export const TAIL_HOT_RATIO = 1.1;
 
@@ -717,9 +720,11 @@ export function tailPicks(signal: TailSignal, p: TailPayload, ttmMs: number): Ta
     if (burst == null || burst < TAIL_BURST_RATIO) return [];
   }
   if (signal === 'tail_busy') {
-    // The bots' filter: busy markets only, and the 12¢ rung each side.
+    // The bots' filter: busy markets only. The 12¢ rung when the market
+    // admits it; under a higher floor, the cheapest rung it does.
     if (p.rv60 == null || p.rv60 < TAIL_BUSY_RV60) return [];
-    return p.quotes.filter((q) => q.target === TAIL_BUSY_TARGET && inTradeBand(q.prob));
+    const at12 = p.quotes.filter((q) => q.target === TAIL_BUSY_TARGET && inTradeBand(q.prob));
+    if (at12.length) return at12;
   }
   const picks: TailQuote[] = [];
   for (const direction of ['up', 'down'] as const) {

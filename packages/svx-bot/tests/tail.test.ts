@@ -280,3 +280,17 @@ describe('tail_busy (the bots’ busy-market filter)', () => {
     expect(strategyTagFor('tail_busy')).toBe('edge_vol');
   });
 });
+
+describe('tails under the 15¢ floor (2026-10-20 relaunch)', () => {
+  it('every tail line takes the cheapest rung the market admits, tail_busy included', () => {
+    const quotes = [
+      { direction: 'up' as const, target: 0.18, strike: 100_048, prob: 0.18, cost: 0.25 },
+      { direction: 'up' as const, target: 0.2, strike: 100_042, prob: 0.2, cost: 0.27 },
+      { direction: 'down' as const, target: 0.18, strike: 99_952, prob: 0.18, cost: 0.25 },
+    ];
+    const p = payload({ quotes, rv60: 45 / Math.sqrt(60) });
+    const sides = (sig: 'tail' | 'tail_busy') => tailPicks(sig, p, 120_000).map((q) => [q.direction, q.target]);
+    expect(sides('tail')).toEqual([['up', 0.18], ['down', 0.18]]);
+    expect(sides('tail_busy')).toEqual([['up', 0.18], ['down', 0.18]]);
+  });
+});

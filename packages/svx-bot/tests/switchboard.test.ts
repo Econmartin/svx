@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+// Fixtures use small epoch timestamps: score everything, not just post-relaunch.
+process.env.SVX_SCORE_SINCE_MS = '0';
 import { LedgerStore, type ShadowDecisionInput } from '../src/ledger/store.js';
 import { backfillEntryEdges, enabledAt, evaluateSwitchboard } from '../src/strategy/switchboard.js';
 
@@ -203,6 +206,19 @@ import {
   strategyStop,
   switchboardRealized24h,
 } from '../src/strategy/switchboard.js';
+
+describe('scoring window', () => {
+  it('scores from the 2026-10-20 relaunch unless overridden', async () => {
+    const { SWITCHBOARD, scoreSinceMs } = await import('../src/strategy/switchboard.js');
+    expect(new Date(SWITCHBOARD.scoreSinceMs).toISOString()).toBe('2026-10-20T19:00:00.000Z');
+    const prev = process.env.SVX_SCORE_SINCE_MS;
+    delete process.env.SVX_SCORE_SINCE_MS;
+    expect(scoreSinceMs()).toBe(SWITCHBOARD.scoreSinceMs);
+    process.env.SVX_SCORE_SINCE_MS = '123';
+    expect(scoreSinceMs()).toBe(123);
+    process.env.SVX_SCORE_SINCE_MS = prev;
+  });
+});
 
 describe('harvest v2 on the switchboard', () => {
   let tmp: string;

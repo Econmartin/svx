@@ -45,6 +45,14 @@ export const SWITCHBOARD = {
   reevaluateMs: 5 * 60_000,
   /** Paper decisions a strategy needs before it may switch ON. */
   minPaperTrades: 50,
+  /**
+   * Score only rows from here on. Predict paused 2026-09-30 and relaunched
+   * ~19:06 UTC 2026-10-20 with new rules (15–85¢ entry band, 1m markets
+   * listed ~60s out, $400/market fee rebate), so every line re-earns its
+   * switch on post-relaunch data (user-approved 2026-10-21). Older rows stay
+   * in the ledger.
+   */
+  scoreSinceMs: Date.UTC(2026, 9, 20, 19, 0),
   /** ON needs mean − onStdErrs·stderr above zero (profit per $1 contract). */
   onStdErrs: 2,
   /** Switch OFF at or below this mean (USD per contract). */
@@ -187,7 +195,9 @@ export interface SwitchEntry {
  */
 export const PAPER_ONLY_SIGNALS: ReadonlySet<string> = new Set(['tail_burst', 'tail_busy']);
 
-const META_KEY = 'switchboard_v1';
+// v2 from the 2026-10-20 relaunch: switch states (incl. live-check blocks
+// counted in old decision numbers) start fresh with the new scoring window.
+const META_KEY = 'switchboard_v2';
 let cache: { atMs: number; entries: SwitchEntry[] } | null = null;
 
 /** Harvest v2 (buy the 60–90¢ favourite 45–150s out) on the switchboard. It
@@ -216,15 +226,24 @@ interface SwitchInputs {
   harvest: ReturnType<LedgerStore['settledStrategyTradesSince']>;
 }
 
+/** Start of the scoring window; SVX_SCORE_SINCE_MS (epoch ms) overrides. */
+export function scoreSinceMs(): number {
+  const env = Number(process.env.SVX_SCORE_SINCE_MS);
+  return process.env.SVX_SCORE_SINCE_MS != null && Number.isFinite(env) ? env : SWITCHBOARD.scoreSinceMs;
+}
+
 function switchInputs(ledger: LedgerStore, network: string): SwitchInputs {
+  const since = scoreSinceMs();
   const liveStart = ledger.firstLivePredictTradeMs();
   return {
-    shadow: ledger.settledShadowDecisions(network, 0),
-    jumps: ledger.settledEdgeProbes<JumpPayload>(network, 'jump', 0),
-    vols: ledger.settledEdgeProbes<VolRegimePayload>(network, 'vol_regime', 0),
-    tails: ledger.settledEdgeProbes<TailPayload>(network, 'tail', 0),
+    shadow: ledger.settledShadowDecisions(network, since),
+    jumps: ledger.settledEdgeProbes<JumpPayload>(network, 'jump', since),
+    vols: ledger.settledEdgeProbes<VolRegimePayload>(network, 'vol_regime', since),
+    tails: ledger.settledEdgeProbes<TailPayload>(network, 'tail', since),
     harvest:
-      liveStart == null ? [] : ledger.settledStrategyTradesSince('calibration_harvest', liveStart),
+      liveStart == null
+        ? []
+        : ledger.settledStrategyTradesSince('calibration_harvest', Math.max(liveStart, since)),
   };
 }
 

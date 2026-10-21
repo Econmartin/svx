@@ -128,7 +128,7 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
   app.use(express.json());
 
   app.get('/health', (_req, res) => {
-    res.json({ ok: true, uptimeSec: Math.round((Date.now() - deps.state.startedAtMs) / 1000) });
+    res.json({ ok: true, node: process.version, uptimeSec: Math.round((Date.now() - deps.state.startedAtMs) / 1000) });
   });
 
   app.get('/status', (req, res) => {

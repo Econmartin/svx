@@ -4,7 +4,9 @@
 # node_modules. Slightly larger image than the standalone-output approach, but
 # avoids Next's tracer behaving unpredictably under pnpm + Docker.
 
-FROM node:22-alpine AS base
+# Pinned to an exact patch: a floating `22-alpine` tag can be served from the
+# host's layer cache and silently skip security releases.
+FROM node:22.23.4-alpine AS base
 RUN apk add --no-cache libc6-compat
 RUN corepack enable && corepack prepare pnpm@8.15.9 --activate
 WORKDIR /app

@@ -27,6 +27,22 @@ import { HARVEST_KEY, strategyTagFor, type SwitchEntry } from '../strategy/switc
 
 export const PREDICT_BASELINE_KEY = 'predict_account_baseline';
 
+/**
+ * Account debits no trade row carries: queued orders that were refunded but
+ * kept their $0.02 order fee (Predict v4). Running total, USD.
+ */
+const UNBOOKED_DEBITS_KEY = 'predict_unbooked_debits_usdc';
+
+export function noteUnbookedDebit(ledger: LedgerStore, usd: number): void {
+  if (!(usd > 0)) return;
+  const prev = Number(ledger.getMeta(UNBOOKED_DEBITS_KEY) ?? 0) || 0;
+  ledger.setMeta(UNBOOKED_DEBITS_KEY, String(prev + usd));
+}
+
+export function unbookedDebitsUsdc(ledger: LedgerStore): number {
+  return Number(ledger.getMeta(UNBOOKED_DEBITS_KEY) ?? 0) || 0;
+}
+
 interface Baseline {
   balanceUsdc: number;
   offsetUsdc: number;
@@ -101,7 +117,7 @@ let baselineAtMs: number | null = null;
  * The first read after a (re)baseline becomes the baseline.
  */
 export function recordBankSnapshot(ledger: LedgerStore, balanceUsdc: number, nowMs = Date.now()): void {
-  const offset = predictLedgerOffsetUsdc(ledger.livePredictTradesSince(0));
+  const offset = predictLedgerOffsetUsdc(ledger.livePredictTradesSince(0)) - unbookedDebitsUsdc(ledger);
   let baseline: Baseline | null = null;
   try {
     const raw = ledger.getMeta(PREDICT_BASELINE_KEY);

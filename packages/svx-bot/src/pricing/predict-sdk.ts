@@ -460,6 +460,59 @@ function descriptorFor(o: PredictOrder) {
     : { ...base, strike: o.strike, side: o.direction };
 }
 
+// ── Queued orders (Predict v4, delayed execution) ───────────────────────────
+//
+// From the 2026-10-20 relaunch, mainnet Predict fills mints only through a
+// queue: an order is placed now and filled ~0.8s later at Pyth's signed price
+// for its tick, by a keeper, as an "Open record" in the market's queue (not a
+// position in the account). The keeper pays every Open record at expiry
+// (OpenRecordSettled), so these never need claimSettled. The immediate
+// tx.mint is retired on-chain (protocol_config abort 3).
+
+export { QUEUED_ORDERS_SINCE_MS } from '../ledger/store.js';
+
+type MintPlanT = Awaited<ReturnType<ReturnType<typeof predict>['read']['planMint']>>;
+export type QueuedMintPlan = MintPlanT;
+
+/** The queued-order plan for an exact-quantity mint: quote, limits, refusal. */
+export async function planQueuedMint(
+  owner: string,
+  o: PredictOrder,
+  slippageCents: number,
+): Promise<QueuedMintPlan> {
+  return predict().read.planMint(owner, descriptorFor(o) as never, {
+    quantity: o.quantity,
+    slippageCents,
+  });
+}
+
+/** The enqueue transaction for a plan (its limits travel with it). */
+export async function buildQueuedMintTx(owner: string, o: PredictOrder, plan: QueuedMintPlan): Promise<Transaction> {
+  const r = await predict().tx.enqueuePlan(owner, descriptorFor(o) as never, plan);
+  return r.transaction as Transaction;
+}
+
+/** The queue record ID from an enqueue transaction's events, or null. */
+export function decodeEnqueueRecordId(
+  events: Array<{ eventType?: string; type?: string; bcs?: Uint8Array | string }> | undefined,
+): bigint | null {
+  if (!events?.length) return null;
+  try {
+    return predict().decode.enqueue({ events }).recordId;
+  } catch {
+    return null;
+  }
+}
+
+/** Poll a queued order until it is filled, refunded or closed (or the timeout). */
+export async function waitQueuedOutcome(o: PredictOrder, recordId: bigint, timeoutMs: number) {
+  return predict().read.waitForOutcome(
+    { underlying: o.underlying, expiryMs: o.expiryMs, marketId: o.marketId } as never,
+    recordId,
+    { timeoutMs },
+  );
+}
+
 /**
  * Exact dry-run of the mint against the real account and market — real fees,
  * real code path. Throws the same typed error the real mint would, so it

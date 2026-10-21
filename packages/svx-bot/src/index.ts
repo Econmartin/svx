@@ -3199,6 +3199,7 @@ export async function runFadeSpikeDecision(
       const liveQuantity = fadeSpikeQuantity(priceNow, priceNow + feePerContract, liveCap);
       if (liveQuantity == null) return skip('clip_above_cost_cap');
       const outcome = await mintLive({
+        ledger,
         sui: live.sui,
         keypair: live.keypair,
         owner: live.operatorAddress,
@@ -3366,6 +3367,7 @@ async function runEdgeTrade(
   if (!blocked && live) {
     const base = { underlying: 'BTC', expiryMs: a.expiryMs, marketId: a.marketId, quantity };
     const outcome = await mintLive({
+      ledger,
       sui: live.sui,
       keypair: live.keypair,
       owner: live.operatorAddress,
@@ -3666,6 +3668,7 @@ async function runHarvestV2Step(deps: {
       if (switchQty != null) quantityDusdc = switchQty;
       try {
         const outcome = await mintLive({
+          ledger,
           sui: live.sui,
           keypair: live.keypair,
           owner: live.operatorAddress,
@@ -3873,6 +3876,7 @@ async function maybeFavoredMint(args: {
     // exec/mint-v2.ts.
     try {
       const outcome = await mintLive({
+        ledger,
         sui: live.sui,
         keypair: live.keypair,
         owner: live.operatorAddress,

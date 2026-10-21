@@ -14,11 +14,11 @@ importers:
         specifier: ^1.1.0
         version: 1.9.2
       '@mysten/deepbook-v3':
-        specifier: ^2.6.4
-        version: 2.6.4(@mysten/sui@2.33.1(typescript@5.9.3))
+        specifier: ^2.8.0
+        version: 2.8.0(@mysten/sui@2.37.0(typescript@5.9.3))
       '@mysten/sui':
-        specifier: ^2.33.1
-        version: 2.33.1(typescript@5.9.3)
+        specifier: ^2.37.0
+        version: 2.37.0(typescript@5.9.3)
       '@nktkas/hyperliquid':
         specifier: ^0.32.2
         version: 0.32.2(typescript@5.9.3)
@@ -591,24 +591,24 @@ packages:
   '@mysten/bcs@1.9.2':
     resolution: {integrity: sha512-kBk5xrxV9OWR7i+JhL/plQrgQ2/KJhB2pB5gj+w6GXhbMQwS3DPpOvi/zN0Tj84jwPvHMllpEl0QHj6ywN7/eQ==}
 
-  '@mysten/bcs@2.1.2':
-    resolution: {integrity: sha512-fv6lyuZMTHN0xRlu4GYiV/UXUrdJDOHbXm1KfZYEU0sy/t+22yTrTVtWnAQv1Km7eyB3qHhwIrAG2aem4JMocw==}
+  '@mysten/bcs@2.1.3':
+    resolution: {integrity: sha512-sg3hstwDLQQmQTpiX8Vzs13bEEGTqnhp1gUzBLlVQ493xyTTCDwB/jXGzT0g2I/GXd2o1B3s7Bd67Ua3VZo+Jw==}
 
-  '@mysten/deepbook-v3@2.6.4':
-    resolution: {integrity: sha512-NyXIf7njJvet+BADd+6BQ/wa56lQzrDge33LI7L4iPTN7JeODdANJcIwWWcIqGpGTpwHSSFdRjmmz+9ruXIjqQ==}
+  '@mysten/deepbook-v3@2.8.0':
+    resolution: {integrity: sha512-lwzjLU8kkWXwiD7FvvRNPCZbzj5EuubZjOHMVRDK55v9f3AEXcMayuGODuE8w6r8r6cjMAPcyff7AF8XXtJSKA==}
     engines: {node: '>=22'}
     peerDependencies:
-      '@mysten/sui': ^2.33.1
+      '@mysten/sui': ^2.37.0
 
-  '@mysten/sui@2.33.1':
-    resolution: {integrity: sha512-b/Nl9H7YbkrHu9GcXvWx14rzCkDMmVG2U3fw9BmpewNAZT7+Rf2fMRP0t6GdFitweHXZKUX91VC5V4O7Cpixpg==}
+  '@mysten/sui@2.37.0':
+    resolution: {integrity: sha512-WW5gs8y9EE3sd5u4vqA4Rw9Oo6iiA/yQRmRnj9KAtF59ykYpgUtSw+u9tJKCpZrN+0tPTeTUdUm6+o/eBYCHdw==}
     engines: {node: '>=22'}
 
   '@mysten/utils@0.2.0':
     resolution: {integrity: sha512-CM6kJcJHX365cK6aXfFRLBiuyXc5WSBHQ43t94jqlCAIRw8umgNcTb5EnEA9n31wPAQgLDGgbG/rCUISCTJ66w==}
 
-  '@mysten/utils@0.4.1':
-    resolution: {integrity: sha512-gffLJ84CbqG/CcOPuVlwXIRu37tFn0BtUx7CQtbLwJzWjUE7FU2Gq8BXWjzxImnvufcyLTaNWtCPG6wq22Zhog==}
+  '@mysten/utils@0.4.2':
+    resolution: {integrity: sha512-K/5eBuYKxUFCrYcic1lvYvWE9OVSH581cjVjwsSJGUqPit91nZq2acUwes+B4lo98VE/CILIUeBcyEIvuNxMhA==}
 
   '@next/env@14.2.35':
     resolution: {integrity: sha512-DuhvCtj4t9Gwrx80dmz2F4t/zKQ4ktN8WrMwOuVzkJfBilwAwGr6v16M5eI8yCuZ63H9TTuEU09Iu2HqkzFPVQ==}
@@ -679,6 +679,10 @@ packages:
     resolution: {integrity: sha512-2I0gnIVPtfnMw9ee9h1dJG7tp81+8Ob3OJb3Mv37rx5L40/b0i7djjCVvGOVqc9AEIQyvyu1i6ypKdFw8R8gQw==}
     engines: {node: ^14.21.3 || >=16}
 
+  '@noble/ciphers@2.4.0':
+    resolution: {integrity: sha512-AnjFn0Jv92laAkvMrghlFZq4qQCIN/4DxFV/eooqtC2YTjB7kBeLMS2T9KJX4Dn+ZVXLOwK0lSgqDtx9gvxtiw==}
+    engines: {node: '>= 20.19.0'}
+
   '@noble/curves@1.9.1':
     resolution: {integrity: sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA==}
     engines: {node: ^14.21.3 || >=16}
@@ -701,6 +705,10 @@ packages:
 
   '@noble/hashes@2.4.0':
     resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
+
+  '@noble/post-quantum@0.7.1':
+    resolution: {integrity: sha512-+P9981IiAnVh+rmcubozzVwrEy3XsN/tMhTnvsjV9VDaYpOnNCqWqKo2FLWxbu92YHfjGIlE5XnW175UK+ln+Q==}
     engines: {node: '>= 20.19.0'}
 
   '@nodelib/fs.scandir@2.1.5':
@@ -2829,15 +2837,15 @@ snapshots:
       '@mysten/utils': 0.2.0
       '@scure/base': 1.2.6
 
-  '@mysten/bcs@2.1.2':
+  '@mysten/bcs@2.1.3':
     dependencies:
-      '@mysten/utils': 0.4.1
+      '@mysten/utils': 0.4.2
       '@scure/base': 2.4.0
 
-  '@mysten/deepbook-v3@2.6.4(@mysten/sui@2.33.1(typescript@5.9.3))':
+  '@mysten/deepbook-v3@2.8.0(@mysten/sui@2.37.0(typescript@5.9.3))':
     dependencies:
-      '@mysten/bcs': 2.1.2
-      '@mysten/sui': 2.33.1(typescript@5.9.3)
+      '@mysten/bcs': 2.1.3
+      '@mysten/sui': 2.37.0(typescript@5.9.3)
       '@noble/hashes': 2.4.0
       axios: 1.20.0
       axios-retry: 4.5.0(axios@1.20.0)
@@ -2845,13 +2853,14 @@ snapshots:
       - debug
       - supports-color
 
-  '@mysten/sui@2.33.1(typescript@5.9.3)':
+  '@mysten/sui@2.37.0(typescript@5.9.3)':
     dependencies:
       '@graphql-typed-document-node/core': 3.2.0(graphql@17.0.2)
-      '@mysten/bcs': 2.1.2
-      '@mysten/utils': 0.4.1
+      '@mysten/bcs': 2.1.3
+      '@mysten/utils': 0.4.2
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
+      '@noble/post-quantum': 0.7.1
       '@protobuf-ts/grpcweb-transport': 2.11.1
       '@protobuf-ts/runtime': 2.11.1
       '@protobuf-ts/runtime-rpc': 2.11.1
@@ -2871,9 +2880,7 @@ snapshots:
     dependencies:
       '@scure/base': 1.2.6
 
-  '@mysten/utils@0.4.1':
-    dependencies:
-      '@scure/base': 2.4.0
+  '@mysten/utils@0.4.2': {}
 
   '@next/env@14.2.35': {}
 
@@ -2916,6 +2923,8 @@ snapshots:
 
   '@noble/ciphers@1.3.0': {}
 
+  '@noble/ciphers@2.4.0': {}
+
   '@noble/curves@1.9.1':
     dependencies:
       '@noble/hashes': 1.8.0
@@ -2933,6 +2942,12 @@ snapshots:
   '@noble/hashes@2.2.0': {}
 
   '@noble/hashes@2.4.0': {}
+
+  '@noble/post-quantum@0.7.1':
+    dependencies:
+      '@noble/ciphers': 2.4.0
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:

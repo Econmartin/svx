@@ -100,20 +100,48 @@ describe('mainnet fee policy', () => {
   });
 });
 
-describe('mintLive gates act on the exact quote', () => {
+describe('mintLive: queued orders (Predict v4), gated on the exact plan', () => {
   afterEach(() => {
     vi.doUnmock('../src/pricing/predict-sdk.js');
     vi.doUnmock('../src/exec/submit.js');
     vi.resetModules();
   });
 
-  async function run(quote: { cost: number; entryProbability: number; quantity: number }) {
-    const buildMintTx = vi.fn(async () => ({}) as never);
-    const submitTx = vi.fn(async () => ({ ok: true, digest: 'D', events: [] }));
+  type Outcome = { outcome: string; order: { view: Record<string, unknown> } | null } | null;
+  async function run(
+    quote: { cost: number; entryProbability: number; quantity: number },
+    opts: { accepting?: boolean; refusal?: string | null; outcome?: Outcome; ledger?: unknown } = {},
+  ) {
+    const planQueuedMint = vi.fn(async () => ({
+      quote: { ...quote, premium: quote.cost * 0.9 },
+      orderFee: 0.02,
+      accepting: opts.accepting ?? true,
+      refusal: opts.refusal ?? null,
+      expectedDebit: quote.cost + 0.02,
+      totalDebit: quote.cost + 0.5,
+    }));
+    const buildQueuedMintTx = vi.fn(async () => ({}) as never);
+    const submitTx = vi.fn(async () => ({ ok: true, digest: 'D', events: [{}] }));
+    const waitQueuedOutcome = vi.fn(async () =>
+      opts.outcome === undefined
+        ? {
+            outcome: 'filled',
+            order: {
+              view: {
+                state: 'filled',
+                quantityRaw: BigInt(quote.quantity * 1e6),
+                amountRaw: BigInt(Math.round(quote.cost * 0.99 * 1e6)),
+                position: { orderId: 99n },
+              },
+            },
+          }
+        : opts.outcome,
+    );
     vi.doMock('../src/pricing/predict-sdk.js', () => ({
-      quoteMint: vi.fn(async () => quote),
-      buildMintTx,
-      decodeMintFill: () => null,
+      planQueuedMint,
+      buildQueuedMintTx,
+      decodeEnqueueRecordId: () => 7n,
+      waitQueuedOutcome,
     }));
     vi.doMock('../src/exec/submit.js', () => ({ submitTx }));
     const { mintLive, DEFAULT_LIVE_MINT_GATES } = await import('../src/exec/mint-v2.js');
@@ -125,11 +153,12 @@ describe('mintLive gates act on the exact quote', () => {
         underlying: 'BTC', expiryMs: 1, marketId: '0xm', strike: 84_000, direction: 'up', quantity: 10,
       },
       gates: { ...DEFAULT_LIVE_MINT_GATES, maxFeeDrag: 0.03, maxEntryProbability: 0.9 },
+      ...(opts.ledger ? { ledger: opts.ledger as never } : {}),
     });
-    return { out, buildMintTx, submitTx };
+    return { out, planQueuedMint, submitTx };
   }
 
-  it('skips when the fee drag exceeds the gate (mainnet launch fees)', async () => {
+  it('skips when the fee drag (order fee included) exceeds the gate', async () => {
     const { out, submitTx } = await run({ cost: 8.383, entryProbability: 0.75, quantity: 10 });
     expect(out).toMatchObject({ kind: 'skipped', reason: 'fee_drag' });
     expect(submitTx).not.toHaveBeenCalled();
@@ -140,14 +169,42 @@ describe('mintLive gates act on the exact quote', () => {
     expect(out).toMatchObject({ kind: 'skipped', reason: 'entry_above_band' });
   });
 
-  it('mints with both caps derived from the quote when fees clear', async () => {
-    const { out, buildMintTx } = await run({ cost: 7.7, entryProbability: 0.75, quantity: 10 });
+  it("skips what the queue's own preflight refuses, without sending", async () => {
+    const { out, submitTx } = await run(
+      { cost: 7.7, entryProbability: 0.75, quantity: 10 },
+      { accepting: false, refusal: 'entry-band' },
+    );
+    expect(out).toMatchObject({ kind: 'skipped', reason: 'refused:entry-band' });
+    expect(submitTx).not.toHaveBeenCalled();
+  });
+
+  it('queues with slippage in cents and books what the fill actually paid plus the order fee', async () => {
+    const { out, planQueuedMint } = await run({ cost: 7.7, entryProbability: 0.75, quantity: 10 });
+    expect((planQueuedMint.mock.calls[0] as unknown[])[2]).toBe(2); // 0.02 probability slippage → 2¢
     expect(out.kind).toBe('filled');
-    const caps = (buildMintTx.mock.calls[0] as unknown[])[2] as {
-      maxCost: number;
-      maxProbability: number;
-    };
-    expect(caps.maxCost).toBeCloseTo(7.7 * 1.02, 6);
-    expect(caps.maxProbability).toBeCloseTo(0.77, 6);
+    if (out.kind !== 'filled') return;
+    expect(out.recordId).toBe('7');
+    expect(out.fill!.quantityDusdc).toBe(10);
+    expect(out.fill!.costUsdc).toBeCloseTo(7.7 * 0.99 + 0.02, 6);
+    expect(out.fill!.orderId).toBe('99');
+  });
+
+  it('a refund that keeps the order fee is booked as an unbooked debit for the bank check', async () => {
+    const meta = new Map<string, string>();
+    const ledger = { getMeta: (k: string) => meta.get(k), setMeta: (k: string, v: string) => meta.set(k, v) };
+    const { out } = await run(
+      { cost: 7.7, entryProbability: 0.75, quantity: 10 },
+      {
+        ledger,
+        outcome: { outcome: 'refunded', order: { view: { state: 'refunded', reason: { key: 'limits', feeKept: true } } } },
+      },
+    );
+    expect(out).toMatchObject({ kind: 'skipped', reason: 'refunded:limits' });
+    expect(Number(meta.get('predict_unbooked_debits_usdc'))).toBeCloseTo(0.02);
+  });
+
+  it('an order the keeper has not resolved in time is reported, not booked', async () => {
+    const { out } = await run({ cost: 7.7, entryProbability: 0.75, quantity: 10 }, { outcome: { outcome: 'timeout', order: null } });
+    expect(out).toMatchObject({ kind: 'failed', reason: 'queue_timeout' });
   });
 });

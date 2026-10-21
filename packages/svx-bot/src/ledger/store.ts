@@ -350,6 +350,15 @@ CREATE TABLE IF NOT EXISTS meta (
  */
 const OPEN_POLY_STATUSES = `('filled', 'partial', 'submitted')`;
 
+/**
+ * Predict v4 cutover on mainnet (2026-10-20 relaunch): live trades from here
+ * on are queued orders whose Open records the keeper pays at expiry
+ * (OpenRecordSettled) — no claim, so settlement marks them paid.
+ */
+export const QUEUED_ORDERS_SINCE_MS = Date.UTC(2026, 9, 20, 19, 0);
+/** redeem_tx_digest for a queued trade the keeper pays at settlement. */
+export const KEEPER_PAID = 'queue_keeper';
+
 export class LedgerStore {
   private readonly db: DB;
 
@@ -615,6 +624,15 @@ export class LedgerStore {
         upd.run({ payout, pnl, sprice: settlementPrice, sat: nowMs, id: t.id });
         count++;
       }
+      // Queued (v4) live trades: the keeper pays the Open record at expiry,
+      // so there is nothing to claim. A payout the keeper skipped would show
+      // as account-vs-ledger drift in the bank check.
+      this.db
+        .prepare(
+          `UPDATE trades SET redeem_tx_digest = ? WHERE oracle_id = ? AND settled = 1
+             AND mode = 'live' AND ts_ms >= ? AND redeem_tx_digest IS NULL`,
+        )
+        .run(KEEPER_PAID, oracleId, QUEUED_ORDERS_SINCE_MS);
       return count;
     });
     return tx(trades);

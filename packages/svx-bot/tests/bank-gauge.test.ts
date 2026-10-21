@@ -101,3 +101,42 @@ describe('bank gauge', () => {
     expect(bankGauge(ledger, board).bank.sinceBaselineUsdc).toBe(-0.5);
   });
 });
+
+import { KEEPER_PAID, QUEUED_ORDERS_SINCE_MS } from '../src/ledger/store.js';
+import { noteUnbookedDebit } from '../src/ops/bank-gauge.js';
+
+describe('queued orders (Predict v4) in the books', () => {
+  const insert = (tsMs: number, oracleId: string) =>
+    ledger.insertTrade({
+      signalId: 'vol_model@t65s',
+      timestampMs: tsMs,
+      mode: 'live',
+      oracleId,
+      underlyingAsset: 'BTC',
+      expiryMs: tsMs + 60_000,
+      strike: 64_000,
+      direction: 'down',
+      quantityDusdc: 5,
+      costPrice: 0.7,
+      costUsdc: 3.5,
+      settled: false,
+      strategy: 'edge_vol',
+    });
+
+  it('marks a post-cutover live trade keeper-paid at settlement; older ones still wait for a claim', () => {
+    insert(QUEUED_ORDERS_SINCE_MS + 1_000, '0xnew');
+    insert(QUEUED_ORDERS_SINCE_MS - 86_400_000, '0xold');
+    ledger.settleTradesForOracle('0xnew', 63_000, QUEUED_ORDERS_SINCE_MS + 70_000);
+    ledger.settleTradesForOracle('0xold', 63_000, QUEUED_ORDERS_SINCE_MS + 70_000);
+    const byOracle = Object.fromEntries(ledger.livePredictTradesSince(0).map((t) => [t.oracleId, t.redeemTxDigest]));
+    expect(byOracle['0xnew']).toBe(KEEPER_PAID);
+    expect(byOracle['0xold']).toBeUndefined();
+  });
+
+  it('a kept order fee is not drift: the bank check expects it', () => {
+    recordBankSnapshot(ledger, 100, T0);
+    noteUnbookedDebit(ledger, 0.02);
+    for (let i = 0; i < 5; i++) recordBankSnapshot(ledger, 99.98, T0);
+    expect(bankGauge(ledger, board).bank.driftUsdc).toBe(0);
+  });
+});

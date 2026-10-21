@@ -35,7 +35,8 @@
   },
   "dependencies": {
     "@mysten/bcs": "^1.1.0",
-    "@mysten/sui": "^2.33.1",
+    "@mysten/deepbook-v3": "^2.8.0",
+    "@mysten/sui": "^2.37.0",
     "@nktkas/hyperliquid": "^0.32.2",
     "@polymarket/clob-client-v2": "^1.0.6",
     "@types/js-yaml": "^4.0.9",
@@ -50,8 +51,7 @@
     "svx-shared": "workspace:*",
     "viem": "^2.21.0",
     "ws": "^8.18.0",
-    "zod": "^3.23.8",
-    "@mysten/deepbook-v3": "^2.6.4"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",

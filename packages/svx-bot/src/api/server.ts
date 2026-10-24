@@ -551,6 +551,25 @@ export function startApiServer(deps: ApiDeps): { app: Express; stop: () => void 
   });
 
   /**
+   * The settled probe rows behind /edge-trackers, for analysis off the box
+   * (read-only research data: chain quotes, realized vol, settlement).
+   *
+   *   GET /edge-trackers/rows?kind=vol_regime|jump|tail&sinceMs=<epoch-ms>&limit=<n>
+   */
+  app.get('/edge-trackers/rows', (req, res) => {
+    const kind = String(req.query.kind ?? 'vol_regime');
+    if (!['vol_regime', 'jump', 'tail'].includes(kind)) {
+      res.status(400).json({ error: 'kind must be vol_regime, jump or tail' });
+      return;
+    }
+    const sinceMs = clampFloat(req.query.sinceMs, 0, Number.MAX_SAFE_INTEGER, 0);
+    const limit = clampInt(req.query.limit, 1, 20_000, 5_000);
+    const network = suiNetwork();
+    const rows = deps.ledger.settledEdgeProbes<unknown>(network, kind, sinceMs);
+    res.json({ network, kind, total: rows.length, rows: rows.slice(-limit) });
+  });
+
+  /**
    * Predict vs Polymarket 5-minute BTC windows: how often buying opposite
    * sides on the two venues cost < $1 all-in, and what those pairs realized
    * once the venues' different settlement rules are counted. Read-only.

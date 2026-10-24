@@ -21,7 +21,8 @@
  *    inside the noise on 3 days, so this records exact chain quotes for
  *    up / down / central $25-$50-$100 windows at t4m, t2m and t65s (before
  *    the last-minute fee ramp), with realized and chain vol, and scores
- *    them by regime.
+ *    them by regime. Since 2026-10-24 also a $15 window, and every candidate
+ *    again by absolute realized vol in $/min (see WINDOW_WIDTHS).
  *
  * GET /edge-trackers reports both. SVX_EDGE_TRACKERS=false disables.
  *
@@ -365,7 +366,30 @@ const VOL_SLOTS: Array<{ slot: string; minMs: number; maxMs: number }> = [
 ];
 /** Realized-vol scale fitted on the launch tape (log-loss optimum 1.2–1.35). */
 export const RV_SCALE = 1.35;
-const WINDOW_WIDTHS = [25, 50, 100];
+/**
+ * Central windows quoted at every checkpoint. W15 was added 2026-10-24 after
+ * the #1 mainnet wallet's post-relaunch run: $12–18 windows centred on the
+ * live index, bought at listing (~56s) in minutes whose trailing 15-minute
+ * realized vol was under ~$12/min, won 67% against a ~33% price (+18.7¢ per
+ * contract after the two boundary fees). It is recorded and scored only: the
+ * model trader does not pick it until its own score says so.
+ */
+const WINDOW_WIDTHS = [15, 25, 50, 100];
+/** Candidates the model trader (and so vol_model / vol_clock live) may pick. */
+const MODEL_TRADER_CANDIDATES = new Set(['up', 'down', 'W25', 'W50', 'W100']);
+/**
+ * Absolute realized-vol buckets, in $ per minute (rv15 · √60). The ratio
+ * buckets below compare realized with the chain; these ask the simpler
+ * question the wallet study raised: is the tape quiet in dollars right now?
+ * Binance 10–24 Oct: P(|1m move| ≤ $7) was 69% under $8/min, 59% at $8–12,
+ * 46% at $12–16, 16% above $30 — while the chain priced a ±$7 window near
+ * 33% throughout.
+ */
+export const RV_BUCKETS_USD_PER_MIN = [8, 12, 16, 22, 30, Infinity];
+/** rv15 is stored in $ per √second; the buckets read in $ per minute. */
+export const rv15PerMinuteUsd = (rv15PerSqrtSecond: number) => rv15PerSqrtSecond * Math.sqrt(60);
+/** The modelled W15 window on rows recorded before W15 was quoted: ±$7.5 around the forward. */
+export const MODELLED_W15_HALF_WIDTH_USD = 7.5;
 
 export interface VolCandidate {
   name: string;
@@ -855,6 +879,7 @@ export function volModelPick(
   const cdf = (x: number | null, dflt: number) => (x == null ? dflt : normalCdf((x - p.forward) / sd));
   let best: { candidate: VolCandidate; fair: number; edge: number } | null = null;
   for (const c of p.candidates) {
+    if (!MODEL_TRADER_CANDIDATES.has(c.name)) continue;
     const fair = cdf(c.upper, 1) - cdf(c.lower, 0);
     const edge = fair - c.cost;
     if (edge > minEdge && (!best || edge > best.edge)) best = { candidate: c, fair, edge };
@@ -888,10 +913,36 @@ export function clockSdFactor(fromMs: number, toMs: number): number {
 /** Minimum modelled edge for the switchboard's vol_model strategies. */
 export const VOL_MODEL_MIN_EDGE = 0.03;
 
+/** A window the chain never quoted on the row: its win rate against the
+ *  chain's own normal (forward, chainSdUsd), with no fee, so compare `won`
+ *  with `chainProb` plus the two-boundary fee (~17¢ per contract on the
+ *  wallet's $14 windows). */
+export interface ModelledStat {
+  n: number;
+  /** Mean P(pays) under N(forward, chainSdUsd) — the chain's price before fees. */
+  chainProb: number;
+  won: number;
+  /** Two standard errors on the win rate. */
+  noise: number;
+}
+
 export interface VolRegimeReport {
   rows: number;
   /** Candidate × regime: does the regime predict mispricing after fees? */
   byRegime: Array<{ regime: string; candidates: Record<string, Stat | null> }>;
+  /**
+   * Candidate × absolute realized vol (rv15 in $/min), all slots and the
+   * t65s slot alone (closest to the wallet's ~56s entries). `modelledW15`
+   * scores a ±$7.5 window on every row, quoted or not, so the rows recorded
+   * before W15 was added still answer whether quiet minutes hold it.
+   */
+  byRealizedVol: Array<{
+    bucket: string;
+    n: number;
+    candidates: Record<string, Stat | null>;
+    t65s: Record<string, Stat | null>;
+    modelledW15: { all: ModelledStat | null; t65s: ModelledStat | null };
+  }>;
   /**
    * Model trader: price every candidate off N(forward, RV_SCALE·rv15·√T),
    * buy the one with the largest fair − all-in if it clears the threshold.
@@ -900,14 +951,32 @@ export interface VolRegimeReport {
   modelTrader: Array<{ minEdge: number; slot: string; stat: Stat | null; picks: Record<string, number> }>;
 }
 
+/** The ±$7.5 window around the row's forward: does it pay, and what would the chain's normal price it at? */
+export function modelledW15(r: EdgeProbeRow<VolRegimePayload>): { win: boolean; chainProb: number } | null {
+  const p = r.payload;
+  if (!(p.chainSdUsd > 0)) return null;
+  const lo = Math.round(p.forward - MODELLED_W15_HALF_WIDTH_USD);
+  const hi = Math.max(lo + 1, Math.round(p.forward + MODELLED_W15_HALF_WIDTH_USD));
+  const z = (x: number) => normalCdf((x - p.forward) / p.chainSdUsd);
+  return { win: pays(lo, hi, r.settlementPrice), chainProb: z(hi) - z(lo) };
+}
+
+function modelledStat(xs: Array<{ win: boolean; chainProb: number }>): ModelledStat | null {
+  if (!xs.length) return null;
+  const n = xs.length;
+  const won = xs.filter((x) => x.win).length / n;
+  const r = (v: number) => Number(v.toFixed(4));
+  return {
+    n,
+    chainProb: r(xs.reduce((a, x) => a + x.chainProb, 0) / n),
+    won: r(won),
+    noise: r(2 * Math.sqrt((won * (1 - won)) / n)),
+  };
+}
+
 export function scoreVolRegime(rows: Array<EdgeProbeRow<VolRegimePayload>>): VolRegimeReport {
   const names = ['up', 'down', ...WINDOW_WIDTHS.map((w) => `W${w}`)];
-  const byRegime = REGIMES.map((g, i) => {
-    const lo = i === 0 ? -Infinity : REGIMES[i - 1]!.max;
-    const rs = rows.filter((r) => {
-      const x = regimeRatio(r.payload, r.ttmMs);
-      return x != null && x >= lo && x < g.max;
-    });
+  const candidateStats = (rs: Array<EdgeProbeRow<VolRegimePayload>>) => {
     const candidates: Record<string, Stat | null> = {};
     for (const n of names) {
       candidates[n] = stat(
@@ -918,7 +987,31 @@ export function scoreVolRegime(rows: Array<EdgeProbeRow<VolRegimePayload>>): Vol
         ),
       );
     }
-    return { regime: g.name, candidates };
+    return candidates;
+  };
+  const byRealizedVol = RV_BUCKETS_USD_PER_MIN.map((max, i) => {
+    const lo = i === 0 ? 0 : RV_BUCKETS_USD_PER_MIN[i - 1]!;
+    const rs = rows.filter((r) => {
+      const x = rv15PerMinuteUsd(r.payload.rv15);
+      return x >= lo && x < max;
+    });
+    const t65 = rs.filter((r) => r.slot === 't65s');
+    const modelled = (xs: typeof rs) => modelledStat(xs.map(modelledW15).filter((x) => x != null));
+    return {
+      bucket: max === Infinity ? `rv15 ≥ $${lo}/min` : `rv15 $${lo}–${max}/min`,
+      n: rs.length,
+      candidates: candidateStats(rs),
+      t65s: candidateStats(t65),
+      modelledW15: { all: modelled(rs), t65s: modelled(t65) },
+    };
+  });
+  const byRegime = REGIMES.map((g, i) => {
+    const lo = i === 0 ? -Infinity : REGIMES[i - 1]!.max;
+    const rs = rows.filter((r) => {
+      const x = regimeRatio(r.payload, r.ttmMs);
+      return x != null && x >= lo && x < g.max;
+    });
+    return { regime: g.name, candidates: candidateStats(rs) };
   });
   const modelTrader: VolRegimeReport['modelTrader'] = [];
   for (const minEdge of [0.03, 0.06]) {
@@ -936,7 +1029,7 @@ export function scoreVolRegime(rows: Array<EdgeProbeRow<VolRegimePayload>>): Vol
       modelTrader.push({ minEdge, slot, stat: stat(xs), picks });
     }
   }
-  return { rows: rows.length, byRegime, modelTrader };
+  return { rows: rows.length, byRegime, byRealizedVol, modelTrader };
 }
 
 // ── switchboard scores ──────────────────────────────────────────────────────

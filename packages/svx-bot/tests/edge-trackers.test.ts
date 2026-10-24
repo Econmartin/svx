@@ -9,6 +9,7 @@ import {
   regimeRatio,
   rmsPerSqrtSecond,
   scoreJumps,
+  rv15PerMinuteUsd,
   scoreVolRegime,
   type JumpPayload,
   type VolRegimePayload,
@@ -132,6 +133,43 @@ describe('scoreVolRegime', () => {
     const mt = r.modelTrader.find((x) => x.minEdge === 0.03 && x.slot === 'all')!;
     expect(mt.picks).toEqual({ W25: 2 });
     expect(mt.stat!.pnlPerContract).toBeCloseTo(0.1);
+  });
+
+  it('buckets by absolute realized vol in $/min and scores a modelled ±$7.5 window on every row', () => {
+    // rv15 0.5 $/√s = 3.87 $/min → the quietest bucket; 2.0 $/√s = 15.5 $/min → $12–16.
+    const quiet = [volRow({}, 100_005), volRow({}, 100_050, 70_000)];
+    quiet[1]!.slot = 't65s';
+    const loud = volRow({ rv15: 2.0 }, 100_003);
+    expect(rv15PerMinuteUsd(0.5)).toBeCloseTo(3.873, 3);
+    const r = scoreVolRegime([...quiet, loud]);
+    expect(r.byRealizedVol.map((b) => b.bucket)).toEqual([
+      'rv15 $0–8/min', 'rv15 $8–12/min', 'rv15 $12–16/min', 'rv15 $16–22/min', 'rv15 $22–30/min', 'rv15 ≥ $30/min',
+    ]);
+    const q = r.byRealizedVol[0]!;
+    expect(q.n).toBe(2);
+    expect(q.candidates.W25!.n).toBe(2);
+    expect(q.t65s.W25!.n).toBe(1);
+    expect(q.t65s.W25!.won).toBe(0); // 100_050 is outside 99_987–100_012
+    // Modelled W15 = (99_993, 100_008] (Math.round sends .5 up): the +5 row pays, the +50 row does not.
+    expect(q.modelledW15.all).toMatchObject({ n: 2, won: 0.5 });
+    // Chain's normal with sd $50: Φ(8/50) − Φ(−7/50) ≈ 0.119 before fees.
+    expect(q.modelledW15.all!.chainProb).toBeCloseTo(0.1192, 3);
+    expect(q.modelledW15.t65s).toMatchObject({ n: 1, won: 0 });
+    expect(r.byRealizedVol[2]!.n).toBe(1);
+    expect(r.byRealizedVol[2]!.modelledW15.all).toMatchObject({ n: 1, won: 1 });
+    expect(r.byRealizedVol[1]!.candidates.W25).toBeNull();
+    expect(r.byRealizedVol[1]!.modelledW15.all).toBeNull();
+  });
+
+  it('scores a quoted W15 by bucket but never lets the model trader pick it', () => {
+    const w15 = { name: 'W15', lower: 99_993, upper: 100_008, prob: 0.3, cost: 0.05 }; // absurdly cheap
+    const row = volRow({ candidates: [...volRow({}, 0).payload.candidates, w15] }, 100_002);
+    const r = scoreVolRegime([row]);
+    expect(r.byRealizedVol[0]!.candidates.W15).toMatchObject({ n: 1, won: 1, allIn: 0.05 });
+    expect(r.byRegime[0]!.candidates.W15).toMatchObject({ n: 1, won: 1 });
+    // W15 would have the largest modelled edge; the pick still goes to a tradable candidate.
+    expect(volModelPick(row.payload, 120_000, 0.03)!.candidate.name).toBe('W25');
+    expect(r.modelTrader.find((x) => x.minEdge === 0.03 && x.slot === 'all')!.picks).toEqual({ W25: 1 });
   });
 });
 

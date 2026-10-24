@@ -11,6 +11,7 @@ import {
   scoreJumps,
   rv15PerMinuteUsd,
   scoreVolRegime,
+  volSlotFor,
   type JumpPayload,
   type VolRegimePayload,
 } from '../src/ops/edge-trackers.js';
@@ -148,17 +149,29 @@ describe('scoreVolRegime', () => {
     const q = r.byRealizedVol[0]!;
     expect(q.n).toBe(2);
     expect(q.candidates.W25!.n).toBe(2);
-    expect(q.t65s.W25!.n).toBe(1);
-    expect(q.t65s.W25!.won).toBe(0); // 100_050 is outside 99_987–100_012
+    expect(q.bySlot.t65s!.W25!.n).toBe(1);
+    expect(q.bySlot.t65s!.W25!.won).toBe(0); // 100_050 is outside 99_987–100_012
+    expect(q.bySlot.t55s!.W25).toBeNull();
     // Modelled W15 = (99_993, 100_008] (Math.round sends .5 up): the +5 row pays, the +50 row does not.
     expect(q.modelledW15.all).toMatchObject({ n: 2, won: 0.5 });
     // Chain's normal with sd $50: Φ(8/50) − Φ(−7/50) ≈ 0.119 before fees.
     expect(q.modelledW15.all!.chainProb).toBeCloseTo(0.1192, 3);
-    expect(q.modelledW15.t65s).toMatchObject({ n: 1, won: 0 });
+    expect(q.modelledW15.bySlot.t65s).toMatchObject({ n: 1, won: 0 });
+    expect(q.modelledW15.bySlot.t55s).toBeNull();
     expect(r.byRealizedVol[2]!.n).toBe(1);
     expect(r.byRealizedVol[2]!.modelledW15.all).toMatchObject({ n: 1, won: 1 });
     expect(r.byRealizedVol[1]!.candidates.W25).toBeNull();
     expect(r.byRealizedVol[1]!.modelledW15.all).toBeNull();
+  });
+
+  it('has a slot for 1m markets, whose reference only appears at 60s', () => {
+    expect(volSlotFor(57_000)!.slot).toBe('t55s');
+    expect(volSlotFor(40_000)!.slot).toBe('t55s');
+    expect(volSlotFor(60_500)).toBeUndefined();
+    expect(volSlotFor(70_000)!.slot).toBe('t65s');
+    expect(volSlotFor(30_000)).toBeUndefined(); // inside the deepest fee ramp: not probed
+    const r = scoreVolRegime([]);
+    expect(r.modelTrader.map((x) => x.slot)).toContain('t55s');
   });
 
   it('scores a quoted W15 by bucket but never lets the model trader pick it', () => {

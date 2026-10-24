@@ -20,7 +20,8 @@
  *    priced; busy regimes underpriced underdogs. After fees the edge was
  *    inside the noise on 3 days, so this records exact chain quotes for
  *    up / down / central $25-$50-$100 windows at t4m, t2m and t65s (before
- *    the last-minute fee ramp), with realized and chain vol, and scores
+ *    the last-minute fee ramp) and, since 2026-10-24, t55s (the only slot a
+ *    1m-only market can be seen in), with realized and chain vol, and scores
  *    them by regime. Since 2026-10-24 also a $15 window, and every candidate
  *    again by absolute realized vol in $/min (see WINDOW_WIDTHS).
  *
@@ -358,12 +359,22 @@ export function scoreJumps(rows: Array<EdgeProbeRow<JumpPayload>>): JumpReport {
 
 // ── 2. vol-regime tracker ───────────────────────────────────────────────────
 
-const VOL_SLOTS: Array<{ slot: string; minMs: number; maxMs: number }> = [
+export const VOL_SLOTS: Array<{ slot: string; minMs: number; maxMs: number }> = [
   { slot: 't4m', minMs: 220_000, maxMs: 260_000 },
   { slot: 't2m', minMs: 100_000, maxMs: 140_000 },
   // Last checkpoint before the final-minute fee ramp.
   { slot: 't65s', minMs: 61_000, maxMs: 80_000 },
+  // A 1m-only market (expiry not on the 5-minute grid) has no reference
+  // price until exactly 60s before expiry (board watched 2026-10-24: null
+  // at 63s, set at 57s), so the three slots above only ever saw 5m-aligned
+  // markets — 32 rows per slot in the 2.7h the #1 wallet traded 83
+  // markets. This slot takes the first 10s tick after the reference
+  // appears (50–60s left), the wallet's own entry, fee ramp included.
+  { slot: 't55s', minMs: 40_000, maxMs: 60_000 },
 ];
+
+/** The vol-regime slot a market with this much time left falls in, if any. */
+export const volSlotFor = (ttmMs: number) => VOL_SLOTS.find((s) => ttmMs >= s.minMs && ttmMs <= s.maxMs);
 /** Realized-vol scale fitted on the launch tape (log-loss optimum 1.2–1.35). */
 export const RV_SCALE = 1.35;
 /**
@@ -479,8 +490,7 @@ export async function recordVolRegime(deps: {
 }): Promise<number> {
   const { ledger } = deps;
   const now = deps.nowMs ?? Date.now();
-  const slotOf = (m: SdkMarket) =>
-    VOL_SLOTS.find((s) => m.expiryMs - now >= s.minMs && m.expiryMs - now <= s.maxMs);
+  const slotOf = (m: SdkMarket) => volSlotFor(m.expiryMs - now);
   const due = (await listSdkMarkets()).filter((m) => {
     const s = slotOf(m);
     return m.referencePrice != null && !m.mintPaused && s && !ledger.hasEdgeProbe(m.id, 'vol_regime', s.slot);
@@ -931,8 +941,8 @@ export interface VolRegimeReport {
   /** Candidate × regime: does the regime predict mispricing after fees? */
   byRegime: Array<{ regime: string; candidates: Record<string, Stat | null> }>;
   /**
-   * Candidate × absolute realized vol (rv15 in $/min), all slots and the
-   * t65s slot alone (closest to the wallet's ~56s entries). `modelledW15`
+   * Candidate × absolute realized vol (rv15 in $/min), over all slots and
+   * per slot (t55s is the wallet's own entry on 1m markets). `modelledW15`
    * scores a ±$7.5 window on every row, quoted or not, so the rows recorded
    * before W15 was added still answer whether quiet minutes hold it.
    */
@@ -940,8 +950,8 @@ export interface VolRegimeReport {
     bucket: string;
     n: number;
     candidates: Record<string, Stat | null>;
-    t65s: Record<string, Stat | null>;
-    modelledW15: { all: ModelledStat | null; t65s: ModelledStat | null };
+    bySlot: Record<string, Record<string, Stat | null>>;
+    modelledW15: { all: ModelledStat | null; bySlot: Record<string, ModelledStat | null> };
   }>;
   /**
    * Model trader: price every candidate off N(forward, RV_SCALE·rv15·√T),
@@ -995,14 +1005,20 @@ export function scoreVolRegime(rows: Array<EdgeProbeRow<VolRegimePayload>>): Vol
       const x = rv15PerMinuteUsd(r.payload.rv15);
       return x >= lo && x < max;
     });
-    const t65 = rs.filter((r) => r.slot === 't65s');
     const modelled = (xs: typeof rs) => modelledStat(xs.map(modelledW15).filter((x) => x != null));
+    const bySlot: Record<string, Record<string, Stat | null>> = {};
+    const modelledBySlot: Record<string, ModelledStat | null> = {};
+    for (const { slot } of VOL_SLOTS) {
+      const xs = rs.filter((r) => r.slot === slot);
+      bySlot[slot] = candidateStats(xs);
+      modelledBySlot[slot] = modelled(xs);
+    }
     return {
       bucket: max === Infinity ? `rv15 ≥ $${lo}/min` : `rv15 $${lo}–${max}/min`,
       n: rs.length,
       candidates: candidateStats(rs),
-      t65s: candidateStats(t65),
-      modelledW15: { all: modelled(rs), t65s: modelled(t65) },
+      bySlot,
+      modelledW15: { all: modelled(rs), bySlot: modelledBySlot },
     };
   });
   const byRegime = REGIMES.map((g, i) => {
